@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任務投入 — 藥局 SmartRoute</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --bg:#f5f6fa;--white:#fff;--surface2:#f0f2f8;--border:#e4e7f0;
+  --accent:#3b6ef5;--accent-light:#eef2ff;
+  --green:#12b76a;--green-light:#ecfdf5;
+  --orange:#f79009;--orange-light:#fffaeb;
+  --red:#f04438;--red-light:#fef3f2;
+  --purple:#7c3aed;--purple-light:#f5f3ff;
+  --teal:#0891b2;--teal-light:#ecfeff;
+  --text:#101828;--text2:#344054;--muted:#667085;--muted2:#98a2b3;
+  --shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.06);
+  --shadow-md:0 4px 8px rgba(16,24,40,.1),0 2px 4px rgba(16,24,40,.06);
+  --radius:12px;--radius-sm:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text)}
+
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:#2a5ce8}
+.btn-ai{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff}
+.btn-ghost{background:var(--white);color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover:not(:disabled){background:var(--surface2)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:14px;font-weight:600}
+.card-body{padding:16px 18px}
+.badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px}
+.badge-blue{background:var(--accent-light);color:var(--accent)}
+.badge-green{background:var(--green-light);color:var(--green)}
+.badge-red{background:var(--red-light);color:var(--red)}
+.badge-orange{background:var(--orange-light);color:var(--orange)}
+.badge-purple{background:var(--purple-light);color:var(--purple)}
+.badge-teal{background:var(--teal-light);color:var(--teal)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.loading-line{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;margin-bottom:8px}
+
+/* ── 地圖 ── */
+#map-container {
+  width:100%;height:420px;border-radius:var(--radius);overflow:hidden;
+  border:1px solid var(--border);box-shadow:var(--shadow);
+  position:relative;background:#e8f0fe;
+}
+#gmap { width:100%;height:100% }
+.map-loading {
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;
+  background:#e8f0fe;font-size:13px;color:var(--muted);z-index:10
+}
+
+/* ── 地區篩選 tabs ── */
+.area-tabs {
+  display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px
+}
+.area-tab {
+  padding:7px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:1.5px solid var(--border);background:var(--white);
+  color:var(--text2);transition:all .15s;display:flex;align-items:center;gap:6px
+}
+.area-tab:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.area-tab.active{border-color:var(--accent);background:var(--accent);color:#fff}
+.area-tab .cnt{
+  font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;
+  background:rgba(255,255,255,.25);
+}
+.area-tab:not(.active) .cnt{background:var(--surface2);color:var(--muted)}
+
+/* ── 藥局選擇格 ── */
+.ph-grid {
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:10px;max-height:320px;overflow-y:auto;padding:2px
+}
+.ph-card {
+  border:1.5px solid var(--border);border-radius:var(--radius-sm);
+  padding:12px 14px;cursor:pointer;transition:all .15s;background:var(--white);
+  box-shadow:var(--shadow);position:relative
+}
+.ph-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.ph-card.selected{border-color:var(--accent);background:var(--accent-light)}
+.ph-card.in-task{border-color:var(--green);background:var(--green-light)}
+.ph-card-id{font-size:10px;font-weight:700;color:var(--accent);margin-bottom:4px}
+.ph-card-name{font-size:13px;font-weight:600;margin-bottom:3px}
+.ph-card-addr{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph-card-doc{font-size:11px;color:var(--text2);margin-top:4px}
+.ph-card-check{
+  position:absolute;top:8px;right:8px;width:18px;height:18px;
+  border-radius:50%;background:var(--green);color:#fff;
+  font-size:10px;display:none;align-items:center;justify-content:center;font-weight:700
+}
+.ph-card.in-task .ph-card-check{display:flex}
+.ph-card-overdue{
+  position:absolute;bottom:8px;right:8px;
+  font-size:10px;font-weight:700;color:var(--red);
+}
+
+/* ── 任務列表 ── */
+.task-item{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:12px 14px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);margin-bottom:8px;
+  background:var(--white);box-shadow:var(--shadow);
+  transition:all .15s
+}
+.task-item:hover{box-shadow:var(--shadow-md)}
+.task-seq{
+  width:26px;height:26px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px
+}
+.task-info{flex:1}
+.task-name{font-size:14px;font-weight:600}
+.task-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.task-del{background:none;border:none;color:var(--muted2);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px;flex-shrink:0}
+.task-del:hover{background:var(--red-light);color:var(--red)}
+
+/* ── 路線結果 ── */
+.route-result{
+  background:linear-gradient(135deg,#eef2ff,#f5f3ff);
+  border:1px solid #c7d2fe;border-radius:var(--radius);padding:18px;margin-top:16px
+}
+.route-stop{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:10px 14px;border-top:1px solid var(--border);background:var(--white)
+}
+.route-stop:first-child{border-top:none}
+.stop-num{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px
+}
+.stop-info{flex:1}
+.stop-name{font-size:13px;font-weight:600}
+.stop-detail{font-size:11px;color:var(--muted);margin-top:2px}
+.stop-dist{font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0;margin-top:3px}
+
+/* 距離連接線 */
+.dist-connector{
+  display:flex;align-items:center;gap:8px;
+  padding:4px 14px 4px 50px;font-size:11px;color:var(--muted)
+}
+.dist-line{flex:1;height:1px;background:var(--border);border-top:1px dashed var(--border)}
+
+/* ── 類型選擇 ── */
+.type-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.type-btn{
+  padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  cursor:pointer;border:1.5px solid var(--border);background:var(--white);
+  color:var(--text2);transition:all .15s
+}
+.type-btn.active{border-color:var(--accent);background:var(--accent-light);color:var(--accent)}
+
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+</style>
+</head>
+<body style="padding:0;background:var(--bg)">
+
+<!-- ★ Config ★ -->
+<script>
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+const GMAPS_KEY = 'YOUR_GOOGLE_MAPS_API_KEY'; // ← 填入你的 Key
+let pharmacies = [];
+let tasks = [];
+let selectedType = 'visit';
+let activeArea = 'all';
+let map = null;
+let markers = [];
+let infoWindow = null;
+let routeResult = null; // 最後一次路線計算結果
+</script>
+
+<div style="padding:20px;max-width:1400px;margin:0 auto">
+
+  <!-- 頂部說明 -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+    <div>
+      <div style="font-size:18px;font-weight:700">📥 任務投入</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:3px">從地圖或地區列表選擇要拜訪的藥局，AI 自動計算最短路線</div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="clearAllTasks()">清空任務</button>
+      <button class="btn btn-ai" id="route-btn" onclick="calcRoute()" disabled>
+        🗺️ 計算最短路線（<span id="task-count">0</span> 站）
+      </button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start">
+
+    <!-- 左側：地圖 + 地區選擇 -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+
+      <!-- 地圖 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🗺️ 藥局地圖</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:12px;color:var(--muted)">點圖釘加入任務</span>
+            <span class="badge badge-blue" id="map-count">載入中...</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:14px">
+          <div id="map-container">
+            <div class="map-loading" id="map-loading">
+              <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+              <div>地圖載入中...</div>
+            </div>
+            <div id="gmap"></div>
+          </div>
+          <!-- 地圖圖例 -->
+          <div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap">
+            <span style="display:flex;align-items:center;gap:5px;font-size:11px">
+              <span style="width:10px;height:10px;border-radius:50%;background:#3b6ef5;display:inline-block"></span>未加入
+            </span>
+            <span style="display:flex;align-items:center;gap:5px;font-size:11px">
+              <span style="width:10px;height:10px;border-radius:50%;background:#12b76a;display:inline-block"></span>已加入任務
+            </span>
+            <span style="display:flex;align-items:center;gap:5px;font-size:11px">
+              <span style="width:10px;height:10px;border-radius:50%;background:#f04438;display:inline-block"></span>逾期未訪
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 地區分類 + 藥局格 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📍 依地區選擇</div>
+          <input id="ph-search" placeholder="搜尋藥局名稱..." 
+            style="padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;outline:none;width:180px"
+            oninput="filterPharmacies()">
+        </div>
+        <div class="card-body">
+          <!-- 地區 Tab -->
+          <div class="area-tabs" id="area-tabs">
+            <div class="area-tab active" data-area="all" onclick="setArea('all',this)">
+              全部 <span class="cnt" id="cnt-all">0</span>
+            </div>
+          </div>
+          <!-- 拜訪類型 -->
+          <div style="margin-bottom:12px">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">加入任務類型</div>
+            <div class="type-btns">
+              <div class="type-btn active" data-type="visit" onclick="setType('visit',this)">🔄 例行拜訪</div>
+              <div class="type-btn" data-type="new" onclick="setType('new',this)">🆕 新開藥局</div>
+              <div class="type-btn" data-type="dad" onclick="setType('dad',this)">👨‍⚕️ 爸爸老客戶</div>
+              <div class="type-btn" data-type="deliver" onclick="setType('deliver',this)">📦 自送出貨</div>
+            </div>
+          </div>
+          <!-- 藥局格 -->
+          <div class="ph-grid" id="ph-grid">
+            <div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--muted)">
+              <span class="spinner" style="width:20px;height:20px;border-width:2.5px"></span>
+              <div style="margin-top:8px;font-size:13px">載入藥局中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側：任務清單 + 路線結果 -->
+    <div style="display:flex;flex-direction:column;gap:14px;position:sticky;top:20px">
+
+      <!-- 任務清單 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📋 今日任務清單</div>
+          <span class="badge badge-blue" id="task-badge">0 家</span>
+        </div>
+        <div class="card-body" style="padding:10px 14px" id="task-list">
+          <div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">
+            <div style="font-size:24px;margin-bottom:8px">👆</div>
+            點地圖圖釘或左側藥局卡片加入
+          </div>
+        </div>
+      </div>
+
+      <!-- 出發地點 -->
+      <div class="card">
+        <div class="card-header"><div class="card-title">📍 出發地點</div></div>
+        <div class="card-body">
+          <input id="origin-input" value="新北市板橋區" 
+            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none"
+            placeholder="輸入出發地址">
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">路線計算會從這個地點出發</div>
+        </div>
+      </div>
+
+      <!-- 路線計算結果 -->
+      <div id="route-output"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Google Maps Script（動態載入） -->
+<script>
+// ══════════════════════════════
+// 載入藥局資料
+// ══════════════════════════════
+async function loadData() {
+  try {
+    const res = await fetch(WORKER + '/pharmacies');
+    const d = await res.json();
+    pharmacies = d.pharmacies || d.data || [];
+    buildAreaTabs();
+    renderGrid();
+    document.getElementById('map-count').textContent = pharmacies.length + ' 家';
+    initMap();
+  } catch(e) {
+    document.getElementById('ph-grid').innerHTML =
+      `<div style="grid-column:1/-1;color:var(--red);font-size:13px;padding:16px">❌ 載入失敗：${e.message}</div>`;
+  }
+}
+
+// ══════════════════════════════
+// 地區 Tabs
+// ══════════════════════════════
+function buildAreaTabs() {
+  // 統計地區
+  const areaCounts = {};
+  pharmacies.forEach(p => {
+    const d = p.district || p.area || '其他';
+    areaCounts[d] = (areaCounts[d] || 0) + 1;
+  });
+
+  // 常用地區優先顯示
+  const priority = ['板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區'];
+  const sorted = [
+    ...priority.filter(a => areaCounts[a]),
+    ...Object.keys(areaCounts).filter(a => !priority.includes(a)).sort()
+  ];
+
+  document.getElementById('cnt-all').textContent = pharmacies.length;
+
+  const tabsEl = document.getElementById('area-tabs');
+  sorted.forEach(area => {
+    const cnt = areaCounts[area] || 0;
+    const tab = document.createElement('div');
+    tab.className = 'area-tab';
+    tab.dataset.area = area;
+    tab.innerHTML = `${area} <span class="cnt">${cnt}</span>`;
+    tab.onclick = () => setArea(area, tab);
+    tabsEl.appendChild(tab);
+  });
+}
+
+function setArea(area, el) {
+  activeArea = area;
+  document.querySelectorAll('.area-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderGrid();
+  // 地圖聚焦到該地區
+  if (area !== 'all' && map) focusArea(area);
+}
+
+function setType(type, el) {
+  selectedType = type;
+  document.querySelectorAll('.type-btn').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ══════════════════════════════
+// 藥局格 Grid
+// ══════════════════════════════
+function renderGrid() {
+  const kw = document.getElementById('ph-search').value.toLowerCase();
+  let list = pharmacies;
+
+  if (activeArea !== 'all') {
+    list = list.filter(p => (p.district || p.area || '') === activeArea);
+  }
+  if (kw) {
+    list = list.filter(p =>
+      (p.name||'').toLowerCase().includes(kw) ||
+      (p.id||'').toLowerCase().includes(kw) ||
+      (p.address||'').toLowerCase().includes(kw)
+    );
+  }
+
+  const grid = document.getElementById('ph-grid');
+  if (!list.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--muted);font-size:13px">無符合結果</div>`;
+    return;
+  }
+
+  grid.innerHTML = list.slice(0, 60).map(p => {
+    const inTask = tasks.some(t => t.id === p.id);
+    return `<div class="ph-card ${inTask?'in-task':''}" onclick="togglePharmacy('${p.id}')">
+      <div class="ph-card-check">✓</div>
+      <div class="ph-card-id">${p.id}</div>
+      <div class="ph-card-name">${p.name}</div>
+      <div class="ph-card-addr">${p.address||''}</div>
+      <div class="ph-card-doc">👤 ${p.pharmacist||'—'}</div>
+    </div>`;
+  }).join('');
+
+  if (list.length > 60) {
+    grid.innerHTML += `<div style="grid-column:1/-1;font-size:12px;color:var(--muted);padding:8px;text-align:center">
+      顯示前60筆，共${list.length}筆。請用搜尋縮小範圍。
+    </div>`;
+  }
+}
+
+function filterPharmacies() { renderGrid(); }
+
+// ══════════════════════════════
+// 加入 / 移除任務
+// ══════════════════════════════
+function togglePharmacy(id) {
+  const p = pharmacies.find(x => x.id === id);
+  if (!p) return;
+
+  const idx = tasks.findIndex(t => t.id === id);
+  if (idx >= 0) {
+    tasks.splice(idx, 1);
+    toast(`已移除：${p.name}`);
+  } else {
+    tasks.push({
+      id: p.id,
+      name: p.name,
+      address: p.address,
+      lat: p.lat,
+      lng: p.lng,
+      pharmacist: p.pharmacist,
+      type: selectedType
+    });
+    toast(`✅ 已加入：${p.name}`);
+  }
+
+  renderGrid();
+  renderTasks();
+  updateMapMarkers();
+  updateRouteBtn();
+}
+
+function removeTask(id) {
+  tasks = tasks.filter(t => t.id !== id);
+  renderGrid();
+  renderTasks();
+  updateMapMarkers();
+  updateRouteBtn();
+}
+
+function clearAllTasks() {
+  tasks = [];
+  renderGrid();
+  renderTasks();
+  updateMapMarkers();
+  updateRouteBtn();
+  document.getElementById('route-output').innerHTML = '';
+}
+
+// ══════════════════════════════
+// 任務清單渲染
+// ══════════════════════════════
+const typeColor = {
+  visit:'var(--accent)', new:'var(--purple)',
+  dad:'var(--teal)', deliver:'var(--green)'
+};
+const typeLabel = {
+  visit:'🔄 例行', new:'🆕 新藥局',
+  dad:'👨‍⚕️ 爸爸', deliver:'📦 自送'
+};
+
+function renderTasks() {
+  const el = document.getElementById('task-list');
+  document.getElementById('task-badge').textContent = tasks.length + ' 家';
+
+  if (!tasks.length) {
+    el.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">
+      <div style="font-size:24px;margin-bottom:8px">👆</div>點地圖或藥局卡片加入
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = tasks.map((t, i) => `
+    <div class="task-item">
+      <div class="task-seq" style="background:${typeColor[t.type]||'var(--accent)'}">${i+1}</div>
+      <div class="task-info">
+        <div class="task-name">${t.name} <span style="font-size:10px;color:var(--muted);font-weight:400">${t.id}</span></div>
+        <div class="task-meta">${t.address||''}</div>
+        <div style="margin-top:4px">
+          <span class="badge" style="background:${typeColor[t.type]}22;color:${typeColor[t.type]};font-size:10px">${typeLabel[t.type]||'拜訪'}</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <button class="task-del" onclick="removeTask('${t.id}')">✕</button>
+        <select onchange="changeTaskType('${t.id}',this.value)"
+          style="font-size:11px;border:1px solid var(--border);border-radius:6px;padding:2px 4px;color:var(--text2)">
+          <option value="visit" ${t.type==='visit'?'selected':''}>🔄 例行</option>
+          <option value="new" ${t.type==='new'?'selected':''}>🆕 新藥局</option>
+          <option value="dad" ${t.type==='dad'?'selected':''}>👨‍⚕️ 爸爸</option>
+          <option value="deliver" ${t.type==='deliver'?'selected':''}>📦 自送</option>
+        </select>
+      </div>
+    </div>`).join('');
+}
+
+function changeTaskType(id, type) {
+  const t = tasks.find(x => x.id === id);
+  if (t) t.type = type;
+  renderTasks();
+}
+
+function updateRouteBtn() {
+  const btn = document.getElementById('route-btn');
+  document.getElementById('task-count').textContent = tasks.length;
+  btn.disabled = tasks.length === 0;
+}
+
+// ══════════════════════════════
+// Google Maps 初始化
+// ══════════════════════════════
+function initMap() {
+  if (typeof google === 'undefined') return;
+  document.getElementById('map-loading').style.display = 'none';
+
+  map = new google.maps.Map(document.getElementById('gmap'), {
+    center: { lat: 25.014, lng: 121.467 }, // 板橋附近
+    zoom: 12,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: true,
+    styles: [
+      { featureType:'poi', elementType:'labels', stylers:[{visibility:'off'}] }
+    ]
+  });
+
+  infoWindow = new google.maps.InfoWindow();
+  renderMapMarkers();
+}
+
+function renderMapMarkers() {
+  // 清除舊 markers
+  markers.forEach(m => m.setMap(null));
+  markers = [];
+
+  pharmacies.forEach(p => {
+    if (!p.lat || !p.lng) return;
+
+    const inTask = tasks.some(t => t.id === p.id);
+    const color = inTask ? '#12b76a' : '#3b6ef5';
+
+    const marker = new google.maps.Marker({
+      position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
+      map,
+      title: p.name,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: inTask ? 9 : 7,
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: '#fff',
+        strokeWeight: 2,
+      }
+    });
+
+    marker.addListener('click', () => {
+      const inTask = tasks.some(t => t.id === p.id);
+      infoWindow.setContent(`
+        <div style="font-family:Inter,sans-serif;padding:4px;min-width:180px">
+          <div style="font-size:12px;font-weight:700;color:#3b6ef5;margin-bottom:4px">${p.id}</div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:3px">${p.name}</div>
+          <div style="font-size:12px;color:#667085;margin-bottom:6px">${p.address||''}</div>
+          <div style="font-size:12px;margin-bottom:8px">👤 ${p.pharmacist||'—'}</div>
+          <button onclick="window.togglePharmacy('${p.id}')"
+            style="width:100%;padding:7px;border:none;border-radius:6px;
+                   background:${inTask?'#fef3f2':'#3b6ef5'};
+                   color:${inTask?'#f04438':'#fff'};
+                   font-size:12px;font-weight:600;cursor:pointer">
+            ${inTask ? '✕ 從任務移除' : '＋ 加入任務'}
+          </button>
+        </div>`);
+      infoWindow.open(map, marker);
+    });
+
+    markers.push(marker);
+  });
+}
+
+function updateMapMarkers() {
+  // 更新 marker 顏色（不重建全部）
+  markers.forEach((marker, i) => {
+    const p = pharmacies.filter(x => x.lat && x.lng)[i];
+    if (!p) return;
+    const inTask = tasks.some(t => t.id === p.id);
+    marker.setIcon({
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: inTask ? 9 : 7,
+      fillColor: inTask ? '#12b76a' : '#3b6ef5',
+      fillOpacity: 1,
+      strokeColor: '#fff',
+      strokeWeight: 2,
+    });
+  });
+}
+
+function focusArea(area) {
+  const areaPharmacies = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+  if (!areaPharmacies.length || !map) return;
+  const bounds = new google.maps.LatLngBounds();
+  areaPharmacies.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
+  map.fitBounds(bounds, 60);
+}
+
+// ══════════════════════════════
+// 路線計算（Google Directions API）
+// ══════════════════════════════
+async function calcRoute() {
+  if (!tasks.length) return;
+
+  const btn = document.getElementById('route-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 計算中...';
+
+  const output = document.getElementById('route-output');
+  output.innerHTML = `<div class="card"><div class="card-body">
+    <div class="loading-line" style="width:50%"></div>
+    <div class="loading-line" style="width:75%"></div>
+    <div class="loading-line" style="width:40%"></div>
+  </div></div>`;
+
+  const origin = document.getElementById('origin-input').value || '新北市板橋區';
+
+  try {
+    // 用 Directions API 計算最佳路線
+    const waypoints = tasks.slice(1, tasks.length - 1).map(t => ({
+      location: t.address,
+      stopover: true
+    }));
+
+    const directionsService = new google.maps.DirectionsService();
+    const directionsRenderer = new google.maps.DirectionsRenderer({
+      suppressMarkers: false,
+      polylineOptions: { strokeColor: '#3b6ef5', strokeWeight: 4, strokeOpacity: 0.8 }
+    });
+    directionsRenderer.setMap(map);
+
+    const result = await new Promise((resolve, reject) => {
+      directionsService.route({
+        origin,
+        destination: tasks[tasks.length - 1].address,
+        waypoints,
+        optimizeWaypoints: true, // ← Google 自動計算最短順序
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (res, status) => {
+        if (status === 'OK') resolve(res);
+        else reject(new Error('Directions API: ' + status));
+      });
+    });
+
+    // 解析結果
+    const order = result.routes[0].waypoint_order; // 最佳順序
+    const legs = result.routes[0].legs;
+
+    // 重新排列 tasks 依照最佳順序
+    const reordered = [tasks[0]];
+    order.forEach(i => reordered.push(tasks[i + 1]));
+    if (tasks.length > 1) reordered.push(tasks[tasks.length - 1]);
+
+    // 計算總距離 / 時間
+    let totalDist = 0, totalTime = 0;
+    legs.forEach(leg => {
+      totalDist += leg.distance.value;
+      totalTime += leg.duration.value;
+    });
+
+    routeResult = { reordered, legs, totalDist, totalTime };
+    renderRouteResult(reordered, legs, totalDist, totalTime);
+
+    // 地圖顯示路線
+    directionsRenderer.setDirections(result);
+    map.fitBounds(result.routes[0].bounds, 60);
+
+    toast('✅ 最短路線計算完成！');
+
+  } catch(e) {
+    output.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red);font-size:13px">
+      ❌ 路線計算失敗：${e.message}<br>
+      <span style="color:var(--muted);font-size:12px;margin-top:4px;display:block">
+        請確認 Google Maps API Key 已開啟 Directions API
+      </span>
+    </div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `🗺️ 計算最短路線（<span id="task-count">${tasks.length}</span> 站）`;
+  }
+}
+
+function renderRouteResult(stops, legs, totalDist, totalTime) {
+  const km = (totalDist / 1000).toFixed(1);
+  const hr = Math.floor(totalTime / 3600);
+  const min = Math.floor((totalTime % 3600) / 60);
+  const timeStr = hr > 0 ? `${hr}hr ${min}min` : `${min} 分鐘`;
+
+  let html = `<div class="route-result">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <span style="background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">✦ 最短路線</span>
+      <span style="font-size:13px;font-weight:700">總距離 ${km} km · 預估 ${timeStr}</span>
+    </div>
+    <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:12px">`;
+
+  stops.forEach((s, i) => {
+    const leg = legs[i];
+    const col = typeColor[s.type] || 'var(--accent)';
+    html += `<div class="route-stop">
+      <div class="stop-num" style="background:${col}">${i+1}</div>
+      <div class="stop-info">
+        <div class="stop-name">${s.name} <span style="font-size:10px;color:var(--muted);font-weight:400">${s.id}</span></div>
+        <div class="stop-detail">${s.address||''}</div>
+      </div>
+      ${leg ? `<div class="stop-dist">↓ ${leg.distance.text}</div>` : ''}
+    </div>`;
+    if (leg) {
+      html += `<div class="dist-connector">
+        <div class="dist-line"></div>
+        <span style="flex-shrink:0;color:var(--muted)">${leg.distance.text} · ${leg.duration.text}</span>
+        <div class="dist-line"></div>
+      </div>`;
+    }
+  });
+
+  html += `</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-primary" onclick="confirmRoute()">✓ 確認今日行程</button>
+      <button class="btn btn-ghost btn-sm" onclick="openGoogleMapsNav()">🗺️ 開啟導航</button>
+    </div>
+  </div>`;
+
+  document.getElementById('route-output').innerHTML = html;
+}
+
+function confirmRoute() {
+  if (!routeResult) return;
+  // 儲存到 localStorage 供主頁面讀取
+  localStorage.setItem('todayRoute', JSON.stringify(routeResult.reordered));
+  toast('✅ 已儲存今日行程！返回主頁面查看');
+}
+
+function openGoogleMapsNav() {
+  if (!routeResult) return;
+  const stops = routeResult.reordered;
+  const origin = encodeURIComponent(document.getElementById('origin-input').value);
+  const dest = encodeURIComponent(stops[stops.length-1].address);
+  const waypts = stops.slice(0,-1).map(s => encodeURIComponent(s.address)).join('/');
+  window.open(`https://www.google.com/maps/dir/${origin}/${waypts}/${dest}`, '_blank');
+}
+
+// ══════════════════════════════
+// Toast
+// ══════════════════════════════
+function toast(msg) {
+  let el = document.getElementById('_toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = '_toast';
+    el.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#101828;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;max-width:320px;font-family:Inter,sans-serif';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.transform = 'translateY(0)';
+  el.style.opacity = '1';
+  setTimeout(() => { el.style.transform = 'translateY(80px)'; el.style.opacity = '0'; }, 2800);
+}
+
+// ══════════════════════════════
+// 啟動
+// ══════════════════════════════
+loadData();
+
+// 動態載入 Google Maps JS API
+window.initGoogleMap = initMap;
+const s = document.createElement('script');
+s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=initGoogleMap&language=zh-TW`;
+s.async = true;
+s.onerror = () => {
+  document.getElementById('map-loading').innerHTML =
+    '<div style="color:#f04438;font-size:13px;padding:16px;text-align:center">⚠️ Google Maps 載入失敗<br><span style="font-size:12px;color:#667085">請確認 API Key 是否正確</span></div>';
+};
+document.head.appendChild(s);
+</script>
+</body>
+</html>
