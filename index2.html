@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>藥局業務智能規劃</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --bg:#f5f6fa;--white:#fff;--surface2:#f0f2f8;--border:#e4e7f0;
+  --accent:#3b6ef5;--accent-light:#eef2ff;
+  --green:#12b76a;--green-light:#ecfdf5;
+  --orange:#f79009;--orange-light:#fffaeb;
+  --red:#f04438;--red-light:#fef3f2;
+  --purple:#7c3aed;--purple-light:#f5f3ff;
+  --teal:#0891b2;--teal-light:#ecfeff;
+  --text:#101828;--text2:#344054;--muted:#667085;--muted2:#98a2b3;
+  --shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.06);
+  --shadow-md:0 4px 8px rgba(16,24,40,.08),0 2px 4px rgba(16,24,40,.06);
+  --radius:12px;--radius-sm:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+
+/* NAV */
+.topnav{display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:58px;background:var(--white);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:200;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:32px;height:32px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.brand-name{font-size:15px;font-weight:700}.brand-name span{color:var(--accent)}
+.nav-tabs{display:flex;gap:2px}
+.nav-tab{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:transparent;color:var(--muted);transition:all .15s}
+.nav-tab:hover{background:var(--surface2);color:var(--text)}
+.nav-tab.active{background:var(--accent-light);color:var(--accent);font-weight:600}
+.nav-right{display:flex;align-items:center;gap:10px}
+.avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
+
+/* LAYOUT */
+.main{display:flex;flex:1;overflow:hidden;height:calc(100vh - 58px)}
+.sidebar{width:240px;min-width:240px;background:var(--white);border-right:1px solid var(--border);padding:18px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.content{flex:1;overflow-y:auto;padding:24px}
+
+/* SIDEBAR */
+.sidebar-label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted2);text-transform:uppercase;padding:0 8px;margin-bottom:4px}
+.sidebar-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);transition:all .13s}
+.sidebar-item:hover{background:var(--surface2)}
+.sidebar-item.active{background:var(--accent-light);color:var(--accent)}
+.sidebar-item .icon{font-size:15px;width:20px;text-align:center}
+.sidebar-badge{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px}
+.badge-red{background:var(--red-light);color:var(--red)}
+.badge-orange{background:var(--orange-light);color:var(--orange)}
+.badge-green{background:var(--green-light);color:var(--green)}
+.badge-blue{background:var(--accent-light);color:var(--accent)}
+.badge-purple{background:var(--purple-light);color:var(--purple)}
+.sidebar-divider{height:1px;background:var(--border);margin:8px 0}
+
+/* PAGES */
+.page{display:none}.page.active{display:block}
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px}
+.page-title{font-size:20px;font-weight:700}
+.page-sub{font-size:13px;color:var(--muted);margin-top:3px}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:#2a5ce8}
+.btn-ai{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff}
+.btn-ai:hover:not(:disabled){opacity:.9}
+.btn-ghost{background:var(--white);color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover:not(:disabled){background:var(--surface2)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+
+/* STATS */
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow)}
+.stat-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.stat-icon-wrap{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.stat-change{font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}
+.change-up{background:var(--green-light);color:var(--green)}
+.change-warn{background:var(--orange-light);color:var(--orange)}
+.change-down{background:var(--red-light);color:var(--red)}
+.stat-val{font-size:28px;font-weight:800;line-height:1}
+.stat-lbl{font-size:12px;color:var(--muted);margin-top:4px}
+
+/* CARD */
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:14px;font-weight:600}
+.card-body{padding:16px 20px}
+
+/* TASK */
+.task-input-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.task-input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--white);color:var(--text);outline:none;min-width:120px}
+.task-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,110,245,.1)}
+select.task-input{cursor:pointer}
+.task-item{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--white);box-shadow:var(--shadow);transition:box-shadow .15s}
+.task-item:hover{box-shadow:var(--shadow-md)}
+.task-badge{flex-shrink:0;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;margin-top:2px}
+.task-info{flex:1}
+.task-name{font-size:14px;font-weight:600}
+.task-meta{font-size:12px;color:var(--muted);margin-top:3px}
+.task-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0}
+.del-btn{background:none;border:none;color:var(--muted2);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
+.del-btn:hover{background:var(--red-light);color:var(--red)}
+
+/* PHARMACY TABLE */
+.ph-table{width:100%;border-collapse:collapse;font-size:13px}
+.ph-table th{text-align:left;padding:10px 12px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.ph-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ph-table tr:last-child td{border-bottom:none}
+.ph-table tr:hover td{background:var(--surface2)}
+.ph-row-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:var(--muted);transition:all .15s}
+.ph-row-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+
+/* AUTOCOMPLETE */
+.ph-select-wrap{position:relative}
+.ph-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);z-index:100;max-height:220px;overflow-y:auto;display:none}
+.ph-dropdown.open{display:block}
+.ph-option{padding:10px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)}
+.ph-option:last-child{border-bottom:none}
+.ph-option:hover{background:var(--surface2)}
+.ph-option strong{color:var(--accent)}
+
+/* SCRIPT */
+.script-out{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:var(--radius);padding:18px;margin-top:14px}
+.script-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--purple);margin-bottom:8px}
+.script-text{font-size:13px;line-height:1.85;color:var(--text2);white-space:pre-wrap}
+
+/* AI RESULT */
+.ai-result-wrap{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:var(--radius);padding:20px;margin-top:16px}
+.ai-badge{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px}
+.route-day{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;overflow:hidden}
+.route-day-header{padding:10px 14px;background:var(--surface2);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:space-between}
+.route-stop{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-top:1px solid var(--border)}
+.stop-num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.stop-info{flex:1}
+.stop-name{font-size:13px;font-weight:600}
+.stop-detail{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* PROGRESS */
+.progress-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.progress-label{font-size:12px;color:var(--text2);width:70px;flex-shrink:0}
+.progress-bar{flex:1;height:7px;background:var(--surface2);border-radius:10px;overflow:hidden}
+.progress-fill{height:100%;border-radius:10px}
+.progress-val{font-size:12px;font-weight:700;width:36px;text-align:right}
+
+/* LOADING */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.loading-line{height:13px;border-radius:6px;background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+
+/* TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--text);color:#fff;padding:12px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;box-shadow:var(--shadow-md);z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;pointer-events:none;max-width:340px}
+.toast.show{transform:translateY(0);opacity:1}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(16,24,40,.4);z-index:500;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--white);border-radius:var(--radius);padding:24px;width:500px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:16px}
+.modal-field{margin-bottom:14px}
+.modal-label{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:5px}
+.modal-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--white);color:var(--text);outline:none}
+.modal-input:focus{border-color:var(--accent)}
+.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+
+/* VISIT PANEL */
+.visit-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px}
+.visit-date{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.visit-summary{font-size:13px;line-height:1.65;color:var(--text2)}
+.visit-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.visit-tag{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--text2)}
+
+.overdue-badge{background:var(--red-light);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
+.new-badge{background:var(--purple-light);color:var(--purple);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
+.dad-badge{background:var(--teal-light);color:var(--teal);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
+
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+</style>
+</head>
+<body>
+
+<!-- ★ 只需改這一行 ★ -->
+<script>
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+let pharmacies = [];   // 從 Sheets 載入的藥局清單
+let tasks = [];        // 任務列表
+let todayRoute = [];   // 確認後的今日路線
+let lastScript = '';   // 最後生成的話術（供複製）
+</script>
+
+<!-- NAV -->
+<div class="topnav">
+  <div class="brand">
+    <div class="brand-icon">💊</div>
+    <div class="brand-name">藥局 <span>SmartRoute</span></div>
+  </div>
+  <div class="nav-tabs">
+    <button class="nav-tab active"   onclick="nav(this,'today')">📍 今日行程</button>
+    <button class="nav-tab"          onclick="nav(this,'tasks')">📥 任務投入</button>
+    <button class="nav-tab"          onclick="nav(this,'pharmacies')">🏪 藥局清單</button>
+    <button class="nav-tab"          onclick="nav(this,'visits')">📋 拜訪紀錄</button>
+  </div>
+  <div class="nav-right">
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
+      <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span>
+      <span id="status-txt">連線中</span>
+    </div>
+    <div class="avatar">張</div>
+  </div>
+</div>
+
+<div class="main">
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div style="margin-bottom:6px">
+    <div class="sidebar-label">行程狀態</div>
+    <div class="sidebar-item active" onclick="nav(document.querySelectorAll('.nav-tab')[0],'today')">
+      <span class="icon">🗺️</span> 今日路線
+      <span class="sidebar-badge badge-blue" id="sb-route">—</span>
+    </div>
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[1],'tasks')">
+      <span class="icon">📥</span> 任務待排
+      <span class="sidebar-badge badge-red" id="sb-tasks">0</span>
+    </div>
+  </div>
+  <div class="sidebar-divider"></div>
+  <div style="margin-bottom:6px">
+    <div class="sidebar-label">藥局資料</div>
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[2],'pharmacies')">
+      <span class="icon">🏪</span> 藥局清單
+      <span class="sidebar-badge badge-green" id="sb-ph">—</span>
+    </div>
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[3],'visits')">
+      <span class="icon">📋</span> 拜訪紀錄查詢
+    </div>
+  </div>
+  <div class="sidebar-divider"></div>
+  <div style="margin-bottom:6px">
+    <div class="sidebar-label">地區</div>
+    <div class="sidebar-item"><span class="icon">📍</span> 板橋區 <span class="sidebar-badge badge-blue" id="sb-banqiao">—</span></div>
+    <div class="sidebar-item"><span class="icon">📍</span> 新莊區 <span class="sidebar-badge badge-blue" id="sb-xinzhuang">—</span></div>
+    <div class="sidebar-item"><span class="icon">📍</span> 三重區 <span class="sidebar-badge badge-blue" id="sb-sanchong">—</span></div>
+    <div class="sidebar-item"><span class="icon">📍</span> 中和區 <span class="sidebar-badge badge-blue" id="sb-zhonghe">—</span></div>
+  </div>
+  <div class="sidebar-divider"></div>
+  <button class="btn btn-ai" style="width:100%;justify-content:center;padding:11px" onclick="openScheduleModal()">
+    ✦ AI 生成今日排程
+  </button>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+<!-- ══ 今日行程 ══ -->
+<div class="page active" id="page-today">
+  <div class="page-header">
+    <div>
+      <div class="page-title" id="today-title">今日行程</div>
+      <div class="page-sub" id="today-sub">使用左側「AI 生成今日排程」開始規劃</div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-ghost btn-sm" onclick="exportRoute()">匯出行程</button>
+      <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--accent-light)">🗺️</div><span class="stat-change change-up">AI排序</span></div>
+      <div class="stat-val" id="stat-total">—</div><div class="stat-lbl">今日拜訪站數</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--green-light)">🚗</div><span class="stat-change change-up">順路</span></div>
+      <div class="stat-val" id="stat-deliver">—</div><div class="stat-lbl">自送出貨</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--red-light)">⏰</div><span class="stat-change change-down">需處理</span></div>
+      <div class="stat-val" id="stat-overdue">—</div><div class="stat-lbl">逾期未訪（>21天）</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--purple-light)">🆕</div><span class="stat-change change-up">新任務</span></div>
+      <div class="stat-val" id="stat-new">—</div><div class="stat-lbl">新藥局 / 特殊任務</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:18px">
+    <!-- 路線列表 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">今日路線順序</div>
+        <span style="font-size:11px;color:var(--muted)">點任一站 → AI 即時生成話術</span>
+      </div>
+      <div id="route-list" style="padding:0">
+        <div style="padding:40px;text-align:center;color:var(--muted)">
+          <div style="font-size:30px;margin-bottom:12px">✦</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px">尚未規劃今日路線</div>
+          <div style="font-size:12px">點左側「AI 生成今日排程」<br>或前往「任務投入」加入藥局後再排程</div>
+        </div>
+      </div>
+    </div>
+    <!-- 話術面板 -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">✦ AI 拜訪話術</div>
+          <span class="sidebar-badge badge-blue" style="font-size:10px">Gemini 2.5-flash</span>
+        </div>
+        <div class="card-body" id="script-panel">
+          <div style="text-align:center;padding:16px 0;color:var(--muted)">
+            <div style="font-size:24px;margin-bottom:8px">👆</div>
+            <div style="font-size:13px">點選左側任一站<br>AI 即時生成個人化話術</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">本週進度</div></div>
+        <div class="card-body">
+          <div class="progress-row"><div class="progress-label">拜訪進度</div><div class="progress-bar"><div class="progress-fill" style="background:var(--green);width:54%"></div></div><div class="progress-val" style="color:var(--green)">54%</div></div>
+          <div class="progress-row"><div class="progress-label">出貨完成</div><div class="progress-bar"><div class="progress-fill" style="background:var(--accent);width:70%"></div></div><div class="progress-val" style="color:var(--accent)">70%</div></div>
+          <div class="progress-row"><div class="progress-label">業績目標</div><div class="progress-bar"><div class="progress-fill" style="background:var(--orange);width:89%"></div></div><div class="progress-val" style="color:var(--orange)">89%</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 任務投入 ══ -->
+<div class="page" id="page-tasks">
+  <div class="page-header">
+    <div><div class="page-title">📥 任務投入</div><div class="page-sub">加入要拜訪的藥局，AI 自動排序路線</div></div>
+    <button class="btn btn-ai" id="schedule-btn" onclick="runSchedule()">✦ AI 一鍵排程</button>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header"><div class="card-title">新增拜訪任務</div></div>
+    <div class="card-body">
+      <div class="task-input-row">
+        <div class="ph-select-wrap" style="flex:2;min-width:180px">
+          <input class="task-input" id="t-name" placeholder="輸入藥局名稱搜尋..." autocomplete="off"
+            oninput="phSearch(this.value)" onfocus="phSearch(this.value)">
+          <div class="ph-dropdown" id="ph-dd"></div>
+        </div>
+        <input class="task-input" id="t-addr" placeholder="地址（自動填入）" style="flex:2">
+        <input class="task-input" id="t-pharmacist" placeholder="藥師姓名" style="max-width:110px">
+        <select class="task-input" id="t-type" style="max-width:150px">
+          <option value="visit">🔄 例行拜訪</option>
+          <option value="new">🆕 新開藥局</option>
+          <option value="dad">👨‍⚕️ 爸爸老客戶</option>
+          <option value="deliver">📦 自送出貨</option>
+        </select>
+        <input class="task-input" id="t-note" placeholder="備註" style="flex:1.5">
+        <button class="btn btn-primary" onclick="addTask()">＋ 加入</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="task-list">
+    <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">
+      尚無任務 — 請從上方搜尋藥局加入
+    </div>
+  </div>
+  <div id="schedule-result"></div>
+</div>
+
+<!-- ══ 藥局清單 ══ -->
+<div class="page" id="page-pharmacies">
+  <div class="page-header">
+    <div><div class="page-title">🏪 藥局清單</div><div class="page-sub" id="ph-sub">從 Google Sheets 即時載入</div></div>
+    <div class="btn-group">
+      <input class="task-input" id="ph-kw" placeholder="搜尋..." style="flex:none;width:200px;height:36px;padding:6px 12px" oninput="renderTable()">
+      <button class="btn btn-ghost btn-sm" onclick="loadPharmacies(true)">🔄 重新載入</button>
+    </div>
+  </div>
+  <div class="card">
+    <div id="ph-table-wrap" style="overflow-x:auto">
+      <div style="padding:40px;text-align:center;color:var(--muted)">
+        <span class="spinner" style="width:22px;height:22px;border-width:3px;display:inline-block;margin-bottom:12px"></span>
+        <div>載入中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 拜訪紀錄查詢 ══ -->
+<div class="page" id="page-visits">
+  <div class="page-header">
+    <div><div class="page-title">📋 拜訪紀錄查詢</div><div class="page-sub">輸入藥局代號查詢歷史紀錄，並生成下次拜訪建議</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-body">
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="ph-select-wrap" style="flex:1">
+          <input class="task-input" id="visit-search" placeholder="輸入藥局名稱或代號（如 C001）" autocomplete="off"
+            oninput="phSearchVisit(this.value)" onfocus="phSearchVisit(this.value)">
+          <div class="ph-dropdown" id="ph-dd-visit"></div>
+        </div>
+        <button class="btn btn-primary" id="visit-btn" onclick="loadVisits()">查詢拜訪紀錄</button>
+      </div>
+      <div id="visit-result" style="margin-top:16px"></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+</div><!-- /main -->
+
+<div class="toast" id="toast"></div>
+
+<!-- AI 排程 Modal -->
+<div class="modal-overlay" id="scheduleModal">
+  <div class="modal">
+    <div class="modal-title">✦ AI 生成今日排程</div>
+    <div class="modal-field">
+      <div class="modal-label">出發地點</div>
+      <input class="modal-input" id="m-origin" value="板橋辦公室">
+    </div>
+    <div class="modal-field">
+      <div class="modal-label" id="m-task-label">目前任務（0 家）</div>
+      <div id="m-task-preview" style="font-size:12px;color:var(--muted);padding:6px 0">
+        請先到「任務投入」頁面加入要拜訪的藥局
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('scheduleModal')">取消</button>
+      <button class="btn btn-ai" onclick="modalSchedule()">✦ 開始排程</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════
+// API
+// ══════════════════════════════
+async function get(path) {
+  const r = await fetch(WORKER + path);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function post(path, body) {
+  const r = await fetch(WORKER + path, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error(t || 'HTTP ' + r.status); }
+  return r.json();
+}
+
+// ══════════════════════════════
+// 初始化
+// ══════════════════════════════
+async function init() {
+  // 日期
+  const d = new Date();
+  const days = ['日','一','二','三','四','五','六'];
+  document.getElementById('today-title').textContent =
+    `今日行程 — ${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）`;
+
+  // 健康檢查
+  try {
+    const h = await get('/health');
+    if (h.ok) { setDot('green', 'Worker 正常'); }
+  } catch(e) { setDot('red', 'Worker 無回應'); }
+
+  // 載入藥局
+  loadPharmacies();
+}
+
+function setDot(color, txt) {
+  document.getElementById('status-dot').style.background = color === 'green' ? 'var(--green)' : 'var(--red)';
+  document.getElementById('status-txt').textContent = txt;
+}
+
+// ══════════════════════════════
+// 藥局清單
+// ══════════════════════════════
+async function loadPharmacies(force = false) {
+  if (pharmacies.length && !force) return;
+  try {
+    const d = await get('/pharmacies');
+    // 支援兩種回傳格式
+    pharmacies = d.pharmacies || d.data || [];
+    updateSidebar();
+    renderTable();
+    document.getElementById('ph-sub').textContent = `共 ${pharmacies.length} 家 — Sheets 即時資料`;
+    if (force) toast(`✅ 已重新載入 ${pharmacies.length} 家藥局`);
+  } catch(e) {
+    document.getElementById('ph-table-wrap').innerHTML =
+      `<div style="padding:24px;color:var(--red);font-size:13px">❌ 載入失敗：${e.message}</div>`;
+  }
+}
+
+function updateSidebar() {
+  document.getElementById('sb-ph').textContent = pharmacies.length;
+  const areas = [
+    ['板橋','sb-banqiao'], ['新莊','sb-xinzhuang'],
+    ['三重','sb-sanchong'], ['中和','sb-zhonghe']
+  ];
+  for (const [name, id] of areas) {
+    const c = pharmacies.filter(p => JSON.stringify(p).includes(name)).length;
+    const el = document.getElementById(id);
+    if (el) el.textContent = c || '—';
+  }
+}
+
+function renderTable() {
+  const kw = (document.getElementById('ph-kw')?.value||'').toLowerCase();
+  const list = kw ? pharmacies.filter(p => JSON.stringify(p).toLowerCase().includes(kw)) : pharmacies;
+
+  if (!list.length) {
+    document.getElementById('ph-table-wrap').innerHTML =
+      `<div style="padding:32px;text-align:center;color:var(--muted)">無符合結果</div>`;
+    return;
+  }
+
+  const shown = list.slice(0, 300);
+  // 顯示欄位：id name pharmacist address area
+  let html = `<table class="ph-table"><thead><tr>
+    <th>代號</th><th>藥局名稱</th><th>藥師</th><th>地址</th><th>區域</th><th></th>
+  </tr></thead><tbody>`;
+
+  shown.forEach(p => {
+    const id = p.id || p['Customer_ID'] || '';
+    const name = p.name || p['店名'] || '';
+    const pharmacist = p.pharmacist || p['Key Man'] || '';
+    const addr = p.address || p['地址'] || '';
+    const area = p.area || p['實體資料夾'] || p.district || '';
+    html += `<tr>
+      <td style="font-weight:600;color:var(--accent)">${id}</td>
+      <td style="font-weight:600">${name}</td>
+      <td>${pharmacist}</td>
+      <td style="color:var(--muted)">${addr}</td>
+      <td>${area}</td>
+      <td style="display:flex;gap:6px">
+        <button class="ph-row-btn" onclick="quickAddTask('${id}','${name.replace(/'/g,'')}','${addr.replace(/'/g,'')}','${pharmacist.replace(/'/g,'')}')">＋ 加入任務</button>
+        <button class="ph-row-btn" onclick="quickScript('${id}','${name.replace(/'/g,'')}','${pharmacist.replace(/'/g,'')}')">✦ 話術</button>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  if (list.length > 300)
+    html += `<div style="padding:10px 16px;font-size:12px;color:var(--muted)">顯示前300筆，共${list.length}筆</div>`;
+
+  document.getElementById('ph-table-wrap').innerHTML = html;
+}
+
+// ══════════════════════════════
+// 自動完成
+// ══════════════════════════════
+function phSearch(val) {
+  const dd = document.getElementById('ph-dd');
+  if (!val || !pharmacies.length) { dd.classList.remove('open'); return; }
+  const hits = pharmacies.filter(p =>
+    (p.name||p['店名']||'').toLowerCase().includes(val.toLowerCase()) ||
+    (p.id||p['Customer_ID']||'').toLowerCase().includes(val.toLowerCase())
+  ).slice(0, 8);
+  if (!hits.length) { dd.classList.remove('open'); return; }
+  dd.innerHTML = hits.map(p => {
+    const id = p.id||p['Customer_ID']||'';
+    const name = p.name||p['店名']||'';
+    const addr = p.address||p['地址']||'';
+    const doc = p.pharmacist||p['Key Man']||'';
+    return `<div class="ph-option" onclick="fillTask('${id}','${name}','${addr}','${doc}')">
+      <strong>${name}</strong> <span style="color:var(--muted);font-size:11px">${id}</span>
+      ${addr?`<div style="font-size:11px;color:var(--muted)">${addr}</div>`:''}
+    </div>`;
+  }).join('');
+  dd.classList.add('open');
+}
+
+function phSearchVisit(val) {
+  const dd = document.getElementById('ph-dd-visit');
+  if (!val || !pharmacies.length) { dd.classList.remove('open'); return; }
+  const hits = pharmacies.filter(p =>
+    (p.name||p['店名']||'').toLowerCase().includes(val.toLowerCase()) ||
+    (p.id||p['Customer_ID']||'').toLowerCase().includes(val.toLowerCase())
+  ).slice(0, 8);
+  if (!hits.length) { dd.classList.remove('open'); return; }
+  dd.innerHTML = hits.map(p => {
+    const id = p.id||p['Customer_ID']||'';
+    const name = p.name||p['店名']||'';
+    return `<div class="ph-option" onclick="fillVisitSearch('${id}','${name}')">
+      <strong>${name}</strong> <span style="color:var(--muted);font-size:11px">${id}</span>
+    </div>`;
+  }).join('');
+  dd.classList.add('open');
+}
+
+function fillTask(id, name, addr, doc) {
+  document.getElementById('t-name').value = name;
+  document.getElementById('t-addr').value = addr;
+  document.getElementById('t-pharmacist').value = doc;
+  document.getElementById('ph-dd').classList.remove('open');
+}
+
+function fillVisitSearch(id, name) {
+  document.getElementById('visit-search').value = id || name;
+  document.getElementById('ph-dd-visit').classList.remove('open');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ph-select-wrap')) {
+    document.querySelectorAll('.ph-dropdown').forEach(d => d.classList.remove('open'));
+  }
+});
+
+// ══════════════════════════════
+// 任務管理
+// ══════════════════════════════
+function addTask() {
+  const name = document.getElementById('t-name').value.trim();
+  const addr = document.getElementById('t-addr').value.trim();
+  const pharmacist = document.getElementById('t-pharmacist').value.trim();
+  const type = document.getElementById('t-type').value;
+  const note = document.getElementById('t-note').value.trim();
+  if (!name) { toast('請輸入藥局名稱'); return; }
+
+  // 找藥局 ID
+  const found = pharmacies.find(p =>
+    (p.name||p['店名']||'') === name || (p.id||p['Customer_ID']||'') === name
+  );
+  const pharmacyId = found ? (found.id||found['Customer_ID']||'') : '';
+
+  tasks.push({ id: Date.now(), pharmacyId, name, addr, pharmacist, type, note });
+  renderTasks();
+  document.getElementById('t-name').value = '';
+  document.getElementById('t-addr').value = '';
+  document.getElementById('t-pharmacist').value = '';
+  document.getElementById('t-note').value = '';
+  document.getElementById('sb-tasks').textContent = tasks.length;
+  toast(`✅ ${name} 已加入`);
+}
+
+function quickAddTask(id, name, addr, doc) {
+  tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: doc, type: 'visit', note: '' });
+  renderTasks();
+  document.getElementById('sb-tasks').textContent = tasks.length;
+  nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
+  toast(`✅ ${name} 已加入任務`);
+}
+
+function removeTask(tid) {
+  tasks = tasks.filter(t => t.id !== tid);
+  renderTasks();
+  document.getElementById('sb-tasks').textContent = tasks.length;
+}
+
+function renderTasks() {
+  const el = document.getElementById('task-list');
+  if (!tasks.length) {
+    el.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">尚無任務</div>`;
+    return;
+  }
+  const typeInfo = {
+    visit: ['🔄 例行拜訪','var(--accent)'],
+    new:   ['🆕 新藥局','var(--purple)'],
+    dad:   ['👨‍⚕️ 爸爸客戶','var(--teal)'],
+    deliver:['📦 自送','var(--green)']
+  };
+  el.innerHTML = tasks.map(t => {
+    const [lbl, col] = typeInfo[t.type]||typeInfo.visit;
+    return `<div class="task-item">
+      <span class="task-badge" style="background:${col}22;color:${col}">${lbl}</span>
+      <div class="task-info">
+        <div class="task-name">${t.name} ${t.pharmacyId?`<span style="font-size:11px;color:var(--muted)">${t.pharmacyId}</span>`:''}</div>
+        <div class="task-meta">${t.addr||'地址未填'} ${t.pharmacist?'· '+t.pharmacist+' 藥師':''} ${t.note?'· '+t.note:''}</div>
+      </div>
+      <div class="task-actions">
+        <span class="sidebar-badge badge-purple">待排程</span>
+        <button class="del-btn" onclick="removeTask(${t.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════
+// AI 路線排程
+// ══════════════════════════════
+async function runSchedule() {
+  if (!tasks.length) { toast('請先加入任務'); return; }
+  const btn = document.getElementById('schedule-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 規劃中...';
+
+  const resultEl = document.getElementById('schedule-result');
+  resultEl.innerHTML = `<div class="ai-result-wrap">
+    <div class="loading-line" style="width:55%"></div>
+    <div class="loading-line" style="width:80%"></div>
+    <div class="loading-line" style="width:40%"></div>
+  </div>`;
+
+  try {
+    // 先撈各藥局拜訪紀錄（取 lastVisitDays）
+    const enriched = await Promise.all(tasks.map(async t => {
+      try {
+        if (t.pharmacyId) {
+          const v = await get('/visits/' + t.pharmacyId);
+          return { ...t, lastVisitDays: v.lastVisitDays };
+        }
+      } catch {}
+      return t;
+    }));
+
+    const payload = {
+      pharmacies: enriched.map(t => ({
+        id: t.pharmacyId || String(t.id),
+        name: t.name,
+        addr: t.addr,
+        lastVisitDays: t.lastVisitDays || null,
+        isNew: t.type === 'new',
+        isDad: t.type === 'dad',
+        hasDelivery: t.type === 'deliver'
+      })),
+      origin: document.getElementById('m-origin')?.value || '板橋'
+    };
+
+    const data = await post('/optimize-route', payload);
+
+    // 保存排程結果
+    window._pendingRoute = data.route || enriched;
+    renderScheduleResult(data, enriched);
+  } catch(e) {
+    resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 排程失敗：${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '✦ AI 一鍵排程';
+  }
+}
+
+function renderScheduleResult(data, original) {
+  const route = data.route || original;
+  const summary = data.summary || '';
+  const el = document.getElementById('schedule-result');
+
+  const typeColor = r =>
+    r.isNew ? 'var(--purple)' : r.isDad ? 'var(--teal)' :
+    r.hasDelivery ? 'var(--green)' : r.lastVisitDays > 21 ? 'var(--red)' : 'var(--accent)';
+  const typeLabel = r =>
+    r.isNew ? '🆕 新藥局' : r.isDad ? '👨‍⚕️ 爸爸客戶' :
+    r.hasDelivery ? '🚗 自送' : r.lastVisitDays > 21 ? '⚠️ 逾期' : '🔄 拜訪';
+
+  el.innerHTML = `<div class="ai-result-wrap" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <span class="ai-badge">✦ Gemini 2.5-flash</span>
+      <span style="font-size:14px;font-weight:700">AI 路線建議（共 ${route.length} 站）</span>
+    </div>
+    <div class="route-day">
+      <div class="route-day-header">今日建議路線 <span style="font-size:11px;font-weight:400;color:var(--muted)">依優先分數排序</span></div>
+      ${route.map((r,i) => `
+      <div class="route-stop">
+        <div class="stop-num" style="background:${typeColor(r)}">${i+1}</div>
+        <div class="stop-info">
+          <div class="stop-name">${r.name||r.id}
+            ${r.lastVisitDays>21?`<span class="overdue-badge">逾期 ${r.lastVisitDays} 天</span>`:''}
+            ${r.isNew?'<span class="new-badge">🆕 新藥局</span>':''}
+            ${r.isDad?'<span class="dad-badge">👨‍⚕️ 爸爸客戶</span>':''}
+          </div>
+          <div class="stop-detail">${r.addr||''} ${r.lastVisitDays?`· 距上次拜訪 ${r.lastVisitDays} 天`:''}</div>
+        </div>
+        <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${typeColor(r)}22;color:${typeColor(r)};flex-shrink:0">${typeLabel(r)}</span>
+      </div>`).join('')}
+    </div>
+    ${summary?`<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-top:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">✦ AI 說明</div>
+      <div style="font-size:13px;line-height:1.7;color:var(--text2);white-space:pre-wrap">${summary}</div>
+    </div>`:''}
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn btn-primary" onclick="confirmRoute()">✓ 確認排入今日行程</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('schedule-result').innerHTML=''">清除</button>
+    </div>
+  </div>`;
+}
+
+function confirmRoute() {
+  if (!window._pendingRoute) return;
+  todayRoute = window._pendingRoute.map((r, i) => ({
+    ...r,
+    seq: i + 1,
+    name: r.name || tasks.find(t => t.pharmacyId === r.id)?.name || r.id
+  }));
+  renderTodayRoute();
+  updateTodayStats();
+  toast('✅ 已排入今日行程！');
+  setTimeout(() => nav(document.querySelectorAll('.nav-tab')[0], 'today'), 800);
+}
+
+// ══════════════════════════════
+// 今日路線渲染
+// ══════════════════════════════
+function renderTodayRoute() {
+  const el = document.getElementById('route-list');
+  if (!todayRoute.length) return;
+  const typeColor = r =>
+    r.isNew ? 'var(--purple)' : r.isDad ? 'var(--teal)' :
+    r.hasDelivery ? 'var(--green)' : r.lastVisitDays > 21 ? 'var(--red)' : 'var(--accent)';
+
+  el.innerHTML = todayRoute.map((r, i) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;border-top:${i?'1px solid var(--border)':''};cursor:pointer;transition:background .15s"
+      onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
+      onclick="fetchScript(${i})">
+      <div style="width:28px;height:28px;border-radius:50%;background:${typeColor(r)};color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${r.name}
+          ${r.lastVisitDays>21?`<span class="overdue-badge">逾期${r.lastVisitDays}天</span>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.addr||''} ${r.lastVisitDays?`· 上次：${r.lastVisitDays}天前`:''}</div>
+      </div>
+      <span style="font-size:14px;color:var(--muted2)">›</span>
+    </div>`).join('');
+
+  document.getElementById('sb-route').textContent = todayRoute.length + '站';
+}
+
+function updateTodayStats() {
+  document.getElementById('stat-total').textContent = todayRoute.length;
+  document.getElementById('stat-deliver').textContent = todayRoute.filter(r => r.hasDelivery).length || '—';
+  document.getElementById('stat-overdue').textContent = todayRoute.filter(r => r.lastVisitDays > 21).length || '—';
+  document.getElementById('stat-new').textContent = todayRoute.filter(r => r.isNew || r.isDad).length || '—';
+  document.getElementById('today-sub').textContent =
+    `共 ${todayRoute.length} 站 · ${todayRoute.filter(r=>r.lastVisitDays>21).length} 家逾期 · ${todayRoute.filter(r=>r.isNew).length} 家新藥局`;
+}
+
+// ══════════════════════════════
+// AI 話術（今日路線用）
+// ══════════════════════════════
+async function fetchScript(idx) {
+  const r = todayRoute[idx];
+  const panel = document.getElementById('script-panel');
+  panel.innerHTML = `<div style="padding:12px 0">
+    <div class="loading-line" style="width:50%"></div>
+    <div class="loading-line" style="width:85%"></div>
+    <div class="loading-line" style="width:65%"></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:6px">
+      <span class="spinner"></span> Gemini 生成中...
+    </div>
+  </div>`;
+
+  // 嘗試撈拜訪紀錄
+  let lastNote = '', lastVisitDays = r.lastVisitDays;
+  try {
+    if (r.id || r.pharmacyId) {
+      const v = await get('/visits/' + (r.id || r.pharmacyId));
+      if (v.visits?.length) {
+        lastNote = v.visits[0].summary || v.visits[0].content || '';
+        lastVisitDays = v.lastVisitDays ?? lastVisitDays;
+      }
+    }
+  } catch {}
+
+  try {
+    const d = await post('/generate-script', {
+      pharmacyId: r.id || r.pharmacyId || '',
+      pharmacyName: r.name,
+      pharmacist: r.pharmacist || '',
+      lastVisitDays,
+      lastVisitNote: lastNote,
+      visitPurpose: r.isNew ? '新藥局首訪' : r.isDad ? '爸爸老客戶維護' : r.hasDelivery ? '送貨+拜訪' : '例行拜訪',
+      recentOrders: []
+    });
+
+    lastScript = d.script || '';
+    panel.innerHTML = `
+      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${r.name}</div>
+        <div style="font-size:13px;line-height:1.85;color:var(--text2)">${lastScript}</div>
+      </div>
+      ${d.context ? `<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${d.context.dayText} · ${d.context.urgency}</div>` : ''}
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="copyScript()">複製話術</button>
+        <button class="btn btn-primary btn-sm" onclick="fetchScript(${idx})">🔄 重新生成</button>
+      </div>`;
+  } catch(e) {
+    panel.innerHTML = `<div style="color:var(--red);font-size:13px;padding:8px 0">❌ ${e.message}</div>`;
+  }
+}
+
+// 藥局清單頁快速話術
+async function quickScript(id, name, pharmacist) {
+  nav(document.querySelectorAll('.nav-tab')[0], 'today');
+  // 暫時加到 todayRoute
+  const tmp = { id, name, pharmacist, lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false };
+  const origLen = todayRoute.length;
+  todayRoute = [tmp, ...todayRoute];
+  renderTodayRoute();
+  await fetchScript(0);
+  // 還原（不真的加進去）
+  todayRoute = todayRoute.slice(1);
+  renderTodayRoute();
+}
+
+function copyScript() {
+  if (!lastScript) { toast('尚無話術'); return; }
+  navigator.clipboard.writeText(lastScript).then(() => toast('✅ 話術已複製'));
+}
+
+// ══════════════════════════════
+// 拜訪紀錄查詢
+// ══════════════════════════════
+async function loadVisits() {
+  const id = document.getElementById('visit-search').value.trim();
+  if (!id) { toast('請輸入藥局代號或名稱'); return; }
+
+  const btn = document.getElementById('visit-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 查詢中...';
+
+  // 找代號
+  const found = pharmacies.find(p =>
+    (p.id||p['Customer_ID']||'') === id ||
+    (p.name||p['店名']||'') === id
+  );
+  const pharmacyId = found ? (found.id||found['Customer_ID']||id) : id;
+  const pharmacyName = found ? (found.name||found['店名']||id) : id;
+
+  const resultEl = document.getElementById('visit-result');
+  resultEl.innerHTML = `<div><div class="loading-line" style="width:40%"></div><div class="loading-line" style="width:70%"></div></div>`;
+
+  try {
+    const d = await get('/visits/' + encodeURIComponent(pharmacyId));
+    const visits = d.visits || [];
+
+    if (!visits.length) {
+      resultEl.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:8px 0">查無「${pharmacyName}」的拜訪紀錄</div>`;
+      return;
+    }
+
+    const dayBadge = d.lastVisitDays !== null
+      ? `<span class="${d.lastVisitDays>21?'overdue-badge':'sidebar-badge badge-green'}" style="margin-left:0">${d.lastVisitDays > 21 ? '⚠️ 逾期 '+d.lastVisitDays+' 天' : '✅ '+d.lastVisitDays+' 天前'}</span>`
+      : '';
+
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700">${pharmacyName}</div>
+      ${dayBadge}
+      <span style="font-size:12px;color:var(--muted)">共 ${d.visitCount} 筆紀錄</span>
+      <button class="btn btn-ai btn-sm" style="margin-left:auto" onclick="genNextScript('${pharmacyId}','${pharmacyName}')">✦ 生成下次拜訪話術</button>
+    </div>`;
+
+    visits.forEach(v => {
+      html += `<div class="visit-card">
+        <div class="visit-date">${v.date || ''} ${v.purpose ? '· '+v.purpose : ''}</div>
+        <div class="visit-summary">${v.summary || v.content || '（無摘要）'}</div>
+        ${v.actionItems ? `<div style="font-size:12px;color:var(--orange);margin-top:6px">📌 待辦：${v.actionItems}</div>` : ''}
+        ${v.tags ? `<div class="visit-tags">${v.tags.split(',').map(t=>`<span class="visit-tag">${t.trim()}</span>`).join('')}</div>` : ''}
+      </div>`;
+    });
+
+    resultEl.innerHTML = html;
+
+    // AI 下次拜訪建議
+    await genNextScript(pharmacyId, pharmacyName, visits[0]);
+
+  } catch(e) {
+    resultEl.innerHTML = `<div style="color:var(--red);font-size:13px">❌ 查詢失敗：${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '查詢拜訪紀錄';
+  }
+}
+
+async function genNextScript(id, name, lastVisit) {
+  const resultEl = document.getElementById('visit-result');
+  const scriptBox = document.getElementById('next-script-box');
+  if (!scriptBox) {
+    // 加一個佔位
+    resultEl.insertAdjacentHTML('beforeend', `<div id="next-script-box" class="script-out" style="margin-top:0">
+      <div class="loading-line" style="width:50%"></div>
+      <div class="loading-line" style="width:80%"></div>
+      <div style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><span class="spinner"></span> 生成下次拜訪話術...</div>
+    </div>`);
+  }
+
+  try {
+    const v = lastVisit || {};
+    const d = await post('/generate-script', {
+      pharmacyId: id,
+      pharmacyName: name,
+      lastVisitNote: v.summary || v.content || '',
+      visitPurpose: '依歷史紀錄規劃下次拜訪',
+      recentOrders: []
+    });
+    lastScript = d.script || '';
+    document.getElementById('next-script-box').innerHTML = `
+      <div class="script-label">✦ 下次拜訪建議話術</div>
+      <div class="script-text">${lastScript}</div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" onclick="copyScript()">複製話術</button>
+        <button class="btn btn-ai btn-sm" onclick="genNextScript('${id}','${name}')">🔄 重新生成</button>
+      </div>`;
+  } catch(e) {
+    const box = document.getElementById('next-script-box');
+    if (box) box.innerHTML = `<div style="color:var(--red);font-size:13px">❌ ${e.message}</div>`;
+  }
+}
+
+// ══════════════════════════════
+// Modal & 工具
+// ══════════════════════════════
+function openScheduleModal() {
+  document.getElementById('m-task-label').textContent = `目前任務（${tasks.length} 家）`;
+  document.getElementById('m-task-preview').textContent =
+    tasks.length ? tasks.map(t=>t.name).join('、') : '請先到「任務投入」加入藥局';
+  document.getElementById('scheduleModal').classList.add('open');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function modalSchedule() {
+  closeModal('scheduleModal');
+  if (!tasks.length) {
+    nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
+    toast('⚠️ 請先加入要拜訪的藥局');
+    return;
+  }
+  nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
+  setTimeout(runSchedule, 200);
+}
+
+function nav(tabEl, pageId) {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  if (tabEl) tabEl.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + pageId).classList.add('active');
+  if (pageId === 'pharmacies') loadPharmacies();
+}
+
+function exportRoute() {
+  if (!todayRoute.length) { toast('行程尚未排定'); return; }
+  const txt = todayRoute.map((r,i)=>`${i+1}. ${r.name}　${r.addr||''}`).join('\n');
+  navigator.clipboard.writeText(txt).then(()=>toast('✅ 行程已複製'));
+}
+
+function openMaps() {
+  if (!todayRoute.length) { toast('請先排定行程'); return; }
+  const q = todayRoute.map(r=>encodeURIComponent(r.addr||r.name)).join('/');
+  window.open('https://www.google.com/maps/dir/'+q, '_blank');
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 2800);
+}
+
+init();
+</script>
+</body>
+</html>
