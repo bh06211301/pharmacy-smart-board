@@ -14,6 +14,7 @@
   --red:#f04438;--red-light:#fef3f2;
   --purple:#7c3aed;--purple-light:#f5f3ff;
   --teal:#0891b2;--teal-light:#ecfeff;
+  --gray:#6b7280;--gray-light:#f9fafb;
   --text:#101828;--text2:#344054;--muted:#667085;--muted2:#98a2b3;
   --shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.06);
   --shadow-md:0 4px 8px rgba(16,24,40,.08),0 2px 4px rgba(16,24,40,.06);
@@ -51,6 +52,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .badge-green{background:var(--green-light);color:var(--green)}
 .badge-blue{background:var(--accent-light);color:var(--accent)}
 .badge-purple{background:var(--purple-light);color:var(--purple)}
+.badge-gray{background:var(--gray-light);color:var(--gray)}
 .sidebar-divider{height:1px;background:var(--border);margin:8px 0}
 
 /* PAGES */
@@ -68,6 +70,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .btn-ai:hover:not(:disabled){opacity:.9}
 .btn-ghost{background:var(--white);color:var(--text2);border:1px solid var(--border)}
 .btn-ghost:hover:not(:disabled){background:var(--surface2)}
+.btn-danger{background:var(--red-light);color:var(--red);border:1px solid #fca5a5}
+.btn-danger:hover:not(:disabled){background:#fee2e2}
 .btn-sm{padding:6px 12px;font-size:12px}
 .btn-group{display:flex;gap:8px;flex-wrap:wrap}
 
@@ -110,8 +114,16 @@ select.task-input{cursor:pointer}
 .ph-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
 .ph-table tr:last-child td{border-bottom:none}
 .ph-table tr:hover td{background:var(--surface2)}
+.ph-table tr.row-dead td{background:#fef9f9;opacity:.65}
 .ph-row-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:var(--muted);transition:all .15s}
 .ph-row-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.ph-row-btn.dead-btn{border-color:#fca5a5;color:var(--red);background:var(--red-light)}
+.ph-row-btn.dead-btn:hover{background:#fee2e2}
+.ph-row-btn.undead-btn{border-color:#86efac;color:var(--green);background:var(--green-light)}
+.ph-row-btn.undead-btn:hover{background:#dcfce7}
+
+/* DEAD BADGE */
+.dead-badge{background:var(--red-light);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px}
 
 /* AUTOCOMPLETE */
 .ph-select-wrap{position:relative}
@@ -165,6 +177,7 @@ select.task-input{cursor:pointer}
 .modal-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--white);color:var(--text);outline:none}
 .modal-input:focus{border-color:var(--accent)}
 .modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.dead-warning{background:var(--red-light);border:1px solid #fca5a5;border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;color:var(--red);margin-bottom:14px;display:flex;align-items:flex-start;gap:8px}
 
 /* VISIT PANEL */
 .visit-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px}
@@ -172,7 +185,6 @@ select.task-input{cursor:pointer}
 .visit-summary{font-size:13px;line-height:1.65;color:var(--text2)}
 .visit-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .visit-tag{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--text2)}
-
 .overdue-badge{background:var(--red-light);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
 .new-badge{background:var(--purple-light);color:var(--purple);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
 .dad-badge{background:var(--teal-light);color:var(--teal);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
@@ -183,13 +195,13 @@ select.task-input{cursor:pointer}
 </head>
 <body>
 
-<!-- ★ 只需改這一行 ★ -->
 <script>
 const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
-let pharmacies = [];   // 從 Sheets 載入的藥局清單
-let tasks = [];        // 任務列表
-let todayRoute = [];   // 確認後的今日路線
-let lastScript = '';   // 最後生成的話術（供複製）
+let pharmacies = [];
+let tasks = [];
+let todayRoute = [];
+let lastScript = '';
+let customerStatuses = {};
 </script>
 
 <!-- NAV -->
@@ -237,6 +249,10 @@ let lastScript = '';   // 最後生成的話術（供複製）
     <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[3],'visits')">
       <span class="icon">📋</span> 拜訪紀錄查詢
     </div>
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[2],'pharmacies');setTimeout(()=>{document.getElementById('ph-filter').value='dead';renderTable()},100)">
+      <span class="icon">🚫</span> 死客戶管理
+      <span class="sidebar-badge badge-gray" id="sb-dead">—</span>
+    </div>
   </div>
   <div class="sidebar-divider"></div>
   <div style="margin-bottom:6px">
@@ -267,7 +283,6 @@ let lastScript = '';   // 最後生成的話術（供複製）
       <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
     </div>
   </div>
-
   <div class="stat-row">
     <div class="stat-card">
       <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--accent-light)">🗺️</div><span class="stat-change change-up">AI排序</span></div>
@@ -286,9 +301,7 @@ let lastScript = '';   // 最後生成的話術（供複製）
       <div class="stat-val" id="stat-new">—</div><div class="stat-lbl">新藥局 / 特殊任務</div>
     </div>
   </div>
-
   <div style="display:grid;grid-template-columns:1fr 340px;gap:18px">
-    <!-- 路線列表 -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">今日路線順序</div>
@@ -302,7 +315,6 @@ let lastScript = '';   // 最後生成的話術（供複製）
         </div>
       </div>
     </div>
-    <!-- 話術面板 -->
     <div style="display:flex;flex-direction:column;gap:14px">
       <div class="card">
         <div class="card-header">
@@ -334,7 +346,6 @@ let lastScript = '';   // 最後生成的話術（供複製）
     <div><div class="page-title">📥 任務投入</div><div class="page-sub">加入要拜訪的藥局，AI 自動排序路線</div></div>
     <button class="btn btn-ai" id="schedule-btn" onclick="runSchedule()">✦ AI 一鍵排程</button>
   </div>
-
   <div class="card" style="margin-bottom:16px">
     <div class="card-header"><div class="card-title">新增拜訪任務</div></div>
     <div class="card-body">
@@ -357,11 +368,8 @@ let lastScript = '';   // 最後生成的話術（供複製）
       </div>
     </div>
   </div>
-
   <div id="task-list">
-    <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">
-      尚無任務 — 請從上方搜尋藥局加入
-    </div>
+    <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">尚無任務 — 請從上方搜尋藥局加入</div>
   </div>
   <div id="schedule-result"></div>
 </div>
@@ -371,7 +379,12 @@ let lastScript = '';   // 最後生成的話術（供複製）
   <div class="page-header">
     <div><div class="page-title">🏪 藥局清單</div><div class="page-sub" id="ph-sub">從 Google Sheets 即時載入</div></div>
     <div class="btn-group">
-      <input class="task-input" id="ph-kw" placeholder="搜尋..." style="flex:none;width:200px;height:36px;padding:6px 12px" oninput="renderTable()">
+      <input class="task-input" id="ph-kw" placeholder="搜尋..." style="flex:none;width:160px;height:36px;padding:6px 12px" oninput="renderTable()">
+      <select class="task-input" id="ph-filter" style="flex:none;width:120px;height:36px;padding:6px 10px" onchange="renderTable()">
+        <option value="all">全部藥局</option>
+        <option value="active">活躍客戶</option>
+        <option value="dead">🚫 死客戶</option>
+      </select>
       <button class="btn btn-ghost btn-sm" onclick="loadPharmacies(true)">🔄 重新載入</button>
     </div>
   </div>
@@ -390,7 +403,6 @@ let lastScript = '';   // 最後生成的話術（供複製）
   <div class="page-header">
     <div><div class="page-title">📋 拜訪紀錄查詢</div><div class="page-sub">輸入藥局代號查詢歷史紀錄，並生成下次拜訪建議</div></div>
   </div>
-
   <div class="card" style="margin-bottom:18px">
     <div class="card-body">
       <div style="display:flex;gap:10px;align-items:center">
@@ -432,6 +444,40 @@ let lastScript = '';   // 最後生成的話術（供複製）
   </div>
 </div>
 
+<!-- 死客戶標記 Modal -->
+<div class="modal-overlay" id="deadModal">
+  <div class="modal" style="width:440px">
+    <div class="modal-title">🚫 標記死客戶</div>
+    <div class="dead-warning">
+      <span style="font-size:16px;flex-shrink:0">⚠️</span>
+      <span>標記後，此藥局將從 AI 推薦行程中排除，並在清單中顯示為灰色。可隨時解除標記。</span>
+    </div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:14px" id="dead-modal-name">—</div>
+    <div class="modal-field">
+      <div class="modal-label">原因備註（選填）</div>
+      <input class="modal-input" id="dead-note" placeholder="例：拒絕拜訪、關店、換藥師...">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('deadModal')">取消</button>
+      <button class="btn btn-danger" onclick="confirmMarkDead()">🚫 確認標記死客戶</button>
+    </div>
+  </div>
+</div>
+
+<!-- 解除死客戶 Modal -->
+<div class="modal-overlay" id="undeadModal">
+  <div class="modal" style="width:400px">
+    <div class="modal-title">♻️ 解除死客戶標記</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:8px" id="undead-modal-name">—</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px" id="undead-modal-note"></div>
+    <div style="font-size:13px;color:var(--text2)">確定要恢復此藥局的正常狀態嗎？解除後將重新納入 AI 推薦排程。</div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('undeadModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmUndead()">✓ 確認解除</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ══════════════════════════════
 // API
@@ -453,19 +499,15 @@ async function post(path, body) {
 // 初始化
 // ══════════════════════════════
 async function init() {
-  // 日期
   const d = new Date();
   const days = ['日','一','二','三','四','五','六'];
   document.getElementById('today-title').textContent =
     `今日行程 — ${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）`;
-
-  // 健康檢查
   try {
     const h = await get('/health');
-    if (h.ok) { setDot('green', 'Worker 正常'); }
+    if (h.ok) setDot('green', 'Worker 正常');
   } catch(e) { setDot('red', 'Worker 無回應'); }
-
-  // 載入藥局
+  await loadCustomerStatuses();
   loadPharmacies();
 }
 
@@ -475,13 +517,75 @@ function setDot(color, txt) {
 }
 
 // ══════════════════════════════
+// 客戶狀態（死客戶）
+// ══════════════════════════════
+async function loadCustomerStatuses() {
+  try {
+    const d = await get('/customer-status');
+    customerStatuses = d.statuses || {};
+    updateDeadBadge();
+  } catch(e) { console.warn('載入客戶狀態失敗', e); }
+}
+
+function updateDeadBadge() {
+  const count = Object.values(customerStatuses).filter(s => s.status === 'dead').length;
+  const el = document.getElementById('sb-dead');
+  if (el) el.textContent = count || '—';
+}
+
+function isDead(id) {
+  return customerStatuses[id]?.status === 'dead';
+}
+
+// 開啟標記 Modal
+let _deadId = '', _deadName = '';
+function openDeadModal(id, name) {
+  _deadId = id; _deadName = name;
+  document.getElementById('dead-modal-name').textContent = `${name}（${id}）`;
+  document.getElementById('dead-note').value = '';
+  document.getElementById('deadModal').classList.add('open');
+}
+
+async function confirmMarkDead() {
+  const note = document.getElementById('dead-note').value.trim();
+  try {
+    await post('/customer-status', { action:'setStatus', id:_deadId, status:'dead', note });
+    customerStatuses[_deadId] = { status:'dead', note };
+    closeModal('deadModal');
+    updateDeadBadge();
+    renderTable();
+    toast(`🚫 已標記「${_deadName}」為死客戶`);
+  } catch(e) { toast('❌ 標記失敗：' + e.message); }
+}
+
+// 解除標記 Modal
+let _undeadId = '', _undeadName = '';
+function openUndeadModal(id, name) {
+  _undeadId = id; _undeadName = name;
+  document.getElementById('undead-modal-name').textContent = `${name}（${id}）`;
+  const note = customerStatuses[id]?.note || '';
+  document.getElementById('undead-modal-note').textContent = note ? `備註：${note}` : '';
+  document.getElementById('undeadModal').classList.add('open');
+}
+
+async function confirmUndead() {
+  try {
+    await post('/customer-status', { action:'setStatus', id:_undeadId, status:'active', note:'' });
+    delete customerStatuses[_undeadId];
+    closeModal('undeadModal');
+    updateDeadBadge();
+    renderTable();
+    toast(`✅ 已解除「${_undeadName}」的死客戶標記`);
+  } catch(e) { toast('❌ 解除失敗：' + e.message); }
+}
+
+// ══════════════════════════════
 // 藥局清單
 // ══════════════════════════════
 async function loadPharmacies(force = false) {
   if (pharmacies.length && !force) return;
   try {
     const d = await get('/pharmacies');
-    // 支援兩種回傳格式
     pharmacies = d.pharmacies || d.data || [];
     updateSidebar();
     renderTable();
@@ -495,10 +599,7 @@ async function loadPharmacies(force = false) {
 
 function updateSidebar() {
   document.getElementById('sb-ph').textContent = pharmacies.length;
-  const areas = [
-    ['板橋','sb-banqiao'], ['新莊','sb-xinzhuang'],
-    ['三重','sb-sanchong'], ['中和','sb-zhonghe']
-  ];
+  const areas = [['板橋','sb-banqiao'],['新莊','sb-xinzhuang'],['三重','sb-sanchong'],['中和','sb-zhonghe']];
   for (const [name, id] of areas) {
     const c = pharmacies.filter(p => JSON.stringify(p).includes(name)).length;
     const el = document.getElementById(id);
@@ -508,7 +609,11 @@ function updateSidebar() {
 
 function renderTable() {
   const kw = (document.getElementById('ph-kw')?.value||'').toLowerCase();
-  const list = kw ? pharmacies.filter(p => JSON.stringify(p).toLowerCase().includes(kw)) : pharmacies;
+  const filter = document.getElementById('ph-filter')?.value || 'all';
+
+  let list = kw ? pharmacies.filter(p => JSON.stringify(p).toLowerCase().includes(kw)) : [...pharmacies];
+  if (filter === 'dead')   list = list.filter(p => isDead(p.id||p['Customer_ID']||''));
+  if (filter === 'active') list = list.filter(p => !isDead(p.id||p['Customer_ID']||''));
 
   if (!list.length) {
     document.getElementById('ph-table-wrap').innerHTML =
@@ -517,26 +622,35 @@ function renderTable() {
   }
 
   const shown = list.slice(0, 300);
-  // 顯示欄位：id name pharmacist address area
   let html = `<table class="ph-table"><thead><tr>
-    <th>代號</th><th>藥局名稱</th><th>藥師</th><th>地址</th><th>區域</th><th></th>
+    <th>代號</th><th>藥局名稱</th><th>藥師</th><th>地址</th><th>區域</th><th style="min-width:190px"></th>
   </tr></thead><tbody>`;
 
   shown.forEach(p => {
-    const id = p.id || p['Customer_ID'] || '';
-    const name = p.name || p['店名'] || '';
-    const pharmacist = p.pharmacist || p['Key Man'] || '';
-    const addr = p.address || p['地址'] || '';
-    const area = p.area || p['實體資料夾'] || p.district || '';
-    html += `<tr>
-      <td style="font-weight:600;color:var(--accent)">${id}</td>
-      <td style="font-weight:600">${name}</td>
-      <td>${pharmacist}</td>
+    const id   = p.id||p['Customer_ID']||'';
+    const name = (p.name||p['店名']||'').replace(/'/g,"&#39;");
+    const doc  = (p.pharmacist||p['Key Man']||'').replace(/'/g,"&#39;");
+    const addr = (p.address||p['地址']||'').replace(/'/g,"&#39;");
+    const area = p.area||p['實體資料夾']||p.district||'';
+    const dead = isDead(id);
+    const deadNote = customerStatuses[id]?.note || '';
+
+    html += `<tr class="${dead?'row-dead':''}">
+      <td style="font-weight:600;color:${dead?'var(--muted)':'var(--accent)'}">${id}</td>
+      <td style="font-weight:600">${name}${dead?`<span class="dead-badge">🚫 死客戶</span>`:''}
+        ${dead&&deadNote?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${deadNote}</div>`:''}
+      </td>
+      <td>${doc}</td>
       <td style="color:var(--muted)">${addr}</td>
       <td>${area}</td>
-      <td style="display:flex;gap:6px">
-        <button class="ph-row-btn" onclick="quickAddTask('${id}','${name.replace(/'/g,'')}','${addr.replace(/'/g,'')}','${pharmacist.replace(/'/g,'')}')">＋ 加入任務</button>
-        <button class="ph-row-btn" onclick="quickScript('${id}','${name.replace(/'/g,'')}','${pharmacist.replace(/'/g,'')}')">✦ 話術</button>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        ${!dead?`
+          <button class="ph-row-btn" onclick="quickAddTask('${id}','${name}','${addr}','${doc}')">＋ 任務</button>
+          <button class="ph-row-btn" onclick="quickScript('${id}','${name}','${doc}')">✦ 話術</button>
+          <button class="ph-row-btn dead-btn" onclick="openDeadModal('${id}','${name}')">🚫 死客戶</button>
+        `:`
+          <button class="ph-row-btn undead-btn" onclick="openUndeadModal('${id}','${name}')">♻️ 解除標記</button>
+        `}
       </td>
     </tr>`;
   });
@@ -564,8 +678,10 @@ function phSearch(val) {
     const name = p.name||p['店名']||'';
     const addr = p.address||p['地址']||'';
     const doc = p.pharmacist||p['Key Man']||'';
-    return `<div class="ph-option" onclick="fillTask('${id}','${name}','${addr}','${doc}')">
+    const dead = isDead(id);
+    return `<div class="ph-option" onclick="fillTask('${id}','${name}','${addr}','${doc}')" style="${dead?'opacity:.5':''}">
       <strong>${name}</strong> <span style="color:var(--muted);font-size:11px">${id}</span>
+      ${dead?'<span class="dead-badge" style="margin-left:4px">死客戶</span>':''}
       ${addr?`<div style="font-size:11px;color:var(--muted)">${addr}</div>`:''}
     </div>`;
   }).join('');
@@ -603,9 +719,8 @@ function fillVisitSearch(id, name) {
 }
 
 document.addEventListener('click', e => {
-  if (!e.target.closest('.ph-select-wrap')) {
+  if (!e.target.closest('.ph-select-wrap'))
     document.querySelectorAll('.ph-dropdown').forEach(d => d.classList.remove('open'));
-  }
 });
 
 // ══════════════════════════════
@@ -619,11 +734,14 @@ function addTask() {
   const note = document.getElementById('t-note').value.trim();
   if (!name) { toast('請輸入藥局名稱'); return; }
 
-  // 找藥局 ID
   const found = pharmacies.find(p =>
     (p.name||p['店名']||'') === name || (p.id||p['Customer_ID']||'') === name
   );
   const pharmacyId = found ? (found.id||found['Customer_ID']||'') : '';
+
+  if (pharmacyId && isDead(pharmacyId)) {
+    if (!confirm(`「${name}」已被標記為死客戶，確定還是要加入任務嗎？`)) return;
+  }
 
   tasks.push({ id: Date.now(), pharmacyId, name, addr, pharmacist, type, note });
   renderTasks();
@@ -636,6 +754,9 @@ function addTask() {
 }
 
 function quickAddTask(id, name, addr, doc) {
+  if (isDead(id)) {
+    if (!confirm(`「${name}」已被標記為死客戶，確定還是要加入任務嗎？`)) return;
+  }
   tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: doc, type: 'visit', note: '' });
   renderTasks();
   document.getElementById('sb-tasks').textContent = tasks.length;
@@ -663,10 +784,13 @@ function renderTasks() {
   };
   el.innerHTML = tasks.map(t => {
     const [lbl, col] = typeInfo[t.type]||typeInfo.visit;
-    return `<div class="task-item">
+    const dead = t.pharmacyId && isDead(t.pharmacyId);
+    return `<div class="task-item" style="${dead?'opacity:.6;border-color:#fca5a5':''}">
       <span class="task-badge" style="background:${col}22;color:${col}">${lbl}</span>
       <div class="task-info">
-        <div class="task-name">${t.name} ${t.pharmacyId?`<span style="font-size:11px;color:var(--muted)">${t.pharmacyId}</span>`:''}</div>
+        <div class="task-name">${t.name} ${t.pharmacyId?`<span style="font-size:11px;color:var(--muted)">${t.pharmacyId}</span>`:''}
+          ${dead?'<span class="dead-badge">🚫 死客戶</span>':''}
+        </div>
         <div class="task-meta">${t.addr||'地址未填'} ${t.pharmacist?'· '+t.pharmacist+' 藥師':''} ${t.note?'· '+t.note:''}</div>
       </div>
       <div class="task-actions">
@@ -684,16 +808,13 @@ async function runSchedule() {
   if (!tasks.length) { toast('請先加入任務'); return; }
   const btn = document.getElementById('schedule-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 規劃中...';
-
   const resultEl = document.getElementById('schedule-result');
   resultEl.innerHTML = `<div class="ai-result-wrap">
     <div class="loading-line" style="width:55%"></div>
     <div class="loading-line" style="width:80%"></div>
     <div class="loading-line" style="width:40%"></div>
   </div>`;
-
   try {
-    // 先撈各藥局拜訪紀錄（取 lastVisitDays）
     const enriched = await Promise.all(tasks.map(async t => {
       try {
         if (t.pharmacyId) {
@@ -703,23 +824,16 @@ async function runSchedule() {
       } catch {}
       return t;
     }));
-
     const payload = {
       pharmacies: enriched.map(t => ({
         id: t.pharmacyId || String(t.id),
-        name: t.name,
-        addr: t.addr,
+        name: t.name, addr: t.addr,
         lastVisitDays: t.lastVisitDays || null,
-        isNew: t.type === 'new',
-        isDad: t.type === 'dad',
-        hasDelivery: t.type === 'deliver'
+        isNew: t.type === 'new', isDad: t.type === 'dad', hasDelivery: t.type === 'deliver'
       })),
       origin: document.getElementById('m-origin')?.value || '板橋'
     };
-
     const data = await post('/optimize-route', payload);
-
-    // 保存排程結果
     window._pendingRoute = data.route || enriched;
     renderScheduleResult(data, enriched);
   } catch(e) {
@@ -733,14 +847,8 @@ function renderScheduleResult(data, original) {
   const route = data.route || original;
   const summary = data.summary || '';
   const el = document.getElementById('schedule-result');
-
-  const typeColor = r =>
-    r.isNew ? 'var(--purple)' : r.isDad ? 'var(--teal)' :
-    r.hasDelivery ? 'var(--green)' : r.lastVisitDays > 21 ? 'var(--red)' : 'var(--accent)';
-  const typeLabel = r =>
-    r.isNew ? '🆕 新藥局' : r.isDad ? '👨‍⚕️ 爸爸客戶' :
-    r.hasDelivery ? '🚗 自送' : r.lastVisitDays > 21 ? '⚠️ 逾期' : '🔄 拜訪';
-
+  const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
+  const typeLabel = r => r.isNew?'🆕 新藥局':r.isDad?'👨‍⚕️ 爸爸客戶':r.hasDelivery?'🚗 自送':r.lastVisitDays>21?'⚠️ 逾期':'🔄 拜訪';
   el.innerHTML = `<div class="ai-result-wrap" style="margin-top:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span class="ai-badge">✦ Gemini 2.5-flash</span>
@@ -776,8 +884,7 @@ function renderScheduleResult(data, original) {
 function confirmRoute() {
   if (!window._pendingRoute) return;
   todayRoute = window._pendingRoute.map((r, i) => ({
-    ...r,
-    seq: i + 1,
+    ...r, seq: i + 1,
     name: r.name || tasks.find(t => t.pharmacyId === r.id)?.name || r.id
   }));
   renderTodayRoute();
@@ -792,10 +899,7 @@ function confirmRoute() {
 function renderTodayRoute() {
   const el = document.getElementById('route-list');
   if (!todayRoute.length) return;
-  const typeColor = r =>
-    r.isNew ? 'var(--purple)' : r.isDad ? 'var(--teal)' :
-    r.hasDelivery ? 'var(--green)' : r.lastVisitDays > 21 ? 'var(--red)' : 'var(--accent)';
-
+  const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
   el.innerHTML = todayRoute.map((r, i) => `
     <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;border-top:${i?'1px solid var(--border)':''};cursor:pointer;transition:background .15s"
       onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
@@ -809,21 +913,20 @@ function renderTodayRoute() {
       </div>
       <span style="font-size:14px;color:var(--muted2)">›</span>
     </div>`).join('');
-
   document.getElementById('sb-route').textContent = todayRoute.length + '站';
 }
 
 function updateTodayStats() {
   document.getElementById('stat-total').textContent = todayRoute.length;
-  document.getElementById('stat-deliver').textContent = todayRoute.filter(r => r.hasDelivery).length || '—';
-  document.getElementById('stat-overdue').textContent = todayRoute.filter(r => r.lastVisitDays > 21).length || '—';
-  document.getElementById('stat-new').textContent = todayRoute.filter(r => r.isNew || r.isDad).length || '—';
+  document.getElementById('stat-deliver').textContent = todayRoute.filter(r=>r.hasDelivery).length||'—';
+  document.getElementById('stat-overdue').textContent = todayRoute.filter(r=>r.lastVisitDays>21).length||'—';
+  document.getElementById('stat-new').textContent = todayRoute.filter(r=>r.isNew||r.isDad).length||'—';
   document.getElementById('today-sub').textContent =
     `共 ${todayRoute.length} 站 · ${todayRoute.filter(r=>r.lastVisitDays>21).length} 家逾期 · ${todayRoute.filter(r=>r.isNew).length} 家新藥局`;
 }
 
 // ══════════════════════════════
-// AI 話術（今日路線用）
+// AI 話術
 // ══════════════════════════════
 async function fetchScript(idx) {
   const r = todayRoute[idx];
@@ -836,8 +939,6 @@ async function fetchScript(idx) {
       <span class="spinner"></span> Gemini 生成中...
     </div>
   </div>`;
-
-  // 嘗試撈拜訪紀錄
   let lastNote = '', lastVisitDays = r.lastVisitDays;
   try {
     if (r.id || r.pharmacyId) {
@@ -848,25 +949,20 @@ async function fetchScript(idx) {
       }
     }
   } catch {}
-
   try {
     const d = await post('/generate-script', {
-      pharmacyId: r.id || r.pharmacyId || '',
-      pharmacyName: r.name,
-      pharmacist: r.pharmacist || '',
-      lastVisitDays,
-      lastVisitNote: lastNote,
-      visitPurpose: r.isNew ? '新藥局首訪' : r.isDad ? '爸爸老客戶維護' : r.hasDelivery ? '送貨+拜訪' : '例行拜訪',
+      pharmacyId: r.id||r.pharmacyId||'', pharmacyName: r.name, pharmacist: r.pharmacist||'',
+      lastVisitDays, lastVisitNote: lastNote,
+      visitPurpose: r.isNew?'新藥局首訪':r.isDad?'爸爸老客戶維護':r.hasDelivery?'送貨+拜訪':'例行拜訪',
       recentOrders: []
     });
-
     lastScript = d.script || '';
     panel.innerHTML = `
       <div style="border-left:3px solid var(--accent);padding-left:12px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${r.name}</div>
         <div style="font-size:13px;line-height:1.85;color:var(--text2)">${lastScript}</div>
       </div>
-      ${d.context ? `<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${d.context.dayText} · ${d.context.urgency}</div>` : ''}
+      ${d.context?`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${d.context.dayText} · ${d.context.urgency}</div>`:''}
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="copyScript()">複製話術</button>
         <button class="btn btn-primary btn-sm" onclick="fetchScript(${idx})">🔄 重新生成</button>
@@ -876,16 +972,12 @@ async function fetchScript(idx) {
   }
 }
 
-// 藥局清單頁快速話術
 async function quickScript(id, name, pharmacist) {
   nav(document.querySelectorAll('.nav-tab')[0], 'today');
-  // 暫時加到 todayRoute
-  const tmp = { id, name, pharmacist, lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false };
-  const origLen = todayRoute.length;
+  const tmp = { id, name, pharmacist, lastVisitDays: null, isNew:false, isDad:false, hasDelivery:false };
   todayRoute = [tmp, ...todayRoute];
   renderTodayRoute();
   await fetchScript(0);
-  // 還原（不真的加進去）
   todayRoute = todayRoute.slice(1);
   renderTodayRoute();
 }
@@ -901,55 +993,49 @@ function copyScript() {
 async function loadVisits() {
   const id = document.getElementById('visit-search').value.trim();
   if (!id) { toast('請輸入藥局代號或名稱'); return; }
-
   const btn = document.getElementById('visit-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 查詢中...';
-
-  // 找代號
   const found = pharmacies.find(p =>
-    (p.id||p['Customer_ID']||'') === id ||
-    (p.name||p['店名']||'') === id
+    (p.id||p['Customer_ID']||'') === id || (p.name||p['店名']||'') === id
   );
   const pharmacyId = found ? (found.id||found['Customer_ID']||id) : id;
   const pharmacyName = found ? (found.name||found['店名']||id) : id;
-
   const resultEl = document.getElementById('visit-result');
   resultEl.innerHTML = `<div><div class="loading-line" style="width:40%"></div><div class="loading-line" style="width:70%"></div></div>`;
-
   try {
     const d = await get('/visits/' + encodeURIComponent(pharmacyId));
     const visits = d.visits || [];
-
     if (!visits.length) {
       resultEl.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:8px 0">查無「${pharmacyName}」的拜訪紀錄</div>`;
       return;
     }
-
+    const dead = isDead(pharmacyId);
     const dayBadge = d.lastVisitDays !== null
-      ? `<span class="${d.lastVisitDays>21?'overdue-badge':'sidebar-badge badge-green'}" style="margin-left:0">${d.lastVisitDays > 21 ? '⚠️ 逾期 '+d.lastVisitDays+' 天' : '✅ '+d.lastVisitDays+' 天前'}</span>`
+      ? `<span class="${d.lastVisitDays>21?'overdue-badge':'sidebar-badge badge-green'}" style="margin-left:0">${d.lastVisitDays>21?'⚠️ 逾期 '+d.lastVisitDays+' 天':'✅ '+d.lastVisitDays+' 天前'}</span>`
       : '';
-
-    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <div style="font-size:15px;font-weight:700">${pharmacyName}</div>
+      ${dead?'<span class="dead-badge">🚫 死客戶</span>':''}
       ${dayBadge}
       <span style="font-size:12px;color:var(--muted)">共 ${d.visitCount} 筆紀錄</span>
-      <button class="btn btn-ai btn-sm" style="margin-left:auto" onclick="genNextScript('${pharmacyId}','${pharmacyName}')">✦ 生成下次拜訪話術</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-ai btn-sm" onclick="genNextScript('${pharmacyId}','${pharmacyName}')">✦ 下次話術</button>
+        ${dead
+          ?`<button class="btn btn-ghost btn-sm" style="border-color:#86efac;color:var(--green)" onclick="openUndeadModal('${pharmacyId}','${pharmacyName}')">♻️ 解除死客戶</button>`
+          :`<button class="btn btn-danger btn-sm" onclick="openDeadModal('${pharmacyId}','${pharmacyName}')">🚫 標記死客戶</button>`
+        }
+      </div>
     </div>`;
-
     visits.forEach(v => {
       html += `<div class="visit-card">
-        <div class="visit-date">${v.date || ''} ${v.purpose ? '· '+v.purpose : ''}</div>
-        <div class="visit-summary">${v.summary || v.content || '（無摘要）'}</div>
-        ${v.actionItems ? `<div style="font-size:12px;color:var(--orange);margin-top:6px">📌 待辦：${v.actionItems}</div>` : ''}
-        ${v.tags ? `<div class="visit-tags">${v.tags.split(',').map(t=>`<span class="visit-tag">${t.trim()}</span>`).join('')}</div>` : ''}
+        <div class="visit-date">${v.date||''} ${v.purpose?'· '+v.purpose:''}</div>
+        <div class="visit-summary">${v.summary||v.content||'（無摘要）'}</div>
+        ${v.actionItems?`<div style="font-size:12px;color:var(--orange);margin-top:6px">📌 待辦：${v.actionItems}</div>`:''}
+        ${v.tags?`<div class="visit-tags">${v.tags.split(',').map(t=>`<span class="visit-tag">${t.trim()}</span>`).join('')}</div>`:''}
       </div>`;
     });
-
     resultEl.innerHTML = html;
-
-    // AI 下次拜訪建議
     await genNextScript(pharmacyId, pharmacyName, visits[0]);
-
   } catch(e) {
     resultEl.innerHTML = `<div style="color:var(--red);font-size:13px">❌ 查詢失敗：${e.message}</div>`;
   } finally {
@@ -961,22 +1047,18 @@ async function genNextScript(id, name, lastVisit) {
   const resultEl = document.getElementById('visit-result');
   const scriptBox = document.getElementById('next-script-box');
   if (!scriptBox) {
-    // 加一個佔位
     resultEl.insertAdjacentHTML('beforeend', `<div id="next-script-box" class="script-out" style="margin-top:0">
       <div class="loading-line" style="width:50%"></div>
       <div class="loading-line" style="width:80%"></div>
       <div style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><span class="spinner"></span> 生成下次拜訪話術...</div>
     </div>`);
   }
-
   try {
     const v = lastVisit || {};
     const d = await post('/generate-script', {
-      pharmacyId: id,
-      pharmacyName: name,
-      lastVisitNote: v.summary || v.content || '',
-      visitPurpose: '依歷史紀錄規劃下次拜訪',
-      recentOrders: []
+      pharmacyId: id, pharmacyName: name,
+      lastVisitNote: v.summary||v.content||'',
+      visitPurpose: '依歷史紀錄規劃下次拜訪', recentOrders: []
     });
     lastScript = d.script || '';
     document.getElementById('next-script-box').innerHTML = `
