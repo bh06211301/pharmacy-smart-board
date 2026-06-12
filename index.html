@@ -191,6 +191,26 @@ select.task-input{cursor:pointer}
 
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+/* VISIT TIMELINE */
+.visit-tl-item{padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .13s}
+.visit-tl-item:last-child{border-bottom:none}
+.visit-tl-item:hover{background:var(--surface2)}
+.visit-tl-ph{font-size:13px;font-weight:600;color:var(--accent);margin-bottom:3px}
+.visit-tl-date{font-size:11px;color:var(--muted2);font-weight:600;letter-spacing:.4px}
+
+/* TODO LIST */
+.todo-item{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);transition:all .15s}
+.todo-item:hover{box-shadow:var(--shadow-md)}
+.todo-item.done{opacity:.5;background:var(--surface2)}
+.todo-item.done .todo-text{text-decoration:line-through;color:var(--muted)}
+.todo-check{width:20px;height:20px;border:2px solid var(--border);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;font-size:11px;transition:all .15s}
+.todo-check.checked{background:var(--green);border-color:var(--green);color:#fff}
+.todo-text{font-size:13px;font-weight:600;line-height:1.4}
+.todo-source{font-size:11px;color:var(--muted);margin-top:3px}
+.todo-priority-high{background:var(--red-light);color:var(--red)}
+.todo-priority-medium{background:var(--orange-light);color:var(--orange)}
+.todo-priority-low{background:var(--green-light);color:var(--green)}
 </style>
 </head>
 <body>
@@ -202,6 +222,8 @@ let tasks = [];
 let todayRoute = [];
 let lastScript = '';
 let customerStatuses = {};
+let actionItems = [];
+let allVisitsCache = [];
 </script>
 
 <!-- NAV -->
@@ -215,6 +237,7 @@ let customerStatuses = {};
     <button class="nav-tab"          onclick="nav(this,'tasks')">📥 任務投入</button>
     <button class="nav-tab"          onclick="nav(this,'pharmacies')">🏪 藥局清單</button>
     <button class="nav-tab"          onclick="nav(this,'visits')">📋 拜訪紀錄</button>
+    <button class="nav-tab"          onclick="nav(this,'todo')">📌 待辦清單</button>
   </div>
   <div class="nav-right">
     <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
@@ -253,14 +276,18 @@ let customerStatuses = {};
       <span class="icon">🚫</span> 死客戶管理
       <span class="sidebar-badge badge-gray" id="sb-dead">—</span>
     </div>
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[4],'todo')">
+      <span class="icon">📌</span> 待辦事項
+      <span class="sidebar-badge badge-orange" id="sb-todo">—</span>
+    </div>
   </div>
   <div class="sidebar-divider"></div>
   <div style="margin-bottom:6px">
     <div class="sidebar-label">地區</div>
-    <div class="sidebar-item"><span class="icon">📍</span> 板橋區 <span class="sidebar-badge badge-blue" id="sb-banqiao">—</span></div>
-    <div class="sidebar-item"><span class="icon">📍</span> 新莊區 <span class="sidebar-badge badge-blue" id="sb-xinzhuang">—</span></div>
-    <div class="sidebar-item"><span class="icon">📍</span> 三重區 <span class="sidebar-badge badge-blue" id="sb-sanchong">—</span></div>
-    <div class="sidebar-item"><span class="icon">📍</span> 中和區 <span class="sidebar-badge badge-blue" id="sb-zhonghe">—</span></div>
+    <div class="sidebar-item" onclick="filterByDistrict('板橋')"><span class="icon">📍</span> 板橋區 <span class="sidebar-badge badge-blue" id="sb-banqiao">—</span></div>
+    <div class="sidebar-item" onclick="filterByDistrict('新莊')"><span class="icon">📍</span> 新莊區 <span class="sidebar-badge badge-blue" id="sb-xinzhuang">—</span></div>
+    <div class="sidebar-item" onclick="filterByDistrict('三重')"><span class="icon">📍</span> 三重區 <span class="sidebar-badge badge-blue" id="sb-sanchong">—</span></div>
+    <div class="sidebar-item" onclick="filterByDistrict('中和')"><span class="icon">📍</span> 中和區 <span class="sidebar-badge badge-blue" id="sb-zhonghe">—</span></div>
   </div>
   <div class="sidebar-divider"></div>
   <button class="btn btn-ai" style="width:100%;justify-content:center;padding:11px" onclick="openScheduleModal()">
@@ -401,13 +428,17 @@ let customerStatuses = {};
 <!-- ══ 拜訪紀錄查詢 ══ -->
 <div class="page" id="page-visits">
   <div class="page-header">
-    <div><div class="page-title">📋 拜訪紀錄查詢</div><div class="page-sub">輸入藥局代號查詢歷史紀錄，並生成下次拜訪建議</div></div>
+    <div>
+      <div class="page-title">📋 拜訪紀錄查詢</div>
+      <div class="page-sub">依日期排序 · 最新紀錄優先顯示</div>
+    </div>
+    <button class="btn btn-ai btn-sm" onclick="analyzeAllTasks()" id="analyze-btn">✦ AI 分析待辦事項</button>
   </div>
   <div class="card" style="margin-bottom:18px">
     <div class="card-body">
       <div style="display:flex;gap:10px;align-items:center">
         <div class="ph-select-wrap" style="flex:1">
-          <input class="task-input" id="visit-search" placeholder="輸入藥局名稱或代號（如 C001）" autocomplete="off"
+          <input class="task-input" id="visit-search" placeholder="輸入藥局名稱或代號（如 C001）搜尋特定藥局..." autocomplete="off"
             oninput="phSearchVisit(this.value)" onfocus="phSearchVisit(this.value)">
           <div class="ph-dropdown" id="ph-dd-visit"></div>
         </div>
@@ -416,6 +447,38 @@ let customerStatuses = {};
       <div id="visit-result" style="margin-top:16px"></div>
     </div>
   </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">最近拜訪紀錄</div>
+      <span style="font-size:11px;color:var(--muted)" id="all-visits-info">依日期排序 · 從最近到最遠</span>
+    </div>
+    <div id="all-visits-list">
+      <div style="text-align:center;padding:32px;color:var(--muted)">
+        <span class="spinner" style="width:20px;height:20px;border-width:2px;display:inline-block;margin-bottom:10px"></span>
+        <div style="font-size:13px">載入最近拜訪紀錄中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 待辦清單 ══ -->
+<div class="page" id="page-todo">
+  <div class="page-header">
+    <div>
+      <div class="page-title">📌 待辦清單</div>
+      <div class="page-sub">AI 從拜訪紀錄自動提取的待辦事項</div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-ghost btn-sm" onclick="clearDoneTodos()">清除已完成</button>
+      <button class="btn btn-ai btn-sm" onclick="analyzeAllTasks()">✦ 重新 AI 分析</button>
+    </div>
+  </div>
+  <div id="todo-empty" style="text-align:center;padding:48px 24px;color:var(--muted)">
+    <div style="font-size:36px;margin-bottom:14px">✅</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:8px">暫無待辦事項</div>
+    <div style="font-size:12px">前往「拜訪紀錄」點「AI 分析待辦事項」自動生成，<br>或在查詢單一藥局後點「AI 分析」</div>
+  </div>
+  <div id="todo-list"></div>
 </div>
 
 </div><!-- /content -->
@@ -509,6 +572,7 @@ async function init() {
   } catch(e) { setDot('red', 'Worker 無回應'); }
   await loadCustomerStatuses();
   loadPharmacies();
+  loadAllVisits();
 }
 
 function setDot(color, txt) {
@@ -1018,14 +1082,16 @@ async function loadVisits() {
       ${dead?'<span class="dead-badge">🚫 死客戶</span>':''}
       ${dayBadge}
       <span style="font-size:12px;color:var(--muted)">共 ${d.visitCount} 筆紀錄</span>
-      <div style="margin-left:auto;display:flex;gap:8px">
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ai btn-sm" id="ph-analyze-btn" onclick="analyzePharmacyTasks('${pharmacyId}','${pharmacyName}',${JSON.stringify(visits).replace(/"/g,'&quot;')})">✦ AI 分析</button>
         <button class="btn btn-ai btn-sm" onclick="genNextScript('${pharmacyId}','${pharmacyName}')">✦ 下次話術</button>
         ${dead
           ?`<button class="btn btn-ghost btn-sm" style="border-color:#86efac;color:var(--green)" onclick="openUndeadModal('${pharmacyId}','${pharmacyName}')">♻️ 解除死客戶</button>`
           :`<button class="btn btn-danger btn-sm" onclick="openDeadModal('${pharmacyId}','${pharmacyName}')">🚫 標記死客戶</button>`
         }
       </div>
-    </div>`;
+    </div>
+    <div id="ph-task-suggest"></div>`;
     visits.forEach(v => {
       html += `<div class="visit-card">
         <div class="visit-date">${v.date||''} ${v.purpose?'· '+v.purpose:''}</div>
@@ -1099,10 +1165,234 @@ function modalSchedule() {
 
 function nav(tabEl, pageId) {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
   if (tabEl) tabEl.classList.add('active');
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + pageId).classList.add('active');
   if (pageId === 'pharmacies') loadPharmacies();
+  if (pageId === 'visits' && !allVisitsCache.length) loadAllVisits();
+  if (pageId === 'todo') renderActionItems();
+}
+
+// ══════════════════════════════
+// 地區篩選
+// ══════════════════════════════
+function filterByDistrict(district) {
+  nav(document.querySelectorAll('.nav-tab')[2], 'pharmacies');
+  setTimeout(() => {
+    document.getElementById('ph-kw').value = district;
+    document.getElementById('ph-filter').value = 'all';
+    renderTable();
+  }, 50);
+}
+
+// ══════════════════════════════
+// 所有拜訪紀錄時間軸
+// ══════════════════════════════
+async function loadAllVisits() {
+  try {
+    const d = await get('/all-visits');
+    allVisitsCache = d.visits || [];
+    renderAllVisits();
+  } catch(e) {
+    document.getElementById('all-visits-list').innerHTML =
+      `<div style="padding:20px;color:var(--red);font-size:13px">❌ 載入失敗：${e.message}</div>`;
+  }
+}
+
+function renderAllVisits() {
+  const el = document.getElementById('all-visits-list');
+  if (!el) return;
+  const info = document.getElementById('all-visits-info');
+  if (!allVisitsCache.length) {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">尚無拜訪紀錄</div>`;
+    return;
+  }
+  if (info) info.textContent = `共 ${allVisitsCache.length} 筆 · 依日期從最近到最遠`;
+
+  const typeIcon = { '例行拜訪':'🔄','新藥局':'🆕','送貨':'📦','代班':'👨‍⚕️' };
+  el.innerHTML = allVisitsCache.map(v => {
+    const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === v.pharmacyId);
+    const phName = ph ? (ph.name||ph['店名']||v.pharmacyId) : v.pharmacyId;
+    const purpose = v.purpose || '';
+    const icon = Object.entries(typeIcon).find(([k]) => purpose.includes(k))?.[1] || '📋';
+    const text = v.summary || v.content || '（無摘要）';
+    const hasAction = !!v.actionItems;
+    return `<div class="visit-tl-item" onclick="fillVisitSearch('${v.pharmacyId}','${phName}');loadVisits()">
+      <div class="visit-tl-date">${v.date}${purpose ? ' · ' + icon + ' ' + purpose : ''}</div>
+      <div class="visit-tl-ph">${phName} <span style="font-size:11px;color:var(--muted);font-weight:400">${v.pharmacyId}</span></div>
+      <div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5">${text.substring(0,120)}${text.length>120?'…':''}</div>
+      ${hasAction?`<div style="font-size:11px;color:var(--orange);margin-top:4px">📌 ${v.actionItems}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════
+// AI 分析待辦事項
+// ══════════════════════════════
+async function analyzeAllTasks() {
+  const btn = document.getElementById('analyze-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> AI 分析中...'; }
+  const visits = allVisitsCache.length ? allVisitsCache : [];
+  if (!visits.length) {
+    try { const d = await get('/all-visits'); allVisitsCache = d.visits || []; } catch {}
+  }
+  if (!allVisitsCache.length) {
+    toast('⚠️ 尚無拜訪紀錄可分析');
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析待辦事項'; }
+    return;
+  }
+  try {
+    const d = await post('/analyze-tasks', { visits: allVisitsCache.slice(0, 30) });
+    const newTasks = d.tasks || [];
+    if (newTasks.length) {
+      newTasks.forEach(t => addActionItem(t));
+      updateTodoBadge();
+      toast(`✅ AI 發現 ${newTasks.length} 個待辦事項，已加入待辦清單`);
+      nav(document.querySelectorAll('.nav-tab')[4], 'todo');
+    } else {
+      toast('✅ AI 分析完成：目前無待辦事項');
+    }
+  } catch(e) {
+    toast('❌ 分析失敗：' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析待辦事項'; }
+  }
+}
+
+// 單一藥局 AI 分析（在拜訪紀錄搜尋結果中使用）
+async function analyzePharmacyTasks(pharmacyId, pharmacyName, visits) {
+  const btn = document.getElementById('ph-analyze-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 分析中...'; }
+  try {
+    const mapped = visits.map(v => ({ ...v, pharmacyId: pharmacyName }));
+    const d = await post('/analyze-tasks', { visits: mapped });
+    const newTasks = d.tasks || [];
+    if (newTasks.length) {
+      const suggestEl = document.getElementById('ph-task-suggest');
+      if (suggestEl) {
+        suggestEl.innerHTML = `
+          <div style="margin-top:14px;background:var(--orange-light);border:1px solid #fcd34d;border-radius:var(--radius-sm);padding:14px 16px">
+            <div style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">📌 AI 偵測到 ${newTasks.length} 個待辦事項</div>
+            ${newTasks.map((t,i) => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span style="font-size:11px;padding:2px 8px;border-radius:10px" class="todo-priority-${t.priority||'medium'}">${t.priority==='high'?'⚠️ 緊急':t.priority==='low'?'低':'一般'}</span>
+              <span style="font-size:13px;flex:1">${t.task}</span>
+              <button class="btn btn-ghost btn-sm" onclick="addActionItemFromSuggest(${i},'${pharmacyId}')">加入清單</button>
+            </div>`).join('')}
+            <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="addAllSuggestedTasks()">全部加入待辦清單</button>
+          </div>`;
+        window._suggestedTasks = newTasks;
+      }
+    } else {
+      toast('✅ 此藥局無待辦事項');
+    }
+  } catch(e) {
+    toast('❌ 分析失敗：' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析'; }
+  }
+}
+
+function addActionItemFromSuggest(idx, pharmacyId) {
+  const t = (window._suggestedTasks||[])[idx];
+  if (t) { addActionItem({ ...t, pharmacyId }); updateTodoBadge(); toast('✅ 已加入待辦清單'); }
+}
+
+function addAllSuggestedTasks() {
+  (window._suggestedTasks||[]).forEach(t => addActionItem(t));
+  updateTodoBadge();
+  window._suggestedTasks = [];
+  const el = document.getElementById('ph-task-suggest');
+  if (el) el.innerHTML = `<div style="color:var(--green);font-size:13px;padding:8px 0">✅ 已全部加入待辦清單</div>`;
+  toast('✅ 已全部加入待辦清單');
+}
+
+// ══════════════════════════════
+// 待辦清單管理
+// ══════════════════════════════
+function addActionItem(item) {
+  const existing = actionItems.find(a => a.task === item.task && !a.done);
+  if (existing) return;
+  actionItems.push({
+    id: Date.now() + Math.random(),
+    task: item.task || '',
+    type: item.type || 'other',
+    priority: item.priority || 'medium',
+    pharmacyId: item.pharmacyId || '',
+    done: false,
+    createdAt: new Date().toLocaleDateString('zh-TW')
+  });
+}
+
+function updateTodoBadge() {
+  const count = actionItems.filter(a => !a.done).length;
+  const el = document.getElementById('sb-todo');
+  if (el) el.textContent = count || '—';
+}
+
+function toggleTodo(id) {
+  const item = actionItems.find(a => a.id === id);
+  if (item) { item.done = !item.done; renderActionItems(); updateTodoBadge(); }
+}
+
+function deleteTodo(id) {
+  actionItems = actionItems.filter(a => a.id !== id);
+  renderActionItems();
+  updateTodoBadge();
+}
+
+function clearDoneTodos() {
+  actionItems = actionItems.filter(a => !a.done);
+  renderActionItems();
+  updateTodoBadge();
+  toast('✅ 已清除完成項目');
+}
+
+function renderActionItems() {
+  const listEl = document.getElementById('todo-list');
+  const emptyEl = document.getElementById('todo-empty');
+  if (!listEl) return;
+
+  if (!actionItems.length) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const typeInfo = {
+    return_receipt: ['📋', '歸還紅單'],
+    get_receipt:    ['📥', '取回紅單'],
+    revisit:        ['📅', '安排拜訪'],
+    prepare:        ['🎒', '準備物品'],
+    follow_up:      ['🔔', '追蹤確認'],
+    other:          ['📌', '其他']
+  };
+
+  const sorted = [...actionItems].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const p = { high:0, medium:1, low:2 };
+    return (p[a.priority]||1) - (p[b.priority]||1);
+  });
+
+  listEl.innerHTML = sorted.map(item => {
+    const [icon, label] = typeInfo[item.type] || typeInfo.other;
+    const checked = item.done ? 'checked' : '';
+    return `<div class="todo-item ${item.done?'done':''}">
+      <div class="todo-check ${checked}" onclick="toggleTodo(${item.id})">
+        ${item.done ? '✓' : ''}
+      </div>
+      <div style="flex:1">
+        <div class="todo-text">${icon} ${item.task}</div>
+        <div class="todo-source">
+          <span style="padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700" class="todo-priority-${item.priority}">${item.priority==='high'?'⚠️ 緊急':item.priority==='low'?'低優先':'一般'}</span>
+          &nbsp;${label} · ${item.createdAt}
+          ${item.pharmacyId ? ` · <span style="color:var(--accent)">${item.pharmacyId}</span>` : ''}
+        </div>
+      </div>
+      <button class="del-btn" onclick="deleteTodo(${item.id})">✕</button>
+    </div>`;
+  }).join('');
 }
 
 function exportRoute() {
