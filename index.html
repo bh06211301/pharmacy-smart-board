@@ -1014,11 +1014,15 @@ async function fetchScript(idx) {
     }
   } catch {}
   try {
+    let visitHistory = [];
+    try { const vd = await get('/visits/' + encodeURIComponent(r.id||r.pharmacyId||'')); visitHistory = vd.visits || []; } catch {}
     const d = await post('/generate-script', {
       pharmacyId: r.id||r.pharmacyId||'', pharmacyName: r.name, pharmacist: r.pharmacist||'',
       lastVisitDays, lastVisitNote: lastNote,
+      recentVisits: visitHistory.slice(0, 5),
       visitPurpose: r.isNew?'新藥局首訪':r.isDad?'爸爸老客戶維護':r.hasDelivery?'送貨+拜訪':'例行拜訪',
-      recentOrders: []
+      recentOrders: [],
+      chatTopics: r.chatTopics||'', background: r.background||'', profileNote: r.profileNote||''
     });
     lastScript = d.script || '';
     panel.innerHTML = `
@@ -1120,11 +1124,18 @@ async function genNextScript(id, name, lastVisit) {
     </div>`);
   }
   try {
-    const v = lastVisit || {};
+    let allVisits = [];
+    try { const vd = await get('/visits/' + encodeURIComponent(id)); allVisits = vd.visits || []; } catch {}
+    const latest = allVisits[0] || lastVisit || {};
+    const ph = pharmacies.find(p => p.id === id) || {};
     const d = await post('/generate-script', {
       pharmacyId: id, pharmacyName: name,
-      lastVisitNote: v.summary||v.content||'',
-      visitPurpose: '依歷史紀錄規劃下次拜訪', recentOrders: []
+      pharmacist: latest.pharmacist || ph.pharmacist || '',
+      lastVisitDays: null,
+      lastVisitNote: latest.summary || latest.content || '',
+      recentVisits: allVisits.slice(0, 5),
+      visitPurpose: '依歷史紀錄規劃下次拜訪', recentOrders: [],
+      chatTopics: ph.chatTopics||'', background: ph.background||'', profileNote: ph.profileNote||''
     });
     lastScript = d.script || '';
     document.getElementById('next-script-box').innerHTML = `
