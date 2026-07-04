@@ -1,0 +1,8 @@
+# 本地開發設定（含 API Key，不上傳 GitHub）
+CLAUDE.md
+.env
+*.local
+
+# OS 暫存
+.DS_Store
+Thumbs.db
