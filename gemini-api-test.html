@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gemini API 測試 v2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; background: #f5f6fa; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { background: #fff; border-radius: 16px; padding: 32px; width: 100%; max-width: 560px; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+  h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #667085; margin-bottom: 22px; }
+  label { font-size: 12px; font-weight: 600; color: #344054; display: block; margin-bottom: 5px; }
+  input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #d0d5dd; border-radius: 8px; font-size: 13px; outline: none; margin-bottom: 14px; transition: border-color .15s; }
+  input:focus, select:focus, textarea:focus { border-color: #3b6ef5; box-shadow: 0 0 0 3px rgba(59,110,245,.1); }
+  textarea { resize: vertical; min-height: 72px; font-family: inherit; }
+  .btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #3b6ef5, #7c3aed); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity .15s; }
+  .btn:hover { opacity: .9; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .result { margin-top: 16px; padding: 14px 16px; border-radius: 8px; font-size: 13px; line-height: 1.6; display: none; white-space: pre-wrap; }
+  .success { background: #ecfdf5; border: 1px solid #6ee7b7; color: #065f46; }
+  .error { background: #fef3f2; border: 1px solid #fca5a5; color: #991b1b; }
+  .loading { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }
+  .tip { font-size: 11px; color: #98a2b3; margin-top: -10px; margin-bottom: 14px; }
+  .badge { display: inline-block; background: #fef9c3; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; font-size: 11px; font-weight: 600; padding: 3px 10px; margin-bottom: 16px; }
+  .next { display:none; margin-top:14px; padding:14px; background:#eff6ff; border-radius:8px; font-size:13px; color:#1e40af; border:1px solid #93c5fd; }
+  code { background:#dbeafe; padding:2px 6px; border-radius:4px; font-size:12px; }
+  .divider { border:none; border-top:1px solid #f0f2f8; margin:18px 0; }
+  .all-btn { display:flex; gap:8px; margin-bottom:14px; }
+  .model-btn { flex:1; padding:8px; border:1px solid #d0d5dd; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; background:#fff; color:#344054; transition:all .15s; text-align:center; }
+  .model-btn.active { border-color:#3b6ef5; background:#eff6ff; color:#3b6ef5; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>🔑 Gemini API 測試工具 v2</h2>
+  <div class="sub">支援 AQ. 和 AIzaSy 兩種格式，自動選最新模型</div>
+  <div class="badge">⚡ 根據 Reddit 修復方案更新 — 改用 gemini-2.5-flash</div>
+
+  <label>你的 API Key（AQ. 或 AIzaSy 開頭都可以貼）</label>
+  <input type="text" id="apiKey" placeholder="AQ.Ab8RN... 或 AIzaSy..." autocomplete="off">
+
+  <label>選擇模型（建議從上往下試）</label>
+  <div class="all-btn">
+    <div class="model-btn active" onclick="selectModel(this,'gemini-2.5-flash')">2.5-flash<br><span style="font-size:10px;color:#667085">推薦</span></div>
+    <div class="model-btn" onclick="selectModel(this,'gemini-2.0-flash')">2.0-flash<br><span style="font-size:10px;color:#667085">備用</span></div>
+    <div class="model-btn" onclick="selectModel(this,'gemini-1.5-flash')">1.5-flash<br><span style="font-size:10px;color:#667085">舊版</span></div>
+    <div class="model-btn" onclick="selectModel(this,'gemini-1.5-pro')">1.5-pro<br><span style="font-size:10px;color:#667085">精準</span></div>
+  </div>
+  <input type="hidden" id="model" value="gemini-2.5-flash">
+
+  <label>測試訊息</label>
+  <textarea id="prompt">你好！請用繁體中文回覆「測試成功！Gemini API 連線正常，模型可以使用。」</textarea>
+
+  <button class="btn" id="testBtn" onclick="testAPI()">✦ 開始測試</button>
+  <div style="margin-top:8px;text-align:center">
+    <span style="font-size:12px;color:#98a2b3;cursor:pointer" onclick="testAll()">▶ 四個模型全部試一遍</span>
+  </div>
+
+  <div class="result" id="result"></div>
+  <div class="next" id="nextStep">
+    <strong>🎉 成功！記下這個設定：</strong><br><br>
+    模型：<code id="successModel"></code><br>
+    下一步把 Key 存到 Cloudflare Worker 環境變數<br>
+    名稱：<code>GEMINI_API_KEY</code>
+  </div>
+</div>
+
+<script>
+let selectedModel = 'gemini-2.5-flash';
+
+function selectModel(el, model) {
+  document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedModel = model;
+}
+
+async function callGemini(key, model, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const t0 = Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 200, responseMimeType: 'text/plain' }
+    })
+  });
+  const elapsed = Date.now() - t0;
+  const data = await res.json();
+  return { res, data, elapsed };
+}
+
+async function testAPI() {
+  const key = document.getElementById('apiKey').value.trim();
+  const prompt = document.getElementById('prompt').value.trim();
+  const btn = document.getElementById('testBtn');
+  const resultEl = document.getElementById('result');
+  const nextEl = document.getElementById('nextStep');
+
+  if (!key) { show('error', '❌ 請先貼上 API Key'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '測試中...';
+  nextEl.style.display = 'none';
+  show('loading', `⏳ 正在呼叫 ${selectedModel}，請稍候...`);
+
+  try {
+    const { res, data, elapsed } = await callGemini(key, selectedModel, prompt);
+    if (!res.ok) {
+      const msg = data?.error?.message || '未知錯誤';
+      const code = data?.error?.code || res.status;
+      let tip = getTip(code, msg);
+      show('error', `❌ 錯誤 ${code}：${msg}${tip}`);
+    } else {
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（無回應）';
+      show('success', `✅ 成功！模型：${selectedModel}（${elapsed}ms）\n\nGemini 回覆：\n${text}`);
+      document.getElementById('successModel').textContent = selectedModel;
+      nextEl.style.display = 'block';
+    }
+  } catch(e) {
+    show('error', `❌ 網路錯誤：${e.message}`);
+  }
+  btn.disabled = false;
+  btn.textContent = '✦ 開始測試';
+}
+
+async function testAll() {
+  const key = document.getElementById('apiKey').value.trim();
+  const prompt = document.getElementById('prompt').value.trim();
+  if (!key) { show('error', '❌ 請先貼上 API Key'); return; }
+
+  const models = ['gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-flash','gemini-1.5-pro'];
+  show('loading', '⏳ 正在依序測試全部模型...\n');
+  document.getElementById('nextStep').style.display = 'none';
+
+  let log = '';
+  for (const m of models) {
+    log += `測試 ${m}... `;
+    show('loading', `⏳ 正在測試 ${m}...`);
+    try {
+      const { res, data, elapsed } = await callGemini(key, m, prompt);
+      if (res.ok) {
+        log += `✅ 成功 (${elapsed}ms)\n`;
+        show('success', log + `\n🎉 ${m} 可以用！`);
+        document.getElementById('successModel').textContent = m;
+        document.getElementById('nextStep').style.display = 'block';
+        return;
+      } else {
+        const code = data?.error?.code || res.status;
+        const msg = data?.error?.message?.substring(0,60) || '錯誤';
+        log += `❌ ${code}: ${msg}\n`;
+        show('loading', log);
+      }
+    } catch(e) {
+      log += `❌ 網路錯誤\n`;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  show('error', log + '\n⚠️ 全部模型都失敗，請確認 Key 是否有效');
+}
+
+function getTip(code, msg) {
+  if (code === 400 && msg.includes('API_KEY_INVALID')) return '\n\n💡 Key 無效或過期';
+  if (code === 400 && msg.includes('OAuth')) return '\n\n💡 AQ. Key 可能需要改用不同的認證方式，建議試試全部模型';
+  if (code === 401) return '\n\n💡 認證失敗，Key 可能格式不對';
+  if (code === 403) return '\n\n💡 API 未啟用或無權限';
+  if (code === 429) return '\n\n💡 超過額度或請求太頻繁';
+  if (code === 503) return '\n\n💡 伺服器過載，稍後再試';
+  return '';
+}
+
+function show(type, msg) {
+  const el = document.getElementById('result');
+  el.className = `result ${type}`;
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+
+document.getElementById('apiKey').addEventListener('keydown', e => {
+  if (e.key === 'Enter') testAPI();
+});
+</script>
+</body>
+</html>
