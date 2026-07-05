@@ -233,6 +233,68 @@ body{
 .nav-btn .ni{font-size:22px}
 .nav-btn.active{color:var(--accent)}
 
+/* ── BRIEF SHEET ── */
+.brief-overlay-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);
+  z-index:200;display:none;
+}
+.brief-overlay-bg.open{display:block}
+.brief-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:300;max-height:88vh;overflow-y:auto;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .35s cubic-bezier(.32,0,.67,0);
+}
+.brief-sheet.open{transform:translateX(-50%) translateY(0)}
+.brief-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 16px;
+}
+.brief-header{
+  display:flex;align-items:center;gap:12px;margin-bottom:14px;
+}
+.brief-char{font-size:40px;line-height:1;flex-shrink:0;user-select:none}
+.brief-header-meta{flex:1;min-width:0}
+.brief-name{font-size:17px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brief-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.brief-close{
+  flex-shrink:0;background:var(--bg);border:none;
+  width:30px;height:30px;border-radius:50%;
+  font-size:14px;cursor:pointer;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+}
+.nav-big-btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  background:linear-gradient(135deg,#10b981,#059669);
+  color:#fff;font-size:15px;font-weight:700;
+  padding:14px;border-radius:12px;
+  text-decoration:none;margin-bottom:14px;
+}
+.brief-ai-section{
+  background:#f8f9ff;border:1px solid var(--border);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px;
+}
+.brief-ai-label{
+  font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;
+}
+.brief-ai-text{font-size:14px;color:var(--text);line-height:1.6}
+.brief-loading{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+.brief-checkin-btn{
+  width:100%;padding:16px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;
+}
+.brief-checkin-btn:disabled{opacity:.45;cursor:not-allowed}
+.brief-history-link{
+  display:block;text-align:center;color:var(--muted);
+  font-size:13px;text-decoration:none;margin-top:12px;padding:8px;
+}
+
 /* ── TOAST ── */
 .toast{
   position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(16px);
@@ -347,6 +409,34 @@ body{
   </a>
 </div>
 
+<!-- BRIEF SHEET -->
+<div class="brief-overlay-bg" id="brief-bg" onclick="closeBrief()"></div>
+<div class="brief-sheet" id="brief-sheet">
+  <div class="brief-handle"></div>
+  <div class="brief-header">
+    <div class="brief-char" id="brief-char">🦊</div>
+    <div class="brief-header-meta">
+      <div class="brief-name" id="brief-ph-name">藥局名稱</div>
+      <div class="brief-sub" id="brief-ph-sub">—</div>
+    </div>
+    <button class="brief-close" onclick="closeBrief()">✕</button>
+  </div>
+  <a class="nav-big-btn" id="brief-nav-link" href="#" target="_blank">
+    🗺️ 開始導航
+  </a>
+  <div id="brief-ai-wrap">
+    <div class="brief-loading">
+      <div class="spinner" style="margin:0 auto 8px"></div>
+      <div>AI 分析中...</div>
+    </div>
+  </div>
+  <button class="brief-checkin-btn" id="brief-checkin-btn"
+          onclick="doBriefCheckin()" disabled>
+    ✅ 已到達，打卡得分
+  </button>
+  <a class="brief-history-link" href="visit.html">📋 查看完整拜訪日誌</a>
+</div>
+
 <!-- CHECK-IN OVERLAY -->
 <div class="checkin-overlay" id="ov">
   <div class="ov-char" id="ov-char">🦊</div>
@@ -363,7 +453,8 @@ body{
 <div class="toast" id="toast"></div>
 
 <script>
-const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+const WORKER       = 'https://still-meadow-0efd.bh06211301.workers.dev';
+const VISIT_WORKER = 'https://weathered-hall-88a0.bh06211301.workers.dev';
 let cards = [];
 let today = null;
 let streak = null;
@@ -502,7 +593,7 @@ function buildVisitMap(allVisits) {
       }
       if (gaps.length) avgGap = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
     }
-    result[id] = { avgGap, lastVisit, lastEmotion: analyzeEmotion(lastVisit) };
+    result[id] = { avgGap, lastVisit, lastEmotion: analyzeEmotion(lastVisit), recentVisits: sorted.slice(0, 5) };
   }
   return result;
 }
@@ -556,6 +647,122 @@ function calcPts(daysSince, neverVisited, hasPending) {
   return p;
 }
 
+// ── AI BRIEF SHEET ────────────────────────────────────────────
+let currentBriefId = null;
+
+async function openBrief(id) {
+  const ph = cards.find(p => p.id === id);
+  if (!ph) return;
+  currentBriefId = id;
+
+  const ct = charType(ph.daysSince, ph.totalAmount);
+  document.getElementById('brief-char').textContent = ct.emoji;
+  document.getElementById('brief-ph-name').textContent = ph.name;
+  document.getElementById('brief-ph-sub').textContent =
+    [ph.district, ph.daysSince !== null ? `${ph.daysSince} 天前拜訪` : '從未拜訪'].filter(Boolean).join(' · ');
+
+  document.getElementById('brief-nav-link').href =
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ph.name + (ph.district ? ' ' + ph.district : ''))}`;
+
+  document.getElementById('brief-ai-wrap').innerHTML =
+    `<div class="brief-loading"><div class="spinner" style="margin:0 auto 8px"></div><div>AI 分析中...</div></div>`;
+
+  const btn = document.getElementById('brief-checkin-btn');
+  btn.disabled = true;
+
+  document.getElementById('brief-bg').classList.add('open');
+  document.getElementById('brief-sheet').classList.add('open');
+  if (navigator.vibrate) navigator.vibrate(20);
+
+  try {
+    const brief = await fetchAIBrief(ph);
+    renderBrief(brief);
+  } catch (e) {
+    document.getElementById('brief-ai-wrap').innerHTML =
+      `<div class="brief-loading" style="color:var(--red)">⚠️ AI 分析失敗，可直接打卡</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeBrief() {
+  document.getElementById('brief-bg').classList.remove('open');
+  document.getElementById('brief-sheet').classList.remove('open');
+  currentBriefId = null;
+}
+
+function doBriefCheckin() {
+  const id = currentBriefId;
+  closeBrief();
+  if (id) setTimeout(() => doCheckin(id), 320);
+}
+
+async function fetchAIBrief(ph) {
+  const visits = ph.visitStats?.recentVisits || [];
+
+  if (!visits.length) {
+    return {
+      last_visit: '尚無拜訪紀錄',
+      pending: '無待追蹤事項',
+      profile: '新客戶，可先自我介紹建立關係',
+      suggestion: '了解藥局特性、主要藥師姓名與需求方向'
+    };
+  }
+
+  const historyText = visits.map((v, i) => {
+    const parts = [v.purpose, v.summary, v.content].filter(Boolean).join('；');
+    const actions = v.actionItems ? `待辦：${v.actionItems}` : '';
+    return `[${i + 1}] ${v.date || '—'}：${parts} ${actions}`.trim();
+  }).join('\n');
+
+  const today = new Date().toLocaleDateString('zh-TW');
+  const systemPrompt = `你是醫藥業務的智慧助理，現在要幫業務在拜訪「${ph.name}」之前做準備。
+今天日期：${today}
+以下是這家藥局的歷史拜訪紀錄（最近 ${visits.length} 筆）：
+
+${historyText}
+
+請整理四個區塊，每區 1-2 句，簡潔有力：
+1. 上次拜訪：日期、主要內容、結果
+2. 未完成追蹤：遺留待辦，若無說「無待追蹤」
+3. 客戶特徵：藥師偏好、關係溫度
+4. 今次建議切入點：這次怎麼開場或推進
+
+只輸出純 JSON：{"last_visit":"...","pending":"...","profile":"...","suggestion":"..."}`;
+
+  const res = await fetch(VISIT_WORKER, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: '請整理拜訪前提醒。' }
+      ]
+    })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const raw = data.text || data.choices?.[0]?.message?.content
+    || data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const match = raw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : raw.trim());
+}
+
+function renderBrief(brief) {
+  const sections = [
+    { icon: '🗓', label: '上次拜訪',    key: 'last_visit' },
+    { icon: '⚠️', label: '未完成追蹤', key: 'pending' },
+    { icon: '👤', label: '客戶特徵',    key: 'profile' },
+    { icon: '💡', label: '建議切入點', key: 'suggestion' },
+  ];
+  document.getElementById('brief-ai-wrap').innerHTML =
+    sections.map(s => `
+      <div class="brief-ai-section">
+        <div class="brief-ai-label">${s.icon} ${s.label}</div>
+        <div class="brief-ai-text">${(brief[s.key] || '—').replace(/\n/g, '<br>')}</div>
+      </div>`).join('');
+}
+
 // ── RENDER ────────────────────────────────────────────────────
 function renderCard(ph) {
   const isDone = today.done.includes(ph.id);
@@ -604,8 +811,8 @@ function renderCard(ph) {
       ${ph.hasPending ? '<div class="cs-item">📌 <strong>有待追蹤</strong></div>' : ''}
     </div>
     ${!isDone ? `
-    <button class="checkin-btn" onclick="doCheckin('${ph.id}')">
-      打卡完成
+    <button class="checkin-btn" onclick="openBrief('${ph.id}')">
+      📍 前往 + AI提醒
       <span class="pts-tag">+${pts} 分</span>
     </button>` : ''}
   </div>`;
