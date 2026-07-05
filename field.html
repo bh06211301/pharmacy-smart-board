@@ -91,7 +91,13 @@ body{
   display:flex;align-items:flex-start;gap:9px;
 }
 .mood-emoji{font-size:26px;flex-shrink:0;margin-top:1px;user-select:none}
+.mood-content{flex:1;min-width:0}
 .mood-text{font-size:14px;color:var(--text);line-height:1.55;font-style:italic}
+.mood-meta{font-size:11px;color:var(--muted);margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.emotion-flag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;display:inline-flex;align-items:center;gap:3px}
+.emotion-flag.neg{background:#fef2f2;color:#dc2626}
+.emotion-flag.warn{background:#fffbeb;color:#d97706}
+.emotion-flag.pos{background:#f0fdf4;color:#059669}
 
 /* ── CARD STATS ── */
 .card-stats{display:flex;gap:18px;margin-bottom:14px}
@@ -457,6 +463,72 @@ function charMood(daysSince) {
   return { emoji: '😶', say: '...（沉默）', after: '...你終於來了' };
 }
 
+// ── EMOTION ANALYSIS ─────────────────────────────────────────
+function analyzeEmotion(visit) {
+  if (!visit) return { sentiment: 'neutral', flag: null, emoji: '😐' };
+  const tags = visit.tags || [];
+  const text = [(visit.content || ''), (visit.summary || '')].join(' ');
+  if (tags.includes('客訴')) return { sentiment: 'negative', flag: '上次有客訴', emoji: '😟' };
+  if (tags.includes('缺貨')) return { sentiment: 'warning', flag: '上次缺貨', emoji: '⚠️' };
+  if (tags.includes('競品')) return { sentiment: 'warning', flag: '有競品壓力', emoji: '🟠' };
+  if (tags.includes('滿意')) return { sentiment: 'positive', flag: null, emoji: '😊' };
+  const neg = ['態度冷','婉拒','不需要','不滿','拒絕','沒興趣','冷漠','抱怨','不感興趣'];
+  const pos = ['很好聊','感謝','有興趣','接受','下次帶','開心','好聊','推薦','願意'];
+  if (neg.some(k => text.includes(k))) return { sentiment: 'negative', flag: '上次互動不順', emoji: '😟' };
+  if (pos.some(k => text.includes(k))) return { sentiment: 'positive', flag: null, emoji: '😊' };
+  return { sentiment: 'neutral', flag: null, emoji: '😐' };
+}
+
+function buildVisitMap(allVisits) {
+  const grouped = {};
+  for (const v of allVisits) {
+    if (!v.pharmacyId) continue;
+    if (!grouped[v.pharmacyId]) grouped[v.pharmacyId] = [];
+    grouped[v.pharmacyId].push(v);
+  }
+  const result = {};
+  for (const [id, visits] of Object.entries(grouped)) {
+    const sorted = visits
+      .filter(v => v.date)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!sorted.length) continue;
+    const lastVisit = sorted[0];
+    let avgGap = null;
+    if (sorted.length >= 2) {
+      const gaps = [];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const diff = Math.round((new Date(sorted[i].date) - new Date(sorted[i+1].date)) / 86400000);
+        if (diff > 0) gaps.push(diff);
+      }
+      if (gaps.length) avgGap = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
+    }
+    result[id] = { avgGap, lastVisit, lastEmotion: analyzeEmotion(lastVisit) };
+  }
+  return result;
+}
+
+function smartMood(ph, vs) {
+  const d = ph.daysSince;
+  if (!vs || !vs.avgGap || d === null || d === undefined) return charMood(d);
+  const ratio = d / vs.avgGap;
+  const emo = vs.lastEmotion;
+  const isNeg = emo?.sentiment === 'negative' || emo?.sentiment === 'warning';
+  if (ratio < 1) {
+    if (isNeg) return { emoji:'⚠️', say:`上次${emo.flag||'有些問題'}，這次要好好處理`, after:'謝謝你特地來修補關係！', ratioLabel:`準時 · 需修補`, healthColor:'#f59e0b' };
+    return { emoji:'😊', say:'最近有規律來看我，感覺很好！', after:'你真的很用心，謝謝！', ratioLabel:`狀態良好`, healthColor:'#10b981' };
+  }
+  if (ratio < 1.5) {
+    if (isNeg) return { emoji:'😬', say:`有點晚了，而且${emo.flag||'上次還有問題'}`, after:'總算來了，我們把問題說清楚吧', ratioLabel:`逾期 ${ratio.toFixed(1)}x · 需處理`, healthColor:'#f97316' };
+    return { emoji:'🥺', say:'有點想你了...不過上次感覺還不錯', after:'你回來了！感情還在的～', ratioLabel:`逾期 ${ratio.toFixed(1)}x`, healthColor:'#f59e0b' };
+  }
+  if (ratio < 2) {
+    if (isNeg) return { emoji:'😰', say:`拖太久了！${emo.flag||'上次還沒處理好'}`, after:'謝謝你終於來了，一起把問題解決吧', ratioLabel:`嚴重逾期 ${ratio.toFixed(1)}x`, healthColor:'#ef4444' };
+    return { emoji:'😤', say:`快兩個週期沒來了，你去哪啦！`, after:'好啦算你及時趕到，感情底子還在', ratioLabel:`逾期 ${ratio.toFixed(1)}x`, healthColor:'#f97316' };
+  }
+  if (isNeg) return { emoji:'🔴', say:`緊急！逾期 ${ratio.toFixed(1)} 倍週期，${emo.flag||'問題還在'}`, after:'謝謝你終於來了，先處理問題', ratioLabel:`緊急 ${ratio.toFixed(1)}x`, healthColor:'#991b1b' };
+  return { emoji:'😱', say:`${ratio.toFixed(1)} 個週期沒見了！雖然上次感覺還行`, after:'你終於想起我了！感情還可以救！', ratioLabel:`嚴重逾期 ${ratio.toFixed(1)}x`, healthColor:'#dc2626' };
+}
+
 function hearts(daysSince) {
   const d = daysSince;
   if (d === null || d === undefined) return 0;
@@ -487,14 +559,23 @@ function calcPts(daysSince, neverVisited, hasPending) {
 // ── RENDER ────────────────────────────────────────────────────
 function renderCard(ph) {
   const isDone = today.done.includes(ph.id);
-  const ct = charType(ph.daysSince, ph.totalAmount);
-  const mood = charMood(ph.daysSince);
-  const h = hearts(ph.daysSince);
-  const pts = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
+  const ct   = charType(ph.daysSince, ph.totalAmount);
+  const mood = smartMood(ph, ph.visitStats);
+  const emo  = ph.visitStats?.lastEmotion;
+  const h    = hearts(ph.daysSince);
+  const pts  = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
   const dText = ph.daysSince !== null && ph.daysSince !== undefined
     ? `${ph.daysSince} 天前` : '從未拜訪';
   const aText = ph.totalAmount
     ? `$${(ph.totalAmount / 1000).toFixed(0)}k` : '—';
+
+  const emoClass = emo?.sentiment === 'negative' ? 'neg'
+                 : emo?.sentiment === 'warning'  ? 'warn' : 'pos';
+  const metaHtml = (mood.ratioLabel || emo?.flag) ? `
+    <div class="mood-meta">
+      ${mood.ratioLabel ? `<span style="color:${mood.healthColor||'var(--muted)'}">● ${mood.ratioLabel}</span>` : ''}
+      ${emo?.flag ? `<span class="emotion-flag ${emoClass}">${emo.emoji} ${emo.flag}</span>` : ''}
+    </div>` : '';
 
   return `
   <div class="ph-card${isDone ? ' done' : ''}" id="c-${ph.id}"
@@ -512,7 +593,10 @@ function renderCard(ph) {
     </div>
     <div class="mood-bubble">
       <div class="mood-emoji">${mood.emoji}</div>
-      <div class="mood-text">「${mood.say}」</div>
+      <div class="mood-content">
+        <div class="mood-text">「${mood.say}」</div>
+        ${metaHtml}
+      </div>
     </div>
     <div class="card-stats">
       <div class="cs-item">📅 <strong>${dText}</strong></div>
@@ -570,9 +654,9 @@ function doCheckin(id) {
   const ph = cards.find(p => p.id === id);
   if (!ph) return;
 
-  const ct = charType(ph.daysSince, ph.totalAmount);
-  const mood = charMood(ph.daysSince);
-  const pts = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
+  const ct   = charType(ph.daysSince, ph.totalAmount);
+  const mood = smartMood(ph, ph.visitStats);
+  const pts  = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
   const newH = Math.min(hearts(ph.daysSince) + 1, 5);
 
   document.getElementById('ov-char').textContent = ct.emoji;
@@ -627,14 +711,21 @@ function showToast(msg) {
 // ── LOAD DATA ─────────────────────────────────────────────────
 async function loadData() {
   try {
-    const [recRes, stRes] = await Promise.all([
+    const [recRes, stRes, visitsRes] = await Promise.all([
       fetch(WORKER + '/recommend-today'),
-      fetch(WORKER + '/customer-status').catch(() => null)
+      fetch(WORKER + '/customer-status').catch(() => null),
+      fetch(WORKER + '/all-visits').catch(() => null),
     ]);
 
-    const recJson = await recRes.json();
-    const stJson  = stRes ? await stRes.json().catch(() => ({})) : {};
-    const statuses = stJson.statuses || {};
+    const recJson    = await recRes.json();
+    const stJson     = stRes     ? await stRes.json().catch(() => ({})) : {};
+    const visitsJson = visitsRes ? await visitsRes.json().catch(() => []) : [];
+
+    const statuses  = stJson.statuses || {};
+    const allVisits = Array.isArray(visitsJson)
+      ? visitsJson
+      : (visitsJson.visits || visitsJson.records || []);
+    const visitMap  = buildVisitMap(allVisits);
 
     const recs = recJson.recommended || recJson.recommendations || recJson || [];
 
@@ -649,6 +740,7 @@ async function loadData() {
         totalAmount: p.totalAmount || 0,
         hasPending:  p.hasPending || false,
         neverVisited:p.neverVisited || false,
+        visitStats:  visitMap[p.id] || null,
       }));
 
     render();
