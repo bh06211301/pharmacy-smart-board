@@ -1614,7 +1614,8 @@ function renderDayPanel(ds) {
           const raw     = v.content    || '';
           const aiSum   = v.summary    || '';
           const ai      = v.actionItems|| '';
-          const hasAny  = raw || aiSum || ai;
+          const pp      = v.painPoints || '';
+          const hasAny  = raw || aiSum || ai || pp;
           return `
           <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:${hasAny?'8px':'0'}">
@@ -1622,13 +1623,17 @@ function renderDayPanel(ds) {
               <b style="font-size:13px">${phName}</b>
               ${v.purpose ? `<span style="color:var(--muted);font-size:11px;margin-left:4px">${v.purpose}</span>` : ''}
             </div>
-            ${raw   ? `<div style="margin-bottom:${aiSum||ai?'7px':'0'}">
+            ${raw   ? `<div style="margin-bottom:${aiSum||pp||ai?'7px':'0'}">
                          <span style="font-size:10px;font-weight:700;color:var(--muted2);letter-spacing:.4px">原始紀錄</span>
                          <div style="font-size:12px;color:var(--text);line-height:1.6;margin-top:3px;white-space:pre-wrap">${raw}</div>
                        </div>` : ''}
-            ${aiSum ? `<div style="margin-bottom:${ai?'7px':'0'}">
+            ${aiSum ? `<div style="margin-bottom:${pp||ai?'7px':'0'}">
                          <span style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.4px">AI 摘要</span>
                          <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-top:3px">${aiSum}</div>
+                       </div>` : ''}
+            ${pp    ? `<div style="margin-bottom:${ai?'7px':'0'}">
+                         <span style="font-size:10px;font-weight:700;color:var(--teal);letter-spacing:.4px">🔍 Pain Points</span>
+                         <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-top:3px">${pp}</div>
                        </div>` : ''}
             ${ai    ? `<div style="font-size:11px;color:var(--orange);background:var(--orange-light);border-radius:4px;padding:4px 7px">📌 ${ai}</div>` : ''}
           </div>`;
@@ -1661,6 +1666,37 @@ function renderDayPanel(ds) {
 
       ${routeHtml}
       ${actualHtml}
+
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+        <div class="cal-section-label">📝 新增拜訪紀錄</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          <div style="position:relative">
+            <input id="new-visit-ph-inp" class="task-input" autocomplete="off"
+              placeholder="搜尋藥局名稱…"
+              value="${dp.pharmacies.length ? dp.pharmacies[0].name : ''}"
+              oninput="visitPhSearch(this.value)" onfocus="visitPhSearch(this.value)"
+              style="width:100%;box-sizing:border-box">
+            <div id="new-visit-ph-dd" class="ph-dropdown"></div>
+          </div>
+          <select id="new-visit-purpose" class="task-input" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--white)">
+            <option value="">拜訪目的（選填）</option>
+            <option>例行拜訪</option>
+            <option>產品介紹</option>
+            <option>訂單追蹤</option>
+            <option>客訴處理</option>
+            <option>新客開發</option>
+            <option>收款</option>
+            <option>其他</option>
+          </select>
+          <textarea id="new-visit-content" rows="4"
+            placeholder="輸入拜訪內容（原始文字，直接存入不經 AI 修改）…"
+            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;resize:vertical;color:var(--text);background:var(--white);box-sizing:border-box"></textarea>
+          <button id="new-visit-submit-btn" onclick="submitNewVisit('${ds}')"
+            style="padding:9px;border-radius:8px;border:none;background:var(--green);color:#fff;font-size:13px;font-weight:600;cursor:pointer;width:100%">
+            💾 儲存拜訪紀錄
+          </button>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1723,6 +1759,55 @@ function calRemovePh(ds, pharmacyId) {
   saveCalPlan(plan);
   renderCalendar();
   renderDayPanel(ds);
+}
+
+function visitPhSearch(q) {
+  const dd = document.getElementById('new-visit-ph-dd');
+  if (!dd) return;
+  if (!q || !q.trim()) { dd.style.display = 'none'; return; }
+  const matches = pharmacies.filter(p => {
+    const name = p.name || p['店名'] || '';
+    return name.includes(q.trim());
+  }).slice(0, 8);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(p => {
+    const name = (p.name || p['店名'] || '').replace(/'/g, "\\'");
+    return `<div class="ph-option" onclick="visitPhSelect('${name}')">${p.name||p['店名']||''}</div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+
+function visitPhSelect(name) {
+  const inp = document.getElementById('new-visit-ph-inp');
+  const dd  = document.getElementById('new-visit-ph-dd');
+  if (inp) inp.value = name;
+  if (dd)  dd.style.display = 'none';
+}
+
+async function submitNewVisit(ds) {
+  const phName  = document.getElementById('new-visit-ph-inp')?.value?.trim();
+  const purpose = document.getElementById('new-visit-purpose')?.value;
+  const content = document.getElementById('new-visit-content')?.value?.trim();
+  if (!phName)  { toast('請輸入藥局名稱'); return; }
+  if (!content) { toast('請輸入拜訪內容'); return; }
+  const btn = document.getElementById('new-visit-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
+  try {
+    await post('/add-visit', {
+      action:       'addVisit',
+      visitId:      'V_' + Date.now(),
+      pharmacyName: phName,
+      date:         ds,
+      purpose:      purpose || '例行拜訪',
+      content,
+    });
+    toast('✅ 拜訪紀錄已儲存！');
+    document.getElementById('new-visit-content').value = '';
+    await loadAllVisits();
+  } catch(e) {
+    toast('❌ 儲存失敗：' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '💾 儲存拜訪紀錄'; }
+  }
 }
 
 async function calCalcRoute(ds) {

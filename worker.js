@@ -88,6 +88,10 @@ export default {
         return await handleAnalyzeTasks(request, env);
       }
 
+      if (path === '/add-visit' && request.method === 'POST') {
+        return await handleAddVisit(request);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -373,6 +377,7 @@ async function handleAllVisits(env) {
         summary:     cleanField(get('Summary')),
         content:     cleanField(get('拜訪內容')),
         actionItems: cleanField(get('Action Items')),
+        painPoints:  cleanField(get('Pain Points')),
         tags:        cleanField(get('Tags')),
       };
     })
@@ -661,6 +666,21 @@ async function handleTodos(request) {
   }
 
   return json({ error: '不支援此 method' }, 405);
+}
+
+// ============================================================
+// 10. 新增拜訪紀錄（代理到 GAS）
+// ============================================================
+async function handleAddVisit(request) {
+  const body = await request.json();
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  return json(data);
 }
 
 // ============================================================
