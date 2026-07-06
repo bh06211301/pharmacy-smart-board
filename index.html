@@ -230,6 +230,7 @@ let todayRoute = [];
 let lastScript = '';
 let customerStatuses = {};
 let actionItems = [];
+let areaFilter = {city:'', district:''};
 let allVisitsCache = [];
 </script>
 
@@ -360,11 +361,15 @@ let allVisitsCache = [];
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-title">本週進度</div></div>
+        <div class="card-header">
+          <div class="card-title">本週進度</div>
+          <button id="office-day-btn" onclick="toggleOfficeDay()" style="font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;white-space:nowrap">🏠 居家辦公</button>
+        </div>
         <div class="card-body">
           <div class="progress-row"><div class="progress-label">本週拜訪</div><div class="progress-bar"><div class="progress-fill" id="prog-week-fill" style="background:var(--green);width:0%"></div></div><div class="progress-val" id="prog-week-val" style="color:var(--green)">…</div></div>
           <div class="progress-row"><div class="progress-label">本月進度</div><div class="progress-bar"><div class="progress-fill" id="prog-month-fill" style="background:var(--accent);width:0%"></div></div><div class="progress-val" id="prog-month-val" style="color:var(--accent)">…</div></div>
           <div class="progress-row"><div class="progress-label">覆蓋率</div><div class="progress-bar"><div class="progress-fill" id="prog-coverage-fill" style="background:var(--orange);width:0%"></div></div><div class="progress-val" id="prog-coverage-val" style="color:var(--orange)">…</div></div>
+          <div id="office-days-info" style="text-align:right;font-size:11px;color:var(--muted);margin-top:6px"></div>
         </div>
       </div>
     </div>
@@ -410,7 +415,7 @@ let allVisitsCache = [];
   <div class="page-header">
     <div><div class="page-title">🏪 藥局清單</div><div class="page-sub" id="ph-sub">從 Google Sheets 即時載入</div></div>
     <div class="btn-group">
-      <input class="task-input" id="ph-kw" placeholder="搜尋..." style="flex:none;width:160px;height:36px;padding:6px 12px" oninput="renderTable()">
+      <input class="task-input" id="ph-kw" placeholder="搜尋..." style="flex:none;width:160px;height:36px;padding:6px 12px" oninput="areaFilter={city:'',district:''};renderTable()">
       <select class="task-input" id="ph-filter" style="flex:none;width:120px;height:36px;padding:6px 10px" onchange="renderTable()">
         <option value="all">全部藥局</option>
         <option value="active">活躍客戶</option>
@@ -674,7 +679,15 @@ function renderTable() {
   const kw = (document.getElementById('ph-kw')?.value||'').toLowerCase();
   const filter = document.getElementById('ph-filter')?.value || 'all';
 
-  let list = kw ? pharmacies.filter(p => JSON.stringify(p).toLowerCase().includes(kw)) : [...pharmacies];
+  let list;
+  if (areaFilter.city) {
+    list = pharmacies.filter(p =>
+      getPhCity(p) === areaFilter.city &&
+      (!areaFilter.district || getPhDistrict(p) === areaFilter.district)
+    );
+  } else {
+    list = kw ? pharmacies.filter(p => JSON.stringify(p).toLowerCase().includes(kw)) : [...pharmacies];
+  }
   if (filter === 'dead')   list = list.filter(p => isDead(p.id||p['Customer_ID']||''));
   if (filter === 'active') list = list.filter(p => !isDead(p.id||p['Customer_ID']||''));
 
@@ -1237,7 +1250,7 @@ function buildAreaSidebar() {
       </div>
       <div class="district-list" id="dl-${key}">
         ${districts.map(([d, cnt]) => `
-          <div class="sidebar-item district-item" onclick="filterByDistrict('${d}')">
+          <div class="sidebar-item district-item" onclick="filterByDistrict('${d}','${city}')">
             <span class="icon">◦</span> ${d}區
             <span class="sidebar-badge badge-blue">${cnt}</span>
           </div>`).join('')}
@@ -1258,10 +1271,11 @@ function toggleCity(key) {
   }
 }
 
-function filterByDistrict(district) {
+function filterByDistrict(district, city) {
+  areaFilter = {city: city||'', district: district||''};
   nav(document.querySelectorAll('.nav-tab')[2], 'pharmacies');
   setTimeout(() => {
-    document.getElementById('ph-kw').value = district;
+    document.getElementById('ph-kw').value = '';
     document.getElementById('ph-filter').value = 'all';
     renderTable();
   }, 50);
