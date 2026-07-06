@@ -362,9 +362,9 @@ let allVisitsCache = [];
       <div class="card">
         <div class="card-header"><div class="card-title">本週進度</div></div>
         <div class="card-body">
-          <div class="progress-row"><div class="progress-label">拜訪進度</div><div class="progress-bar"><div class="progress-fill" style="background:var(--green);width:54%"></div></div><div class="progress-val" style="color:var(--green)">54%</div></div>
-          <div class="progress-row"><div class="progress-label">出貨完成</div><div class="progress-bar"><div class="progress-fill" style="background:var(--accent);width:70%"></div></div><div class="progress-val" style="color:var(--accent)">70%</div></div>
-          <div class="progress-row"><div class="progress-label">業績目標</div><div class="progress-bar"><div class="progress-fill" style="background:var(--orange);width:89%"></div></div><div class="progress-val" style="color:var(--orange)">89%</div></div>
+          <div class="progress-row"><div class="progress-label">本週拜訪</div><div class="progress-bar"><div class="progress-fill" id="prog-week-fill" style="background:var(--green);width:0%"></div></div><div class="progress-val" id="prog-week-val" style="color:var(--green)">…</div></div>
+          <div class="progress-row"><div class="progress-label">本月進度</div><div class="progress-bar"><div class="progress-fill" id="prog-month-fill" style="background:var(--accent);width:0%"></div></div><div class="progress-val" id="prog-month-val" style="color:var(--accent)">…</div></div>
+          <div class="progress-row"><div class="progress-label">覆蓋率</div><div class="progress-bar"><div class="progress-fill" id="prog-coverage-fill" style="background:var(--orange);width:0%"></div></div><div class="progress-val" id="prog-coverage-val" style="color:var(--orange)">…</div></div>
         </div>
       </div>
     </div>
@@ -1275,10 +1275,57 @@ async function loadAllVisits() {
     const d = await get('/all-visits');
     allVisitsCache = d.visits || [];
     renderAllVisits();
+    updateWeekProgress(allVisitsCache);
   } catch(e) {
     document.getElementById('all-visits-list').innerHTML =
       `<div style="padding:20px;color:var(--red);font-size:13px">❌ 載入失敗：${e.message}</div>`;
   }
+}
+
+function updateWeekProgress(visits) {
+  const now = new Date();
+  const dow = now.getDay(); // 0=日, 1=一 ... 6=六
+  const diffToMon = (dow === 0) ? -6 : 1 - dow;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() + diffToMon);
+  weekStart.setHours(0, 0, 0, 0);
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const cutoff14 = new Date(now - 14 * 86400000);
+
+  let weekVisits = 0, monthVisits = 0;
+  const pharmacyLastVisit = {};
+
+  visits.forEach(v => {
+    if (!v.date) return;
+    const d = new Date(v.date.replace(/\//g, '-'));
+    if (isNaN(d)) return;
+    if (d >= weekStart) weekVisits++;
+    if (d >= monthStart) monthVisits++;
+    if (!pharmacyLastVisit[v.pharmacyId] || d > pharmacyLastVisit[v.pharmacyId]) {
+      pharmacyLastVisit[v.pharmacyId] = d;
+    }
+  });
+
+  let recentCount = 0;
+  Object.values(pharmacyLastVisit).forEach(lastD => {
+    if (lastD >= cutoff14) recentCount++;
+  });
+
+  const WEEK_TARGET = 10, MONTH_TARGET = 40, TOTAL = 131;
+  const weekPct  = Math.min(100, Math.round(weekVisits  / WEEK_TARGET  * 100));
+  const monthPct = Math.min(100, Math.round(monthVisits / MONTH_TARGET * 100));
+  const covPct   = Math.round(recentCount / TOTAL * 100);
+
+  const setBar = (fillId, valId, pct, label) => {
+    const fill = document.getElementById(fillId);
+    const val  = document.getElementById(valId);
+    if (fill) fill.style.width = pct + '%';
+    if (val)  val.textContent  = label;
+  };
+  setBar('prog-week-fill',     'prog-week-val',     weekPct,  `${weekVisits}/${WEEK_TARGET}`);
+  setBar('prog-month-fill',    'prog-month-val',    monthPct, `${monthVisits}/${MONTH_TARGET}`);
+  setBar('prog-coverage-fill', 'prog-coverage-val', covPct,   `${covPct}%`);
 }
 
 function renderAllVisits() {
