@@ -2,3 +2,9 @@ name = "still-meadow-0efd"
 main = "worker.js"
 compatibility_date = "2024-09-23"
 account_id = "f9c6f3f26e64a3df873681836b9fdbf3"
+
+[vars]
+SHEET_PHARMACY = "1qJ62K5Hd2bKP9DdQTjwJOOy0njNICMSPiayW7YJZdNM"
+SHEET_VISIT    = "10rofUuKtji4tKGyUv6cvbsiTEq1ynRP0zJxohc3l68U"
+SHEET_PRODUCT  = "1tyJYRWVPl7F5kprBylR_WbbIVayIWQEUxdQ-2sCL-cM"
+SHEET_ORDER    = "13HB7e9mzL0H6Nhfyl-AKhjO8M_GElnqPldTk-u-0ni8"
