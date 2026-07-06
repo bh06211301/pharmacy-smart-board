@@ -111,8 +111,9 @@ const GMAPS_KEY = 'AIzaSyBp-5PjGecwMsv-Ug5O__RAf-RzOwOqA3o';
 // 固定起終點
 const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
 const ORIGIN_LABEL = '🏢 公司（汐止）';
-const DEST_ADDR = '台北市內湖區南京東路六段350之7號';
+const DEST_ADDR = '台北市內湖區新民街422號';
 const DEST_LABEL = '🏠 家（內湖）';
+const HOME_DEADLINE_HOUR = 18; // 希望到家的時間（18:00）
 
 // Honda Fit 油耗設定
 const KM_PER_LITER = 24;       // 每公升跑 24km
@@ -154,7 +155,24 @@ let directionsRenderer = null;
     <div style="font-size:18px;color:var(--muted2)">→</div>
     <div style="font-size:12px;font-weight:600;color:var(--muted);align-self:center">途經各藥局</div>
     <div style="font-size:18px;color:var(--muted2)">→</div>
-    <div class="endpoint-marker ep-end">🏠 終點：台北市內湖區南京東路六段350之7號</div>
+    <div class="endpoint-marker ep-end">🏠 終點：台北市內湖區新民街422號</div>
+  </div>
+
+  <!-- 時間設定 -->
+  <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px;flex-wrap:wrap;background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
+    <span style="font-size:12px;font-weight:700;color:var(--muted)">⏱ 行程設定</span>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+      出發時間
+      <input type="time" id="depart-time" value="09:00"
+        style="font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-family:inherit;color:var(--text)">
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+      每站停留
+      <input type="number" id="visit-duration" value="30" min="5" max="120" step="5"
+        style="width:56px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-family:inherit;color:var(--text)">
+      分鐘
+    </label>
+    <span style="font-size:12px;color:var(--muted)">希望 <strong>18:00</strong> 前到家</span>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:start">
@@ -572,16 +590,65 @@ function renderRouteResult(stops, legs, totalDist, totalTime) {
   // 費用計算
   const fuelUsed = km / KM_PER_LITER;
   const fuelCost = Math.round(fuelUsed * GAS_PRICE);
-  // 高速公路費：估算走高速的公里數，扣掉 eTag 每日免費 20km
   const hwKm = km * HW_RATIO;
   const hwChargeable = Math.max(0, hwKm - HW_FREE_KM);
   const hwCost = Math.round(hwChargeable * HIGHWAY_RATE);
   const totalCost = fuelCost + hwCost;
 
-  let html = `<div class="route-result">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+  // 預計到家時間計算
+  const departStr = document.getElementById('depart-time')?.value || '09:00';
+  const visitDur = parseInt(document.getElementById('visit-duration')?.value || '30', 10);
+  const [dh, dm] = departStr.split(':').map(Number);
+  const departMins = dh * 60 + dm;
+  const driveMins = Math.ceil(totalTime / 60);
+  const stopMins = stops.length * visitDur;
+  const arrivalMins = departMins + driveMins + stopMins;
+  const arrH = Math.floor(arrivalMins / 60) % 24;
+  const arrM = arrivalMins % 60;
+  const arrivalStr = `${String(arrH).padStart(2,'0')}:${String(arrM).padStart(2,'0')}`;
+  const isLate = arrH > HOME_DEADLINE_HOUR || (arrH === HOME_DEADLINE_HOUR && arrM > 0);
+
+  // 每站累積抵達時間
+  let cumMins = departMins;
+  const stopArrival = [];
+  legs.forEach((leg, i) => {
+    cumMins += Math.ceil(leg.duration.value / 60);
+    if (i < stops.length) {
+      stopArrival.push(cumMins);
+      cumMins += visitDur;
+    }
+  });
+
+  let html = `<div class="route-result">`;
+
+  // 警告橫幅
+  if (isLate) {
+    const overMin = arrivalMins - HOME_DEADLINE_HOUR * 60;
+    const overH = Math.floor(overMin / 60), overM = overMin % 60;
+    const overStr = overH > 0 ? `${overH} 小時 ${overM} 分` : `${overM} 分鐘`;
+    html += `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:24px">⚠️</span>
+      <div>
+        <div style="font-size:14px;font-weight:800;color:#dc2626">行程超時警告！</div>
+        <div style="font-size:13px;color:#b91c1c;margin-top:2px">
+          預計 <strong>${arrivalStr}</strong> 到家，超過 18:00 共 <strong>${overStr}</strong>。<br>
+          建議減少停留時間或移除部分藥局。
+        </div>
+      </div>
+    </div>`;
+  } else {
+    html += `<div style="background:#f0fdf4;border:1.5px solid #6ee7b7;border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">✅</span>
+      <div style="font-size:13px;color:#065f46">
+        預計 <strong>${arrivalStr}</strong> 到家，18:00 前安全到達！
+      </div>
+    </div>`;
+  }
+
+  html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <span style="background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">✦ 最短路線</span>
       <span style="font-size:13px;font-weight:700">${km.toFixed(1)} km · ${timeStr}</span>
+      <span style="font-size:12px;color:var(--muted)">（出發 ${departStr}，每站 ${visitDur} 分鐘）</span>
     </div>
     <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:12px">`;
 
@@ -599,10 +666,16 @@ function renderRouteResult(stops, legs, totalDist, totalTime) {
   stops.forEach((s, i) => {
     const col = typeColor[s.type] || 'var(--accent)';
     const leg = legs[i + 1];
+    const aMins = stopArrival[i];
+    const aH = Math.floor(aMins / 60) % 24;
+    const aM = aMins % 60;
+    const aStr = `${String(aH).padStart(2,'0')}:${String(aM).padStart(2,'0')}`;
     html += `<div class="route-stop">
       <div class="stop-num" style="background:${col}">${i+1}</div>
       <div class="stop-info">
-        <div class="stop-name">${s.name} <span style="font-size:10px;color:var(--muted)">${s.id}</span></div>
+        <div class="stop-name">${s.name} <span style="font-size:10px;color:var(--muted)">${s.id}</span>
+          <span style="font-size:10px;background:#eff6ff;color:#2563eb;border-radius:6px;padding:1px 6px;margin-left:4px">抵達 ${aStr}</span>
+        </div>
         <div class="stop-detail">${s.address||''}</div>
       </div>
     </div>`;
