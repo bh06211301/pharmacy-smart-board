@@ -233,6 +233,24 @@ body{
 .nav-btn .ni{font-size:22px}
 .nav-btn.active{color:var(--accent)}
 
+/* ── ROUTE PREVIEW ── */
+.brief-route-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:10px;
+}
+.brief-route-chip{
+  flex:1;background:var(--bg);border-radius:8px;
+  padding:7px 10px;font-size:12px;font-weight:600;color:var(--text);
+  text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;
+}
+.brief-route-chip.dest{background:#eff6ff;color:#1d4ed8}
+.brief-route-arrow{color:var(--muted);font-size:14px;flex-shrink:0}
+.brief-map-frame{
+  width:100%;height:175px;border-radius:12px;
+  border:none;display:block;margin-bottom:12px;
+  background:var(--bg);
+}
+
 /* ── BRIEF SHEET ── */
 .brief-overlay-bg{
   position:fixed;inset:0;background:rgba(0,0,0,.45);
@@ -421,8 +439,17 @@ body{
     </div>
     <button class="brief-close" onclick="closeBrief()">✕</button>
   </div>
+  <!-- Route preview -->
+  <div id="brief-route-wrap" style="display:none">
+    <div class="brief-route-row">
+      <span class="brief-route-chip" id="brief-from-label">出發地</span>
+      <span class="brief-route-arrow">▶</span>
+      <span class="brief-route-chip dest" id="brief-to-label">藥局</span>
+    </div>
+    <iframe id="brief-map-frame" class="brief-map-frame" src="" loading="lazy" allowfullscreen></iframe>
+  </div>
   <a class="nav-big-btn" id="brief-nav-link" href="#" target="_blank">
-    🗺️ 開始導航
+    🗺️ 開始導航（含路線）
   </a>
   <div id="brief-ai-wrap">
     <div class="brief-loading">
@@ -455,6 +482,8 @@ body{
 <script>
 const WORKER       = 'https://still-meadow-0efd.bh06211301.workers.dev';
 const VISIT_WORKER = 'https://weathered-hall-88a0.bh06211301.workers.dev';
+const MAPS_KEY     = 'AIzaSyBp-5PjGecwMsv-Ug5O__RAf-RzOwOqA3o';
+const ORIGIN       = '新北市汐止區湖東街五巷25號';
 let cards = [];
 let today = null;
 let streak = null;
@@ -647,6 +676,18 @@ function calcPts(daysSince, neverVisited, hasPending) {
   return p;
 }
 
+// ── LAST STOP ─────────────────────────────────────────────────
+function saveLastStop(ph) {
+  localStorage.setItem('field_lastStop', JSON.stringify({
+    name: ph.name, district: ph.district || '',
+    lat: ph.lat || null, lng: ph.lng || null
+  }));
+}
+function getLastStop() {
+  const raw = localStorage.getItem('field_lastStop');
+  return raw ? JSON.parse(raw) : null;
+}
+
 // ── AI BRIEF SHEET ────────────────────────────────────────────
 let currentBriefId = null;
 
@@ -661,8 +702,32 @@ async function openBrief(id) {
   document.getElementById('brief-ph-sub').textContent =
     [ph.district, ph.daysSince !== null ? `${ph.daysSince} 天前拜訪` : '從未拜訪'].filter(Boolean).join(' · ');
 
+  // Navigation: use Directions mode (auto-current-location)
+  const navDest = ph.lat && ph.lng
+    ? `${ph.lat},${ph.lng}`
+    : encodeURIComponent(ph.name + (ph.district ? ' ' + ph.district : '') + ' 台灣');
   document.getElementById('brief-nav-link').href =
-    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ph.name + (ph.district ? ' ' + ph.district : ''))}`;
+    `https://www.google.com/maps/dir/?api=1&destination=${navDest}&travelmode=driving`;
+
+  // Route preview map (Google Maps Embed)
+  const lastStop = getLastStop();
+  const fromLabel = lastStop ? lastStop.name : '汐止出發地';
+  let originQ;
+  if (lastStop) {
+    originQ = (lastStop.lat && lastStop.lng)
+      ? `${lastStop.lat},${lastStop.lng}`
+      : encodeURIComponent(lastStop.name + ' ' + lastStop.district + ' 台灣');
+  } else {
+    originQ = encodeURIComponent(ORIGIN);
+  }
+  const destQ = (ph.lat && ph.lng)
+    ? `${ph.lat},${ph.lng}`
+    : encodeURIComponent(ph.name + ' ' + (ph.district || '') + ' 台灣');
+  document.getElementById('brief-from-label').textContent = fromLabel;
+  document.getElementById('brief-to-label').textContent   = ph.name;
+  document.getElementById('brief-map-frame').src =
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=${originQ}&destination=${destQ}&mode=driving&language=zh-TW`;
+  document.getElementById('brief-route-wrap').style.display = '';
 
   document.getElementById('brief-ai-wrap').innerHTML =
     `<div class="brief-loading"><div class="spinner" style="margin:0 auto 8px"></div><div>AI 分析中...</div></div>`;
@@ -880,6 +945,7 @@ function doCheckin(id) {
   today.done.push(id);
   today.pts += pts;
   saveToday(today);
+  saveLastStop(ph);
 
   document.getElementById(`c-${id}`)?.classList.add('done');
 
@@ -948,6 +1014,9 @@ async function loadData() {
         hasPending:  p.hasPending || false,
         neverVisited:p.neverVisited || false,
         visitStats:  visitMap[p.id] || null,
+        lat:         p.lat || p.latitude || null,
+        lng:         p.lng || p.longitude || null,
+        addr:        p.addr || p.address || '',
       }));
 
     render();
