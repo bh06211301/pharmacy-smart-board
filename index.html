@@ -1192,21 +1192,21 @@ function nav(tabEl, pageId) {
 // ══════════════════════════════
 function getPhCity(p) {
   const addr = p.address || p['地址'] || '';
+  if (/基隆市/.test(addr)) return '基隆市';
   if (/台北市|臺北市/.test(addr)) return '台北市';
   if (/新北市/.test(addr)) return '新北市';
-  if (/基隆市/.test(addr)) return '基隆市';
   if (/桃園市/.test(addr)) return '桃園市';
-  const area = p.area || p['實體資料夾'] || '';
-  if (area) return '新北市';
+  if (/新竹市/.test(addr)) return '新竹市';
+  if (/新竹縣/.test(addr)) return '新竹縣';
   return '其他';
 }
 
 function getPhDistrict(p) {
   const addr = p.address || p['地址'] || '';
-  const m = addr.match(/[市縣]([^\s,，、]+?區)/);
-  if (m) return m[1].replace(/區$/, '');
-  const area = p.area || p['實體資料夾'] || '';
-  return area.replace(/[市縣].+/, '').replace(/區$/, '') || '未分類';
+  // 從地址解析「市/縣」後面的行政區（區/市/鎮/鄉）
+  const m = addr.match(/[市縣]([^\s,，、\d]+?[區市鎮鄉])/);
+  if (m) return m[1].replace(/[區市鎮鄉]$/, '');
+  return '未分類';
 }
 
 function buildAreaSidebar() {
@@ -1218,7 +1218,7 @@ function buildAreaSidebar() {
     cityMap[city][dist] = (cityMap[city][dist] || 0) + 1;
   });
 
-  const priority = ['台北市', '新北市', '基隆市', '桃園市', '其他'];
+  const priority = ['基隆市', '台北市', '新北市', '桃園市', '新竹市', '新竹縣', '其他'];
   const cities = [...priority.filter(c => cityMap[c]),
                   ...Object.keys(cityMap).filter(c => !priority.includes(c))];
 
@@ -1227,7 +1227,7 @@ function buildAreaSidebar() {
 
   container.innerHTML = cities.map(city => {
     const total = Object.values(cityMap[city]).reduce((a,b)=>a+b, 0);
-    const key = city.replace(/[市]/g, '');
+    const key = city.replace(/[市縣]/g, '');
     const districts = Object.entries(cityMap[city]).sort((a,b)=>b[1]-a[1]);
     return `
       <div class="sidebar-item city-item" onclick="toggleCity('${key}')">
