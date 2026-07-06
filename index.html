@@ -1609,13 +1609,15 @@ function renderDayPanel(ds) {
       <div style="margin-top:16px">
         <div class="cal-section-label">✅ 當日實際拜訪（${dayVisits.length} 家）</div>
         ${dayVisits.map(v => {
+          const ph     = pharmacies.find(p => (p.id||p['Customer_ID']||'') === v.pharmacyId);
+          const phName = ph ? (ph.name||ph['店名']||v.pharmacyId) : v.pharmacyId;
           const detail = v.summary || v.content || '';
           const ai     = v.actionItems || '';
           return `
           <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:${detail||ai?'6px':'0'}">
               <span style="color:var(--green);font-size:10px">●</span>
-              <b style="font-size:13px">${v.pharmacyId}</b>
+              <b style="font-size:13px">${phName}</b>
               ${v.purpose ? `<span style="color:var(--muted);font-size:11px;margin-left:4px">${v.purpose}</span>` : ''}
             </div>
             ${detail ? `<div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:${ai?'5px':'0'}">${detail}</div>` : ''}
