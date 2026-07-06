@@ -241,6 +241,15 @@ select.task-input{cursor:pointer}
 .cal-time{font-size:10px;color:var(--muted);margin-top:2px;line-height:1.3}
 .cal-dots{display:flex;gap:2px;margin-top:3px;flex-wrap:wrap}
 .cal-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+/* CALENDAR TODO DRAG */
+.cal-todo-pool{margin-top:14px;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.todo-chip{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;cursor:grab;user-select:none;font-size:12px;background:var(--white);box-shadow:var(--shadow);transition:all .15s}
+.todo-chip:last-child{margin-bottom:0}
+.todo-chip:hover{border-color:var(--accent);box-shadow:var(--shadow-md)}
+.todo-chip.dragging{opacity:.35}
+.cal-cell.drag-target{border-color:var(--accent)!important;background:var(--accent-light)!important;box-shadow:0 0 0 2px rgba(59,110,245,.3)!important}
+.todo-drop-zone{min-height:52px;border:2px dashed var(--border);border-radius:var(--radius-sm);padding:8px;transition:all .15s}
+.todo-drop-zone.drag-over{border-color:var(--accent);background:var(--accent-light)}
 .cal-panel{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);position:sticky;top:78px;max-height:calc(100vh - 100px);overflow-y:auto}
 .cal-panel-inner{padding:20px}
 .cal-panel-date{font-size:16px;font-weight:700;margin-bottom:14px}
@@ -536,6 +545,7 @@ let allVisitsCache = [];
         <button class="cal-nav-btn" onclick="calNext()">下月 →</button>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
+      <div id="cal-todo-pool" class="cal-todo-pool" style="display:none"></div>
     </div>
     <div class="cal-panel" id="cal-panel">
       <div class="cal-panel-inner" style="text-align:center;padding:48px 20px;color:var(--muted);font-size:13px">
@@ -1254,7 +1264,8 @@ function nav(tabEl, pageId) {
   if (pageId === 'todo') renderActionItems();
   if (pageId === 'calendar') {
     renderCalendar();
-    if (!allVisitsCache.length) loadAllVisits(); // 資料載入完後會自動重繪月曆
+    renderCalTodoPool();
+    if (!allVisitsCache.length) loadAllVisits();
   }
 }
 
@@ -1530,7 +1541,14 @@ function renderCalendar() {
     if (vc > 0) {
       inner += `<div class="cal-dots">${'<span class="cal-dot"></span>'.repeat(Math.min(vc, 5))}</div>`;
     }
-    html += `<div class="${cls}" onclick="calSelectDay('${ds}')">${inner}</div>`;
+    const tc = actionItems.filter(a => !a.done && a.scheduledDate === ds).length;
+    if (tc > 0) {
+      inner += `<div style="margin-top:2px"><span style="font-size:9px;padding:1px 5px;border-radius:8px;background:var(--orange-light);color:var(--orange);font-weight:700">📌${tc}</span></div>`;
+    }
+    html += `<div class="${cls}" onclick="calSelectDay('${ds}')"
+      ondragover="event.preventDefault();this.classList.add('drag-target')"
+      ondragleave="this.classList.remove('drag-target')"
+      ondrop="calOnDropCell(event,'${ds}')">${inner}</div>`;
   }
 
   // trailing padding
@@ -1666,6 +1684,30 @@ function renderDayPanel(ds) {
 
       ${routeHtml}
       ${actualHtml}
+      ${(()=>{
+        const dayTodos = actionItems.filter(a => !a.done && a.scheduledDate === ds);
+        const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
+        return `
+      <div style="margin-top:16px">
+        <div class="cal-section-label">📌 今日待辦（${dayTodos.length} 項）</div>
+        <div class="todo-drop-zone" id="day-todo-drop"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="calOnDrop(event,'${ds}')">
+          ${dayTodos.length ? dayTodos.map(item => {
+            const icon = tiMap[item.type] || '📌';
+            const prioColor = item.priority==='high'?'var(--red)':item.priority==='low'?'var(--green)':'var(--orange)';
+            return `<div class="todo-chip" id="todo-chip-${item.id}" draggable="true"
+              ondragstart="todoChipDragStart(event,${item.id})"
+              ondragend="todoChipDragEnd(${item.id})">
+              <span style="color:${prioColor};font-size:12px">●</span>
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon} ${item.task}</span>
+              <button onclick="todoUnschedule(${item.id},'${ds}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:0 2px;flex-shrink:0">×</button>
+            </div>`;
+          }).join('') : '<div style="text-align:center;padding:12px 0;color:var(--muted);font-size:12px">拖曳待辦事項到此排入日程</div>'}
+        </div>
+      </div>`;
+      })()}
 
       <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
         <div class="cal-section-label">📝 新增拜訪紀錄</div>
@@ -2047,6 +2089,83 @@ function renderActionItems() {
       <button class="del-btn" onclick="deleteTodo(${item.id})">✕</button>
     </div>`;
   }).join('');
+}
+
+// ══════════════════════════════
+// 月曆待辦拖曳
+// ══════════════════════════════
+function renderCalTodoPool() {
+  const el = document.getElementById('cal-todo-pool');
+  if (!el) return;
+  const unscheduled = actionItems.filter(a => !a.done && !a.scheduledDate);
+  el.style.display = 'block';
+  const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
+  if (!unscheduled.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">✅ 所有待辦已排入日程</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
+      📌 未排定待辦（拖曳到日期格排入行程）
+    </div>
+    ${unscheduled.map(item => {
+      const icon = tiMap[item.type] || '📌';
+      const prioColor = item.priority==='high'?'var(--red)':item.priority==='low'?'var(--green)':'var(--orange)';
+      return `<div class="todo-chip" id="todo-chip-${item.id}" draggable="true"
+        ondragstart="todoChipDragStart(event,${item.id})"
+        ondragend="todoChipDragEnd(${item.id})">
+        <span style="color:${prioColor};font-size:12px">●</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon} ${item.task}</span>
+        ${item.pharmacyId ? `<span style="font-size:10px;color:var(--muted);flex-shrink:0">${item.pharmacyId}</span>` : ''}
+      </div>`;
+    }).join('')}`;
+}
+
+function todoChipDragStart(ev, id) {
+  ev.dataTransfer.setData('text/plain', String(id));
+  ev.dataTransfer.effectAllowed = 'move';
+  const el = document.getElementById('todo-chip-' + id);
+  if (el) el.classList.add('dragging');
+}
+
+function todoChipDragEnd(id) {
+  const el = document.getElementById('todo-chip-' + id);
+  if (el) el.classList.remove('dragging');
+}
+
+function calOnDropCell(ev, ds) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-target');
+  const id = parseInt(ev.dataTransfer.getData('text/plain'));
+  if (!id) return;
+  const item = actionItems.find(a => a.id === id);
+  if (!item) return;
+  item.scheduledDate = ds;
+  calSelectDay(ds);
+  renderCalTodoPool();
+  toast(`✅ 已排入 ${ds}`);
+}
+
+function calOnDrop(ev, ds) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-over');
+  const id = parseInt(ev.dataTransfer.getData('text/plain'));
+  if (!id) return;
+  const item = actionItems.find(a => a.id === id);
+  if (!item) return;
+  item.scheduledDate = ds;
+  renderCalTodoPool();
+  renderDayPanel(ds);
+  renderCalendar();
+  toast(`✅ 已排入 ${ds}`);
+}
+
+function todoUnschedule(id, ds) {
+  const item = actionItems.find(a => a.id === id);
+  if (item) item.scheduledDate = null;
+  renderCalTodoPool();
+  renderDayPanel(ds);
+  renderCalendar();
 }
 
 function exportRoute() {
