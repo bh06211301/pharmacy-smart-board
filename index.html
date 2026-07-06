@@ -189,6 +189,13 @@ select.task-input{cursor:pointer}
 .new-badge{background:var(--purple-light);color:var(--purple);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
 .dad-badge{background:var(--teal-light);color:var(--teal);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px}
 
+/* AREA HIERARCHY */
+.city-item{font-weight:600;user-select:none}
+.city-arrow{font-size:10px;margin-left:auto;transition:transform .2s;display:inline-block}
+.district-list{display:none;padding-left:12px}
+.district-item{font-size:12px;padding:6px 10px}
+.district-item .icon{font-size:10px;color:var(--muted2)}
+
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
 
@@ -284,10 +291,7 @@ let allVisitsCache = [];
   <div class="sidebar-divider"></div>
   <div style="margin-bottom:6px">
     <div class="sidebar-label">地區</div>
-    <div class="sidebar-item" onclick="filterByDistrict('板橋')"><span class="icon">📍</span> 板橋區 <span class="sidebar-badge badge-blue" id="sb-banqiao">—</span></div>
-    <div class="sidebar-item" onclick="filterByDistrict('新莊')"><span class="icon">📍</span> 新莊區 <span class="sidebar-badge badge-blue" id="sb-xinzhuang">—</span></div>
-    <div class="sidebar-item" onclick="filterByDistrict('三重')"><span class="icon">📍</span> 三重區 <span class="sidebar-badge badge-blue" id="sb-sanchong">—</span></div>
-    <div class="sidebar-item" onclick="filterByDistrict('中和')"><span class="icon">📍</span> 中和區 <span class="sidebar-badge badge-blue" id="sb-zhonghe">—</span></div>
+    <div id="area-sidebar"></div>
   </div>
   <div class="sidebar-divider"></div>
   <button class="btn btn-ai" style="width:100%;justify-content:center;padding:11px" onclick="openScheduleModal()">
@@ -663,12 +667,7 @@ async function loadPharmacies(force = false) {
 
 function updateSidebar() {
   document.getElementById('sb-ph').textContent = pharmacies.length;
-  const areas = [['板橋','sb-banqiao'],['新莊','sb-xinzhuang'],['三重','sb-sanchong'],['中和','sb-zhonghe']];
-  for (const [name, id] of areas) {
-    const c = pharmacies.filter(p => JSON.stringify(p).includes(name)).length;
-    const el = document.getElementById(id);
-    if (el) el.textContent = c || '—';
-  }
+  buildAreaSidebar();
 }
 
 function renderTable() {
@@ -1188,6 +1187,77 @@ function nav(tabEl, pageId) {
 // ══════════════════════════════
 // 地區篩選
 // ══════════════════════════════
+// ══════════════════════════════
+// 地區階層篩選
+// ══════════════════════════════
+function getPhCity(p) {
+  const addr = p.address || p['地址'] || '';
+  if (/台北市|臺北市/.test(addr)) return '台北市';
+  if (/新北市/.test(addr)) return '新北市';
+  if (/基隆市/.test(addr)) return '基隆市';
+  if (/桃園市/.test(addr)) return '桃園市';
+  const area = p.area || p['實體資料夾'] || '';
+  if (area) return '新北市';
+  return '其他';
+}
+
+function getPhDistrict(p) {
+  const addr = p.address || p['地址'] || '';
+  const m = addr.match(/[市縣]([^\s,，、]+?區)/);
+  if (m) return m[1].replace(/區$/, '');
+  const area = p.area || p['實體資料夾'] || '';
+  return area.replace(/[市縣].+/, '').replace(/區$/, '') || '未分類';
+}
+
+function buildAreaSidebar() {
+  const cityMap = {};
+  pharmacies.forEach(p => {
+    const city = getPhCity(p);
+    const dist = getPhDistrict(p);
+    if (!cityMap[city]) cityMap[city] = {};
+    cityMap[city][dist] = (cityMap[city][dist] || 0) + 1;
+  });
+
+  const priority = ['台北市', '新北市', '基隆市', '桃園市', '其他'];
+  const cities = [...priority.filter(c => cityMap[c]),
+                  ...Object.keys(cityMap).filter(c => !priority.includes(c))];
+
+  const container = document.getElementById('area-sidebar');
+  if (!container) return;
+
+  container.innerHTML = cities.map(city => {
+    const total = Object.values(cityMap[city]).reduce((a,b)=>a+b, 0);
+    const key = city.replace(/[市]/g, '');
+    const districts = Object.entries(cityMap[city]).sort((a,b)=>b[1]-a[1]);
+    return `
+      <div class="sidebar-item city-item" onclick="toggleCity('${key}')">
+        <span class="icon">🏙️</span> ${city}
+        <span class="sidebar-badge badge-blue">${total}</span>
+        <span class="city-arrow" id="arrow-${key}">▶</span>
+      </div>
+      <div class="district-list" id="dl-${key}">
+        ${districts.map(([d, cnt]) => `
+          <div class="sidebar-item district-item" onclick="filterByDistrict('${d}')">
+            <span class="icon">◦</span> ${d}區
+            <span class="sidebar-badge badge-blue">${cnt}</span>
+          </div>`).join('')}
+      </div>`;
+  }).join('');
+}
+
+function toggleCity(key) {
+  const dl = document.getElementById('dl-' + key);
+  const arrow = document.getElementById('arrow-' + key);
+  if (!dl) return;
+  const opening = dl.style.display === 'none' || dl.style.display === '';
+  document.querySelectorAll('.district-list').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('.city-arrow').forEach(el => { el.style.transform = ''; });
+  if (opening) {
+    dl.style.display = 'block';
+    if (arrow) arrow.style.transform = 'rotate(90deg)';
+  }
+}
+
 function filterByDistrict(district) {
   nav(document.querySelectorAll('.nav-tab')[2], 'pharmacies');
   setTimeout(() => {
