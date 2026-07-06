@@ -16,6 +16,7 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 const GEMINI_URL_PRO = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_PRO}:generateContent`;
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxdCQvTWLTLtTLrpL5gpZZrvsEAujA0xnQ9gOiX0o23mR2y6ZTJHtSDqEmt_LmqZBFA/exec';
+const GAS_VISIT_URL = 'https://script.google.com/macros/s/AKfycbxBDS60OKaAhxeS53qrN7O1TbbN_wHSaJgwKJeFVjgr8ZuxpS-RV6aRu-uEwTJwKvzN9g/exec';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -673,10 +674,19 @@ async function handleTodos(request) {
 // ============================================================
 async function handleAddVisit(request) {
   const body = await request.json();
-  const res = await fetch(GAS_URL, {
+  // 轉換欄位名稱以符合 VisitAppWebhook.js 格式
+  const gasPayload = {
+    action:      'addVisit',
+    visitId:     body.visitId,
+    pharmacy:    body.pharmacyName || body.pharmacy || '',
+    date:        body.date,
+    visitType:   body.purpose || body.visitType || '',
+    note:        body.content  || body.note || '',
+  };
+  const res = await fetch(GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(gasPayload),
     redirect: 'follow',
   });
   const data = await res.json();
