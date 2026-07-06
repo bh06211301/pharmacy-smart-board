@@ -1252,7 +1252,10 @@ function nav(tabEl, pageId) {
   if (pageId === 'pharmacies') loadPharmacies();
   if (pageId === 'visits' && !allVisitsCache.length) loadAllVisits();
   if (pageId === 'todo') renderActionItems();
-  if (pageId === 'calendar') renderCalendar();
+  if (pageId === 'calendar') {
+    renderCalendar();
+    if (!allVisitsCache.length) loadAllVisits(); // 資料載入完後會自動重繪月曆
+  }
 }
 
 // ══════════════════════════════
@@ -1348,6 +1351,7 @@ async function loadAllVisits() {
     allVisitsCache = d.visits || [];
     renderAllVisits();
     updateWeekProgress(allVisitsCache);
+    if (document.getElementById('page-calendar')?.classList.contains('active')) renderCalendar();
   } catch(e) {
     document.getElementById('all-visits-list').innerHTML =
       `<div style="padding:20px;color:var(--red);font-size:13px">❌ 載入失敗：${e.message}</div>`;
