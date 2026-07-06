@@ -579,6 +579,7 @@ async function init() {
     const h = await get('/health');
     if (h.ok) setDot('green', 'Worker 正常');
   } catch(e) { setDot('red', 'Worker 無回應'); }
+  renderOfficeDayBtn();
   await loadCustomerStatuses();
   loadPharmacies();
   loadAllVisits();
@@ -1296,6 +1297,43 @@ async function loadAllVisits() {
   }
 }
 
+// ── 居家辦公記錄 ──────────────────────────
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function getOfficeDays() {
+  try { return JSON.parse(localStorage.getItem('officeDays') || '[]'); } catch { return []; }
+}
+function getOfficeDaysThisWeek() {
+  const now = new Date();
+  const dow = now.getDay();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() + ((dow === 0) ? -6 : 1 - dow));
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+  return getOfficeDays().filter(ds => { const d = new Date(ds); return d >= weekStart && d < weekEnd; });
+}
+function toggleOfficeDay() {
+  const today = todayStr();
+  const days = getOfficeDays();
+  const idx = days.indexOf(today);
+  if (idx >= 0) days.splice(idx, 1); else days.push(today);
+  const cutoff = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  localStorage.setItem('officeDays', JSON.stringify(days.filter(d => d >= cutoff)));
+  renderOfficeDayBtn();
+  updateWeekProgress(allVisitsCache);
+}
+function renderOfficeDayBtn() {
+  const btn = document.getElementById('office-day-btn');
+  if (!btn) return;
+  const isOffice = getOfficeDays().includes(todayStr());
+  btn.textContent  = isOffice ? '🏠 居家辦公中' : '🏠 居家辦公';
+  btn.style.background  = isOffice ? 'var(--accent)' : '';
+  btn.style.color       = isOffice ? '#fff'          : 'var(--muted)';
+  btn.style.borderColor = isOffice ? 'var(--accent)'  : 'var(--border)';
+}
+
 function updateWeekProgress(visits) {
   const now = new Date();
   const dow = now.getDay(); // 0=日, 1=一 ... 6=六
@@ -1326,7 +1364,10 @@ function updateWeekProgress(visits) {
     if (lastD >= cutoff14) recentCount++;
   });
 
-  const WEEK_TARGET = 30, MONTH_TARGET = 120, TOTAL = 131;
+  const officeDaysThisWeek = getOfficeDaysThisWeek().length;
+  const visitDays   = Math.max(0, 5 - officeDaysThisWeek);
+  const WEEK_TARGET = visitDays * 6 || 1;
+  const MONTH_TARGET = 120, TOTAL = 131;
   const weekPct  = Math.min(100, Math.round(weekVisits  / WEEK_TARGET  * 100));
   const monthPct = Math.min(100, Math.round(monthVisits / MONTH_TARGET * 100));
   const covPct   = Math.round(recentCount / TOTAL * 100);
@@ -1340,6 +1381,13 @@ function updateWeekProgress(visits) {
   setBar('prog-week-fill',     'prog-week-val',     weekPct,  `${weekVisits}/${WEEK_TARGET}`);
   setBar('prog-month-fill',    'prog-month-val',    monthPct, `${monthVisits}/${MONTH_TARGET}`);
   setBar('prog-coverage-fill', 'prog-coverage-val', covPct,   `${covPct}%`);
+
+  const info = document.getElementById('office-days-info');
+  if (info) {
+    info.textContent = officeDaysThisWeek > 0
+      ? `本週居家辦公 ${officeDaysThisWeek} 天，外訪目標 ${WEEK_TARGET} 家`
+      : '';
+  }
 }
 
 function renderAllVisits() {
