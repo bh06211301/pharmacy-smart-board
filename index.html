@@ -1312,7 +1312,7 @@ function updateWeekProgress(visits) {
     if (lastD >= cutoff14) recentCount++;
   });
 
-  const WEEK_TARGET = 10, MONTH_TARGET = 40, TOTAL = 131;
+  const WEEK_TARGET = 30, MONTH_TARGET = 120, TOTAL = 131;
   const weekPct  = Math.min(100, Math.round(weekVisits  / WEEK_TARGET  * 100));
   const monthPct = Math.min(100, Math.round(monthVisits / MONTH_TARGET * 100));
   const covPct   = Math.round(recentCount / TOTAL * 100);
