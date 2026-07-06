@@ -218,6 +218,38 @@ select.task-input{cursor:pointer}
 .todo-priority-high{background:var(--red-light);color:var(--red)}
 .todo-priority-medium{background:var(--orange-light);color:var(--orange)}
 .todo-priority-low{background:var(--green-light);color:var(--green)}
+/* CALENDAR */
+.cal-wrap{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.cal-nav-btn{background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 14px;cursor:pointer;font-size:13px;color:var(--text2)}
+.cal-nav-btn:hover{background:var(--surface2)}
+.cal-month-label{font-size:17px;font-weight:700}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-hdr{text-align:center;font-size:11px;font-weight:700;color:var(--muted2);padding:5px 0;letter-spacing:.5px}
+.cal-cell{min-height:74px;border:1px solid var(--border);border-radius:8px;padding:6px 7px;cursor:pointer;transition:all .15s;background:var(--white);position:relative;overflow:hidden}
+.cal-cell:hover{border-color:var(--accent);box-shadow:var(--shadow-md)}
+.cal-cell.is-today{border-color:var(--accent);background:var(--accent-light)}
+.cal-cell.is-selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,110,245,.2)}
+.cal-cell.is-office{background:#f8f9fc}
+.cal-cell.is-other{opacity:.3;pointer-events:none}
+.cal-cell.is-weekend{background:var(--gray-light)}
+.cal-d{font-size:12px;font-weight:600;color:var(--text2)}
+.cal-cell.is-today .cal-d{color:var(--accent);font-weight:800}
+.cal-badge{display:inline-flex;align-items:center;font-size:10px;padding:1px 6px;border-radius:10px;margin-top:3px;font-weight:600}
+.cal-badge-plan{background:var(--accent-light);color:var(--accent)}
+.cal-badge-off{background:var(--surface2);color:var(--muted)}
+.cal-time{font-size:10px;color:var(--muted);margin-top:2px;line-height:1.3}
+.cal-dots{display:flex;gap:2px;margin-top:3px;flex-wrap:wrap}
+.cal-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+.cal-panel{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);position:sticky;top:78px;max-height:calc(100vh - 100px);overflow-y:auto}
+.cal-panel-inner{padding:20px}
+.cal-panel-date{font-size:16px;font-weight:700;margin-bottom:14px}
+.cal-ph-item{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:7px;margin-bottom:6px;font-size:13px;background:var(--white)}
+.cal-ph-num{color:var(--accent);font-weight:700;font-size:12px;min-width:16px;margin-top:1px}
+.cal-ph-remove{background:none;border:none;cursor:pointer;color:var(--muted2);font-size:18px;margin-left:auto;line-height:1;padding:0 2px;flex-shrink:0}
+.cal-ph-remove:hover{color:var(--red)}
+.cal-route-box{background:var(--surface2);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:13px}
+.cal-section-label{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -246,6 +278,7 @@ let allVisitsCache = [];
     <button class="nav-tab"          onclick="nav(this,'pharmacies')">🏪 藥局清單</button>
     <button class="nav-tab"          onclick="nav(this,'visits')">📋 拜訪紀錄</button>
     <button class="nav-tab"          onclick="nav(this,'todo')">📌 待辦清單</button>
+    <button class="nav-tab"          onclick="nav(this,'calendar')">📅 月曆</button>
   </div>
   <div class="nav-right">
     <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
@@ -488,6 +521,29 @@ let allVisitsCache = [];
     <div style="font-size:12px">前往「拜訪紀錄」點「AI 分析待辦事項」自動生成，<br>或在查詢單一藥局後點「AI 分析」</div>
   </div>
   <div id="todo-list"></div>
+</div>
+
+<!-- ══ 月曆排程 ══ -->
+<div class="page" id="page-calendar">
+  <div class="page-header">
+    <div><div class="page-title">📅 月曆排程</div><div class="page-sub">規劃每月拜訪行程 · AI 路線順序 · 時間預估</div></div>
+  </div>
+  <div class="cal-wrap">
+    <div>
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="calPrev()">← 上月</button>
+        <div class="cal-month-label" id="cal-label"></div>
+        <button class="cal-nav-btn" onclick="calNext()">下月 →</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+    <div class="cal-panel" id="cal-panel">
+      <div class="cal-panel-inner" style="text-align:center;padding:48px 20px;color:var(--muted);font-size:13px">
+        <div style="font-size:28px;margin-bottom:10px">📅</div>
+        點選左側日期<br>查看或排定拜訪行程
+      </div>
+    </div>
+  </div>
 </div>
 
 </div><!-- /content -->
@@ -1196,6 +1252,7 @@ function nav(tabEl, pageId) {
   if (pageId === 'pharmacies') loadPharmacies();
   if (pageId === 'visits' && !allVisitsCache.length) loadAllVisits();
   if (pageId === 'todo') renderActionItems();
+  if (pageId === 'calendar') renderCalendar();
 }
 
 // ══════════════════════════════
@@ -1387,6 +1444,298 @@ function updateWeekProgress(visits) {
     info.textContent = officeDaysThisWeek > 0
       ? `本週居家辦公 ${officeDaysThisWeek} 天，外訪目標 ${WEEK_TARGET} 家`
       : '';
+  }
+}
+
+// ══════════════════════════════
+// 月曆排程
+// ══════════════════════════════
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let calSelected = null;
+
+function getCalPlan() {
+  try { return JSON.parse(localStorage.getItem('calendarPlan') || '{}'); } catch { return {}; }
+}
+function saveCalPlan(p) { localStorage.setItem('calendarPlan', JSON.stringify(p)); }
+
+function calPrev() { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); }
+function calNext() { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); }
+
+function renderCalendar() {
+  const label = document.getElementById('cal-label');
+  const grid  = document.getElementById('cal-grid');
+  if (!label || !grid) return;
+  label.textContent = `${calYear}年${calMonth + 1}月`;
+
+  const now      = new Date();
+  const todayDs  = fmtDs(now);
+  const offDays  = getOfficeDays();
+  const plan     = getCalPlan();
+
+  // build actual visits map  date→count
+  const visitMap = {};
+  allVisitsCache.forEach(v => {
+    if (!v.date) return;
+    const ds = v.date.replace(/\//g, '-');
+    visitMap[ds] = (visitMap[ds] || 0) + 1;
+  });
+
+  const HDRS = ['一','二','三','四','五','六','日'];
+  let html = HDRS.map(h => `<div class="cal-hdr">${h}</div>`).join('');
+
+  // padding before 1st
+  const firstDow = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const offset   = firstDow === 0 ? 6 : firstDow - 1;
+  const prevLast = new Date(calYear, calMonth, 0).getDate();
+  for (let i = offset - 1; i >= 0; i--) {
+    html += `<div class="cal-cell is-other"><span class="cal-d">${prevLast - i}</span></div>`;
+  }
+
+  const lastDay = new Date(calYear, calMonth + 1, 0).getDate();
+  for (let d = 1; d <= lastDay; d++) {
+    const ds     = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow    = new Date(calYear, calMonth, d).getDay(); // 0=Sun,6=Sat
+    const isWE   = dow === 0 || dow === 6;
+    const isOff  = offDays.includes(ds);
+    const dp     = plan[ds];
+    const vc     = visitMap[ds] || 0;
+    const cls    = ['cal-cell',
+      ds === todayDs    ? 'is-today'    : '',
+      ds === calSelected? 'is-selected' : '',
+      isOff             ? 'is-office'   : '',
+      isWE && !isOff    ? 'is-weekend'  : '',
+    ].filter(Boolean).join(' ');
+
+    let inner = `<span class="cal-d">${d}</span>`;
+    if (isOff) {
+      inner += `<div><span class="cal-badge cal-badge-off">🏠</span></div>`;
+    } else if (dp?.pharmacies?.length) {
+      inner += `<div><span class="cal-badge cal-badge-plan">${dp.pharmacies.length}家</span></div>`;
+      if (dp.route) {
+        const h = Math.floor(dp.route.totalMin / 60), m = dp.route.totalMin % 60;
+        inner += `<div class="cal-time">⏱ ${h > 0 ? h+'h' : ''}${m}m · $${dp.route.fuelCost}</div>`;
+      }
+    }
+    if (vc > 0) {
+      inner += `<div class="cal-dots">${'<span class="cal-dot"></span>'.repeat(Math.min(vc, 5))}</div>`;
+    }
+    html += `<div class="${cls}" onclick="calSelectDay('${ds}')">${inner}</div>`;
+  }
+
+  // trailing padding
+  const total = offset + lastDay;
+  const rem   = total % 7;
+  if (rem !== 0) {
+    for (let i = 1; i <= 7 - rem; i++) {
+      html += `<div class="cal-cell is-other"><span class="cal-d">${i}</span></div>`;
+    }
+  }
+  grid.innerHTML = html;
+}
+
+function fmtDs(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function calSelectDay(ds) {
+  calSelected = ds;
+  renderCalendar();
+  renderDayPanel(ds);
+}
+
+function renderDayPanel(ds) {
+  const panel = document.getElementById('cal-panel');
+  if (!panel) return;
+
+  const d        = new Date(ds + 'T00:00:00');
+  const DNAMES   = ['日','一','二','三','四','五','六'];
+  const dateStr  = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${DNAMES[d.getDay()]}）`;
+  const isOff    = getOfficeDays().includes(ds);
+  const plan     = getCalPlan();
+  const dp       = plan[ds] || { pharmacies: [], route: null };
+  const dayVisits= allVisitsCache.filter(v => v.date && v.date.replace(/\//g,'-') === ds);
+
+  const offBtnStyle = isOff
+    ? 'background:var(--accent);color:#fff;border-color:var(--accent)'
+    : 'background:none;color:var(--muted);border-color:var(--border)';
+
+  // pharmacy list
+  const phHtml = dp.pharmacies.length
+    ? dp.pharmacies.map((ph, i) => `
+        <div class="cal-ph-item">
+          <span class="cal-ph-num">${i+1}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ph.name}</div>
+            ${ph.address ? `<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ph.address}</div>` : ''}
+          </div>
+          <button class="cal-ph-remove" onclick="calRemovePh('${ds}','${ph.id.replace(/'/g,"\\'")}')" title="移除">×</button>
+        </div>`)
+      .join('')
+    : `<div style="text-align:center;padding:16px 0;color:var(--muted);font-size:13px">尚未排定藥局</div>`;
+
+  // route result
+  let routeHtml = '';
+  if (dp.route) {
+    const r  = dp.route;
+    const hh = Math.floor(r.totalMin / 60), mm = r.totalMin % 60;
+    const tStr = hh > 0 ? `${hh} 小時 ${mm} 分` : `${mm} 分鐘`;
+    routeHtml = `
+      <div class="cal-route-box" style="margin-top:12px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">🗺️ 路線預估</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">
+          <span>⏱ ${tStr}</span>
+          <span>📍 約 ${r.totalKm} km</span>
+          <span>⛽ 約 $${r.fuelCost + r.hwCost}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">每家約 25 分 · 城市均速 30km/h · 粗估僅供參考</div>
+      </div>`;
+  }
+
+  // actual visits
+  let actualHtml = '';
+  if (dayVisits.length) {
+    actualHtml = `
+      <div style="margin-top:16px">
+        <div class="cal-section-label">✅ 當日實際拜訪</div>
+        ${dayVisits.map(v => `
+          <div style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;font-size:13px">
+            <span style="color:var(--green)">●</span> <b>${v.pharmacyId}</b>
+            ${v.purpose ? `<span style="color:var(--muted);font-size:11px"> · ${v.purpose}</span>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
+  panel.innerHTML = `
+    <div class="cal-panel-inner">
+      <div class="cal-panel-date">${dateStr}</div>
+      <button onclick="calToggleOfficeCal('${ds}')" style="font-size:12px;padding:5px 12px;border-radius:20px;border:1px solid;cursor:pointer;margin-bottom:16px;${offBtnStyle}">
+        🏠 ${isOff ? '居家辦公中（點選取消）' : '標記居家辦公'}
+      </button>
+
+      <div class="cal-section-label">📌 計畫拜訪</div>
+      <div id="cal-ph-list">${phHtml}</div>
+
+      <div style="position:relative;margin-top:8px">
+        <input id="cal-ph-inp" class="task-input" placeholder="搜尋藥局名稱加入…"
+          oninput="calPhSearch(this.value,'${ds}')" onfocus="calPhSearch(this.value,'${ds}')"
+          style="width:100%;box-sizing:border-box" autocomplete="off">
+        <div id="cal-ph-dd" class="ph-dropdown"></div>
+      </div>
+
+      ${!isOff && dp.pharmacies.length >= 1 ? `
+      <button id="cal-route-btn" onclick="calCalcRoute('${ds}')"
+        style="margin-top:10px;width:100%;padding:9px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+        ✦ AI 排序 + 路線預估
+      </button>` : ''}
+
+      ${routeHtml}
+      ${actualHtml}
+    </div>`;
+}
+
+function calToggleOfficeCal(ds) {
+  const days = getOfficeDays();
+  const idx  = days.indexOf(ds);
+  if (idx >= 0) days.splice(idx, 1); else days.push(ds);
+  const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  localStorage.setItem('officeDays', JSON.stringify(days.filter(d => d >= cutoff)));
+  renderOfficeDayBtn();
+  updateWeekProgress(allVisitsCache);
+  renderCalendar();
+  renderDayPanel(ds);
+}
+
+function calPhSearch(q, ds) {
+  const dd = document.getElementById('cal-ph-dd');
+  if (!dd) return;
+  if (!q || !q.trim()) { dd.style.display = 'none'; return; }
+
+  const plan       = getCalPlan();
+  const existIds   = new Set((plan[ds]?.pharmacies || []).map(p => p.id));
+  const matches    = pharmacies.filter(p => {
+    const name = p.name || p['店名'] || '';
+    const id   = p.id   || p['Customer_ID'] || '';
+    return name.includes(q.trim()) && !existIds.has(id);
+  }).slice(0, 8);
+
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(p => {
+    const id   = (p.id || p['Customer_ID'] || '').replace(/'/g, "\\'");
+    const name = (p.name || p['店名'] || '').replace(/'/g, "\\'");
+    const addr = (p.address || p['地址'] || '').replace(/'/g, "\\'");
+    return `<div class="ph-option" onclick="calAddPh('${ds}','${id}','${name}','${addr}')">${p.name||p['店名']||''}<span style="color:var(--muted);font-size:11px;margin-left:6px">${p.address||p['地址']||''}</span></div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+
+function calAddPh(ds, id, name, address) {
+  const plan = getCalPlan();
+  if (!plan[ds]) plan[ds] = { pharmacies: [], route: null };
+  if (plan[ds].pharmacies.find(p => p.id === id)) return;
+  plan[ds].pharmacies.push({ id, name, address });
+  plan[ds].route = null;
+  saveCalPlan(plan);
+  const dd = document.getElementById('cal-ph-dd');
+  const inp = document.getElementById('cal-ph-inp');
+  if (dd) dd.style.display = 'none';
+  if (inp) inp.value = '';
+  renderCalendar();
+  renderDayPanel(ds);
+}
+
+function calRemovePh(ds, pharmacyId) {
+  const plan = getCalPlan();
+  if (!plan[ds]) return;
+  plan[ds].pharmacies = plan[ds].pharmacies.filter(p => p.id !== pharmacyId);
+  plan[ds].route = null;
+  if (!plan[ds].pharmacies.length) delete plan[ds];
+  saveCalPlan(plan);
+  renderCalendar();
+  renderDayPanel(ds);
+}
+
+async function calCalcRoute(ds) {
+  const btn = document.getElementById('cal-route-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px"></span> AI 排序中…'; }
+
+  const plan = getCalPlan();
+  const dp   = plan[ds];
+  if (!dp?.pharmacies?.length) return;
+
+  try {
+    const payload = dp.pharmacies.map(p => ({
+      id: p.id, name: p.name, address: p.address,
+      lastVisitDays: 14, isNew: false, isDad: false, hasDelivery: false, pendingOrder: false
+    }));
+    const result = await post('/optimize-route', { pharmacies: payload });
+    const ordered = result.route || dp.pharmacies;
+
+    // reorder our pharmacy list to match AI result
+    const idOrder = ordered.map(r => r.id || r.name);
+    plan[ds].pharmacies.sort((a, b) => {
+      const ai = idOrder.indexOf(a.id), bi = idOrder.indexOf(b.id);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+
+    // rough time & distance estimate
+    const N       = plan[ds].pharmacies.length;
+    const totalKm = 10 + N * 5;
+    const drivMin = Math.round(totalKm / 30 * 60);
+    const visitMin= N * 25;
+    const totalMin= drivMin + visitMin + 15;
+
+    const KPL = 24, GP = 32, HWR = 0.3, HWP = 1.3, HWF = 20;
+    const fuelCost = Math.round(totalKm / KPL * GP);
+    const hwCost   = Math.round(Math.max(0, totalKm * HWR - HWF) * HWP);
+
+    plan[ds].route = { totalKm, drivMin, visitMin, totalMin, fuelCost, hwCost };
+    saveCalPlan(plan);
+    renderCalendar();
+    renderDayPanel(ds);
+  } catch(e) {
+    toast('❌ 路線計算失敗：' + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 排序 + 路線預估'; }
   }
 }
 
