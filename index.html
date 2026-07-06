@@ -1458,6 +1458,12 @@ function getCalPlan() {
   try { return JSON.parse(localStorage.getItem('calendarPlan') || '{}'); } catch { return {}; }
 }
 function saveCalPlan(p) { localStorage.setItem('calendarPlan', JSON.stringify(p)); }
+function normDs(dateStr) {
+  // 把 "2026/6/7" 或 "2026-6-7" 統一轉成零補齊的 "2026-07-07"
+  const parts = String(dateStr).replace(/\//g, '-').split('-');
+  if (parts.length !== 3) return dateStr;
+  return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+}
 
 function calPrev() { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); }
 function calNext() { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); }
@@ -1477,7 +1483,7 @@ function renderCalendar() {
   const visitMap = {};
   allVisitsCache.forEach(v => {
     if (!v.date) return;
-    const ds = v.date.replace(/\//g, '-');
+    const ds = normDs(v.date);
     visitMap[ds] = (visitMap[ds] || 0) + 1;
   });
 
@@ -1554,7 +1560,7 @@ function renderDayPanel(ds) {
   const isOff    = getOfficeDays().includes(ds);
   const plan     = getCalPlan();
   const dp       = plan[ds] || { pharmacies: [], route: null };
-  const dayVisits= allVisitsCache.filter(v => v.date && v.date.replace(/\//g,'-') === ds);
+  const dayVisits= allVisitsCache.filter(v => v.date && normDs(v.date) === ds);
 
   const offBtnStyle = isOff
     ? 'background:var(--accent);color:#fff;border-color:var(--accent)'
@@ -1597,12 +1603,21 @@ function renderDayPanel(ds) {
   if (dayVisits.length) {
     actualHtml = `
       <div style="margin-top:16px">
-        <div class="cal-section-label">✅ 當日實際拜訪</div>
-        ${dayVisits.map(v => `
-          <div style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;font-size:13px">
-            <span style="color:var(--green)">●</span> <b>${v.pharmacyId}</b>
-            ${v.purpose ? `<span style="color:var(--muted);font-size:11px"> · ${v.purpose}</span>` : ''}
-          </div>`).join('')}
+        <div class="cal-section-label">✅ 當日實際拜訪（${dayVisits.length} 家）</div>
+        ${dayVisits.map(v => {
+          const detail = v.summary || v.content || '';
+          const ai     = v.actionItems || '';
+          return `
+          <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:${detail||ai?'6px':'0'}">
+              <span style="color:var(--green);font-size:10px">●</span>
+              <b style="font-size:13px">${v.pharmacyId}</b>
+              ${v.purpose ? `<span style="color:var(--muted);font-size:11px;margin-left:4px">${v.purpose}</span>` : ''}
+            </div>
+            ${detail ? `<div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:${ai?'5px':'0'}">${detail}</div>` : ''}
+            ${ai     ? `<div style="font-size:11px;color:var(--orange);background:var(--orange-light);border-radius:4px;padding:4px 7px;margin-top:4px">📌 ${ai}</div>` : ''}
+          </div>`;
+        }).join('')}
       </div>`;
   }
 

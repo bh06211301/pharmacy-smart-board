@@ -378,7 +378,7 @@ async function handleAllVisits(env) {
     })
     .filter(v => v && v.visitId && v.date)
     .sort((a, b) => new Date(b.date.replace(/\//g,'-')) - new Date(a.date.replace(/\//g,'-')))
-    .slice(0, 60);
+    .slice(0, 500);
 
   return json({ ok: true, count: visits.length, visits });
 }
