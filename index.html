@@ -1241,7 +1241,7 @@ function buildAreaSidebar() {
 
   container.innerHTML = cities.map(city => {
     const total = Object.values(cityMap[city]).reduce((a,b)=>a+b, 0);
-    const key = city.replace(/[市縣]/g, '');
+    const key = city;
     const districts = Object.entries(cityMap[city]).sort((a,b)=>b[1]-a[1]);
     return `
       <div class="sidebar-item city-item" onclick="toggleCity('${key}')">
