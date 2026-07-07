@@ -227,9 +227,12 @@ select.task-input{cursor:pointer}
 .e-q-title{font-size:13px;font-weight:700;color:var(--text)}
 .e-q-sub{font-size:11px;color:var(--muted);margin-top:1px}
 .e-q-ui{border-left:3px solid var(--red)}
-.e-q-ii{border-left:3px solid var(--blue,#3b6af5)}
+.e-q-ii{border-left:3px solid #3b6af5}
 .e-q-iii{border-left:3px solid var(--orange)}
-.e-q-pool{border-left:3px solid var(--muted)}
+.e-q-iv{border-left:3px solid var(--muted2)}
+.e-q-pool{border-left:3px solid var(--muted);background:var(--surface2)}
+.e-q-example{font-size:10px;color:var(--muted2);line-height:1.5;margin-top:3px}
+.e-pool-section{margin-top:14px}
 .e-todo-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);cursor:grab;transition:all .15s}
 .e-todo-card:hover{box-shadow:var(--shadow-md)}
 .e-todo-card.done{opacity:.5;background:var(--surface2)}
@@ -550,28 +553,56 @@ let allVisitsCache = [];
     <div class="e-quadrant e-q-ui" ondragover="eDragOver(event)" ondrop="eDrop(event,'ui')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
         <span class="e-q-icon">❗</span>
-        <div><div class="e-q-title">緊急重要</div><div class="e-q-sub">立即處理</div></div>
+        <div>
+          <div class="e-q-title">緊急重要</div>
+          <div class="e-q-sub">立即處理</div>
+          <div class="e-q-example">如：今日調貨、緊急客訴、<br>客戶等回覆、今天要送的藥</div>
+        </div>
       </div>
       <div id="eq-ui"></div>
     </div>
     <div class="e-quadrant e-q-ii" ondragover="eDragOver(event)" ondrop="eDrop(event,'ii')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
         <span class="e-q-icon">📋</span>
-        <div><div class="e-q-title">重要不緊急</div><div class="e-q-sub">規劃時間處理</div></div>
+        <div>
+          <div class="e-q-title">重要不緊急</div>
+          <div class="e-q-sub">排程計畫處理</div>
+          <div class="e-q-example">如：定期拜訪計畫、關係維護、<br>產品提案準備、長期合作跟進</div>
+        </div>
       </div>
       <div id="eq-ii"></div>
     </div>
     <div class="e-quadrant e-q-iii" ondragover="eDragOver(event)" ondrop="eDrop(event,'iii')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
         <span class="e-q-icon">⚡</span>
-        <div><div class="e-q-title">緊急不重要</div><div class="e-q-sub">委派或快速處理</div></div>
+        <div>
+          <div class="e-q-title">緊急不重要</div>
+          <div class="e-q-sub">快速完成或委派</div>
+          <div class="e-q-example">如：交辦文件、例行回報、<br>行政確認、轉達訊息</div>
+        </div>
       </div>
       <div id="eq-iii"></div>
     </div>
+    <div class="e-quadrant e-q-iv" ondragover="eDragOver(event)" ondrop="eDrop(event,'iv')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">🗑</span>
+        <div>
+          <div class="e-q-title">不緊急不重要</div>
+          <div class="e-q-sub">考慮刪除或擱置</div>
+          <div class="e-q-example">如：可延後的參考資料、<br>不影響業績的瑣事</div>
+        </div>
+      </div>
+      <div id="eq-iv"></div>
+    </div>
+  </div>
+  <div class="e-pool-section">
     <div class="e-quadrant e-q-pool" ondragover="eDragOver(event)" ondrop="eDrop(event,'pool')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
         <span class="e-q-icon">📦</span>
-        <div><div class="e-q-title">待辦池</div><div class="e-q-sub">未分類 / 低優先</div></div>
+        <div>
+          <div class="e-q-title">待辦池</div>
+          <div class="e-q-sub">新增後先放這裡，再拖曳到上方對應格子</div>
+        </div>
       </div>
       <div id="eq-pool"></div>
     </div>
@@ -602,12 +633,16 @@ let allVisitsCache = [];
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="modal-field">
         <div class="modal-field-label">分類</div>
-        <select class="modal-input" id="nt-quadrant" style="padding:9px 10px">
-          <option value="pool">📦 待辦池（未分類）</option>
-          <option value="ui">❗ 緊急重要</option>
-          <option value="ii">📋 重要不緊急</option>
-          <option value="iii">⚡ 緊急不重要</option>
-        </select>
+        <div style="position:relative">
+          <select class="modal-input" id="nt-quadrant" style="padding:9px 10px">
+            <option value="pool">📦 待辦池（未分類）</option>
+            <option value="ui">❗ 緊急重要</option>
+            <option value="ii">📋 重要不緊急</option>
+            <option value="iii">⚡ 緊急不重要</option>
+            <option value="iv">🗑 不緊急不重要</option>
+          </select>
+          <div id="nt-ai-quadrant-badge" style="display:none;margin-top:5px;font-size:11px;color:var(--accent)"></div>
+        </div>
       </div>
       <div class="modal-field">
         <div class="modal-field-label">排定日期（選填）</div>
@@ -2189,15 +2224,16 @@ async function clearDoneTodos() {
 
 // ── 艾森豪矩陣渲染 ──
 const QMETA = {
-  ui:   {color:'var(--red)'},
-  ii:   {color:'#3b6af5'},
-  iii:  {color:'var(--orange)'},
-  pool: {color:'var(--muted)'}
+  ui:   {color:'var(--red)',    label:'❗ 緊急重要'},
+  ii:   {color:'#3b6af5',      label:'📋 重要不緊急'},
+  iii:  {color:'var(--orange)', label:'⚡ 緊急不重要'},
+  iv:   {color:'var(--muted2)', label:'🗑 不緊急不重要'},
+  pool: {color:'var(--muted)',  label:'📦 待辦池'}
 };
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
-  ['ui','ii','iii','pool'].forEach(q => {
+  ['ui','ii','iii','iv','pool'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
     const items = todosCache.filter(t => (t.quadrant||'pool') === q);
@@ -2286,7 +2322,7 @@ async function eDrop(ev, quadrant) {
   item.quadrant = quadrant;
   renderEisenhower();
   await todoApiUpdate(id, { quadrant });
-  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', pool:'待辦池'};
+  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', iv:'不緊急不重要', pool:'待辦池'};
   toast(`✅ 已移至「${labels[quadrant]}」`);
 }
 
@@ -2339,6 +2375,7 @@ function openNewTodoModal() {
   document.getElementById('nt-date').value = '';
   document.getElementById('nt-ai-area').style.display = 'none';
   document.getElementById('nt-suggestions').style.display = 'none';
+  document.getElementById('nt-ai-quadrant-badge').style.display = 'none';
   _ntAiSuggestions = [];
 }
 
@@ -2388,6 +2425,15 @@ async function fetchNtAiSuggestions() {
   try {
     const d = await post('/ai-todo-suggest', { pharmacyName: phName, task });
     _ntAiSuggestions = d.suggestions || [];
+
+    // 顯示 AI 建議象限
+    if (d.suggestedQuadrant && QMETA[d.suggestedQuadrant]) {
+      document.getElementById('nt-quadrant').value = d.suggestedQuadrant;
+      const badge = document.getElementById('nt-ai-quadrant-badge');
+      badge.style.display = 'block';
+      badge.innerHTML = `✦ AI 建議分類：${QMETA[d.suggestedQuadrant].label}`;
+    }
+
     const el = document.getElementById('nt-suggestions');
     el.style.display = 'block';
     el.innerHTML = _ntAiSuggestions.map((s, i) => `

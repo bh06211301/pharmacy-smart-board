@@ -781,26 +781,46 @@ async function handleAiTodoSuggest(request, env) {
   const { pharmacyName, task } = await request.json();
   if (!task) return json({ error: '缺少 task' }, 400);
 
-  const prompt = `你是業務助理，業務員要去拜訪藥局。
+  const prompt = `你是藥局業務助理。請根據以下待辦事項，輸出 JSON（不要 markdown）：
+
 藥局：${pharmacyName || '（未指定）'}
 待辦事項：${task}
 
-請列出 2~4 條「業務員這次需要準備或注意的具體事項」，每條一行，不要編號，不要解釋，直接列出重點。`;
+艾森豪矩陣判斷規則：
+- ui（緊急重要）：今天就要做、客戶在等、影響業績的事，如當日調貨、緊急客訴、今日送藥
+- ii（重要不緊急）：影響業績但有時間規劃，如定期拜訪、提案準備、關係維護
+- iii（緊急不重要）：有時效但不影響業績，如交辦文件、例行回報、轉達訊息
+- iv（不緊急不重要）：可延後或刪除，如資料整理、非必要瑣事
+
+輸出 JSON：
+{"suggestedQuadrant":"ui|ii|iii|iv","suggestions":["準備事項1","準備事項2","準備事項3"]}
+
+suggestions 列 2~4 條具體要準備的事，不要編號。只輸出純 JSON。`;
 
   const geminiRes = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 300, temperature: 0.4 }
+      generationConfig: { maxOutputTokens: 400, temperature: 0.3 }
     })
   });
   const geminiData = await geminiRes.json();
   if (!geminiRes.ok) return json({ error: `Gemini 錯誤：${geminiData?.error?.message}` }, 500);
 
   const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const suggestions = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  return json({ ok: true, suggestions });
+  let suggestedQuadrant = 'pool';
+  let suggestions = [];
+  try {
+    const cleaned = raw.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    const parsed = JSON.parse(cleaned);
+    suggestedQuadrant = parsed.suggestedQuadrant || 'pool';
+    suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+  } catch {
+    // fallback: 純文字處理
+    suggestions = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  }
+  return json({ ok: true, suggestedQuadrant, suggestions });
 }
 
 // ============================================================
