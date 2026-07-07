@@ -218,6 +218,24 @@ select.task-input{cursor:pointer}
 .todo-priority-high{background:var(--red-light);color:var(--red)}
 .todo-priority-medium{background:var(--orange-light);color:var(--orange)}
 .todo-priority-low{background:var(--green-light);color:var(--green)}
+/* EISENHOWER MATRIX */
+.eisenhower-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.e-quadrant{border:1px solid var(--border);border-radius:var(--radius);padding:14px;min-height:160px;transition:border-color .15s}
+.e-quadrant.drag-over{border-color:var(--accent);background:var(--accent-light)}
+.e-q-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.e-q-icon{font-size:20px;flex-shrink:0}
+.e-q-title{font-size:13px;font-weight:700;color:var(--text)}
+.e-q-sub{font-size:11px;color:var(--muted);margin-top:1px}
+.e-q-ui{border-left:3px solid var(--red)}
+.e-q-ii{border-left:3px solid var(--blue,#3b6af5)}
+.e-q-iii{border-left:3px solid var(--orange)}
+.e-q-pool{border-left:3px solid var(--muted)}
+.e-todo-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);cursor:grab;transition:all .15s}
+.e-todo-card:hover{box-shadow:var(--shadow-md)}
+.e-todo-card.done{opacity:.5;background:var(--surface2)}
+.e-resolution{width:100%;min-height:40px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;color:var(--text);background:var(--surface2);outline:none;box-sizing:border-box;transition:border-color .15s}
+.e-resolution:focus{border-color:var(--accent);background:var(--white)}
+.modal-field-label{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:5px}
 /* CALENDAR */
 .cal-wrap{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
 .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
@@ -270,7 +288,7 @@ let tasks = [];
 let todayRoute = [];
 let lastScript = '';
 let customerStatuses = {};
-let actionItems = [];
+let todosCache = [];
 let areaFilter = {city:'', district:''};
 let allVisitsCache = [];
 </script>
@@ -515,24 +533,99 @@ let allVisitsCache = [];
   </div>
 </div>
 
-<!-- ══ 待辦清單 ══ -->
+<!-- ══ 待辦清單（艾森豪矩陣） ══ -->
 <div class="page" id="page-todo">
   <div class="page-header">
     <div>
-      <div class="page-title">📌 待辦清單</div>
-      <div class="page-sub">AI 從拜訪紀錄自動提取的待辦事項</div>
+      <div class="page-title">📌 智能待辦清單</div>
+      <div class="page-sub">艾森豪矩陣 · 拖曳卡片移動分類</div>
     </div>
     <div class="btn-group">
       <button class="btn btn-ghost btn-sm" onclick="clearDoneTodos()">清除已完成</button>
-      <button class="btn btn-ai btn-sm" onclick="analyzeAllTasks()">✦ 重新 AI 分析</button>
+      <button class="btn btn-ai btn-sm" id="analyze-btn" onclick="analyzeAllTasks()">✦ AI 分析拜訪</button>
+      <button class="btn btn-primary btn-sm" onclick="openNewTodoModal()">＋ 新增待辦</button>
     </div>
   </div>
-  <div id="todo-empty" style="text-align:center;padding:48px 24px;color:var(--muted)">
-    <div style="font-size:36px;margin-bottom:14px">✅</div>
-    <div style="font-size:14px;font-weight:600;margin-bottom:8px">暫無待辦事項</div>
-    <div style="font-size:12px">前往「拜訪紀錄」點「AI 分析待辦事項」自動生成，<br>或在查詢單一藥局後點「AI 分析」</div>
+  <div class="eisenhower-grid" id="eisenhower-grid">
+    <div class="e-quadrant e-q-ui" ondragover="eDragOver(event)" ondrop="eDrop(event,'ui')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">❗</span>
+        <div><div class="e-q-title">緊急重要</div><div class="e-q-sub">立即處理</div></div>
+      </div>
+      <div id="eq-ui"></div>
+    </div>
+    <div class="e-quadrant e-q-ii" ondragover="eDragOver(event)" ondrop="eDrop(event,'ii')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">📋</span>
+        <div><div class="e-q-title">重要不緊急</div><div class="e-q-sub">規劃時間處理</div></div>
+      </div>
+      <div id="eq-ii"></div>
+    </div>
+    <div class="e-quadrant e-q-iii" ondragover="eDragOver(event)" ondrop="eDrop(event,'iii')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">⚡</span>
+        <div><div class="e-q-title">緊急不重要</div><div class="e-q-sub">委派或快速處理</div></div>
+      </div>
+      <div id="eq-iii"></div>
+    </div>
+    <div class="e-quadrant e-q-pool" ondragover="eDragOver(event)" ondrop="eDrop(event,'pool')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">📦</span>
+        <div><div class="e-q-title">待辦池</div><div class="e-q-sub">未分類 / 低優先</div></div>
+      </div>
+      <div id="eq-pool"></div>
+    </div>
   </div>
-  <div id="todo-list"></div>
+</div>
+
+<!-- ══ 新增待辦 Modal ══ -->
+<div class="modal-overlay" id="new-todo-modal" style="display:none;align-items:center;justify-content:center"
+  onclick="if(event.target===this)closeNewTodoModal()">
+  <div class="modal" style="width:520px" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <div class="modal-title" style="margin-bottom:0">＋ 新增待辦事項</div>
+      <button onclick="closeNewTodoModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1">✕</button>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">藥局（選填）</div>
+      <div style="position:relative">
+        <input type="text" class="modal-input" id="nt-ph-search" placeholder="搜尋藥局名稱…" autocomplete="off"
+          oninput="ntPhSearch(this.value)" onfocus="ntPhSearch(this.value)">
+        <div class="ph-dropdown" id="nt-ph-dd"></div>
+      </div>
+      <input type="hidden" id="nt-ph-id"><input type="hidden" id="nt-ph-name">
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">待辦事項 *</div>
+      <input type="text" class="modal-input" id="nt-task" placeholder="描述要做的事…" oninput="ntTaskInput()">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="modal-field">
+        <div class="modal-field-label">分類</div>
+        <select class="modal-input" id="nt-quadrant" style="padding:9px 10px">
+          <option value="pool">📦 待辦池（未分類）</option>
+          <option value="ui">❗ 緊急重要</option>
+          <option value="ii">📋 重要不緊急</option>
+          <option value="iii">⚡ 緊急不重要</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <div class="modal-field-label">排定日期（選填）</div>
+        <input type="date" class="modal-input" id="nt-date">
+      </div>
+    </div>
+    <div class="modal-field" id="nt-ai-area" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="modal-field-label" style="margin-bottom:0">💡 AI 建議準備事項</div>
+        <button class="btn btn-ai btn-sm" id="nt-ai-btn" onclick="fetchNtAiSuggestions()">取得建議</button>
+      </div>
+      <div id="nt-suggestions" style="display:none;background:var(--surface2);border-radius:8px;padding:10px 12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewTodoModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitNewTodo()">建立待辦</button>
+    </div>
+  </div>
 </div>
 
 <!-- ══ 月曆排程 ══ -->
@@ -1264,7 +1357,7 @@ function nav(tabEl, pageId) {
   document.getElementById('page-' + pageId).classList.add('active');
   if (pageId === 'pharmacies') loadPharmacies();
   if (pageId === 'visits' && !allVisitsCache.length) loadAllVisits();
-  if (pageId === 'todo') renderActionItems();
+  if (pageId === 'todo') loadTodos();
   if (pageId === 'calendar') {
     renderCalendar();
     renderCalTodoPool();
@@ -1544,7 +1637,7 @@ function renderCalendar() {
     if (vc > 0) {
       inner += `<div class="cal-dots">${'<span class="cal-dot"></span>'.repeat(Math.min(vc, 5))}</div>`;
     }
-    const tc = actionItems.filter(a => !a.done && a.scheduledDate === ds).length;
+    const tc = todosCache.filter(a => !a.done && a.scheduledDate === ds).length;
     if (tc > 0) {
       inner += `<div style="margin-top:2px"><span style="font-size:9px;padding:1px 5px;border-radius:8px;background:var(--orange-light);color:var(--orange);font-weight:700">📌${tc}</span></div>`;
     }
@@ -1688,8 +1781,9 @@ function renderDayPanel(ds) {
       ${routeHtml}
       ${actualHtml}
       ${(()=>{
-        const dayTodos = actionItems.filter(a => !a.done && a.scheduledDate === ds);
+        const dayTodos = todosCache.filter(a => !a.done && a.scheduledDate === ds);
         const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
+        const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)' };
         return `
       <div style="margin-top:16px">
         <div class="cal-section-label">📌 今日待辦（${dayTodos.length} 項）</div>
@@ -1699,13 +1793,14 @@ function renderDayPanel(ds) {
           ondrop="calOnDrop(event,'${ds}')">
           ${dayTodos.length ? dayTodos.map(item => {
             const icon = tiMap[item.type] || '📌';
-            const prioColor = item.priority==='high'?'var(--red)':item.priority==='low'?'var(--green)':'var(--orange)';
-            return `<div class="todo-chip" id="todo-chip-${item.id}" draggable="true"
-              ondragstart="todoChipDragStart(event,${item.id})"
-              ondragend="todoChipDragEnd(${item.id})">
+            const safeId = item.id.replace(/[^a-z0-9]/gi,'_');
+            const prioColor = qColor[item.quadrant||'pool'];
+            return `<div class="todo-chip" id="todo-chip-${safeId}" draggable="true"
+              ondragstart="todoChipDragStart(event,'${item.id}')"
+              ondragend="todoChipDragEnd('${item.id}')">
               <span style="color:${prioColor};font-size:12px">●</span>
               <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon} ${item.task}</span>
-              <button onclick="todoUnschedule(${item.id},'${ds}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:0 2px;flex-shrink:0">×</button>
+              <button onclick="todoUnschedule('${item.id}','${ds}')" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:16px;padding:0 2px;flex-shrink:0">×</button>
             </div>`;
           }).join('') : '<div style="text-align:center;padding:12px 0;color:var(--muted);font-size:12px">拖曳待辦事項到此排入日程</div>'}
         </div>
@@ -1932,30 +2027,40 @@ function renderAllVisits() {
 async function analyzeAllTasks() {
   const btn = document.getElementById('analyze-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> AI 分析中...'; }
-  const visits = allVisitsCache.length ? allVisitsCache : [];
-  if (!visits.length) {
+  if (!allVisitsCache.length) {
     try { const d = await get('/all-visits'); allVisitsCache = d.visits || []; } catch {}
   }
   if (!allVisitsCache.length) {
     toast('⚠️ 尚無拜訪紀錄可分析');
-    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析待辦事項'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析拜訪'; }
     return;
   }
   try {
     const d = await post('/analyze-tasks', { visits: allVisitsCache.slice(0, 30) });
     const newTasks = d.tasks || [];
-    if (newTasks.length) {
-      newTasks.forEach(t => addActionItem(t));
-      updateTodoBadge();
-      toast(`✅ AI 發現 ${newTasks.length} 個待辦事項，已加入待辦清單`);
+    let added = 0;
+    for (const t of newTasks) {
+      const dup = todosCache.find(c => c.task === t.task && !c.done);
+      if (dup) continue;
+      const res = await todoApiCreate({
+        task: t.task, quadrant: t.priority === 'high' ? 'ui' : 'pool',
+        pharmacyId: t.pharmacyId || '', pharmacyName: t.pharmacyName || '',
+        type: t.type || 'other', aiSuggestions: [],
+        sourceVisitId: t.sourceVisitId || null, sourceVisitDate: t.sourceVisitDate || null,
+      });
+      if (res?.ok) { todosCache.push(res.todo); added++; }
+    }
+    if (added) {
+      renderEisenhower(); updateTodoBadge();
+      toast(`✅ AI 發現 ${added} 個待辦事項，已加入待辦清單`);
       nav(document.querySelectorAll('.nav-tab')[4], 'todo');
     } else {
-      toast('✅ AI 分析完成：目前無待辦事項');
+      toast('✅ AI 分析完成：無新增待辦');
     }
   } catch(e) {
     toast('❌ 分析失敗：' + e.message);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析待辦事項'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 分析拜訪'; }
   }
 }
 
@@ -1992,13 +2097,28 @@ async function analyzePharmacyTasks(pharmacyId, pharmacyName, visits) {
   }
 }
 
-function addActionItemFromSuggest(idx, pharmacyId) {
+async function addActionItemFromSuggest(idx, pharmacyId) {
   const t = (window._suggestedTasks||[])[idx];
-  if (t) { addActionItem({ ...t, pharmacyId }); updateTodoBadge(); toast('✅ 已加入待辦清單'); }
+  if (!t) return;
+  const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === pharmacyId);
+  const res = await todoApiCreate({
+    task: t.task, quadrant: t.priority === 'high' ? 'ui' : 'pool',
+    pharmacyId: pharmacyId, pharmacyName: ph?.name||ph?.['店名']||pharmacyId,
+    type: t.type || 'other', aiSuggestions: [],
+  });
+  if (res?.ok) { todosCache.push(res.todo); updateTodoBadge(); toast('✅ 已加入待辦清單'); }
 }
 
-function addAllSuggestedTasks() {
-  (window._suggestedTasks||[]).forEach(t => addActionItem(t));
+async function addAllSuggestedTasks() {
+  const tasks = window._suggestedTasks || [];
+  for (const t of tasks) {
+    const res = await todoApiCreate({
+      task: t.task, quadrant: t.priority === 'high' ? 'ui' : 'pool',
+      pharmacyId: t.pharmacyId || '', pharmacyName: t.pharmacyName || '',
+      type: t.type || 'other', aiSuggestions: [],
+    });
+    if (res?.ok) todosCache.push(res.todo);
+  }
   updateTodoBadge();
   window._suggestedTasks = [];
   const el = document.getElementById('ph-task-suggest');
@@ -2007,119 +2127,329 @@ function addAllSuggestedTasks() {
 }
 
 // ══════════════════════════════
-// 待辦清單管理
+// 待辦清單系統（KV 持久化 + 艾森豪矩陣）
 // ══════════════════════════════
-function addActionItem(item) {
-  const existing = actionItems.find(a => a.task === item.task && !a.done);
-  if (existing) return;
-  actionItems.push({
-    id: Date.now() + Math.random(),
-    task: item.task || '',
-    type: item.type || 'other',
-    priority: item.priority || 'medium',
-    pharmacyId: item.pharmacyId || '',
-    done: false,
-    createdAt: new Date().toLocaleDateString('zh-TW')
-  });
+let _ntAiSuggestions = [];
+
+async function loadTodos() {
+  try {
+    const d = await get('/todos-v2');
+    todosCache = d.todos || [];
+  } catch { todosCache = []; }
+  renderEisenhower();
+  renderCalTodoPool();
+  updateTodoBadge();
 }
 
 function updateTodoBadge() {
-  const count = actionItems.filter(a => !a.done).length;
+  const count = todosCache.filter(t => !t.done).length;
   const el = document.getElementById('sb-todo');
   if (el) el.textContent = count || '—';
 }
 
-function toggleTodo(id) {
-  const item = actionItems.find(a => a.id === id);
-  if (item) { item.done = !item.done; renderActionItems(); updateTodoBadge(); }
+async function todoApiCreate(data) {
+  const res = await fetch(WORKER + '/todos-v2', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  });
+  return res.json();
 }
 
-function deleteTodo(id) {
-  actionItems = actionItems.filter(a => a.id !== id);
-  renderActionItems();
-  updateTodoBadge();
+async function todoApiUpdate(id, data) {
+  const res = await fetch(WORKER + '/todos-v2', {
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id, ...data})
+  });
+  return res.json();
 }
 
-function clearDoneTodos() {
-  actionItems = actionItems.filter(a => !a.done);
-  renderActionItems();
-  updateTodoBadge();
+async function todoApiDelete(id) {
+  return fetch(WORKER + '/todos-v2?id=' + encodeURIComponent(id), {method:'DELETE'}).then(r=>r.json());
+}
+
+async function toggleTodo(id) {
+  const item = todosCache.find(t => t.id === id);
+  if (!item) return;
+  item.done = !item.done;
+  renderEisenhower(); updateTodoBadge(); renderCalendar();
+  await todoApiUpdate(id, { done: item.done });
+}
+
+async function todoDelete(id) {
+  todosCache = todosCache.filter(t => t.id !== id);
+  renderEisenhower(); updateTodoBadge(); renderCalTodoPool(); renderCalendar();
+  await todoApiDelete(id);
+}
+
+async function clearDoneTodos() {
+  const doneIds = todosCache.filter(t => t.done).map(t => t.id);
+  todosCache = todosCache.filter(t => !t.done);
+  renderEisenhower(); updateTodoBadge();
+  for (const id of doneIds) await todoApiDelete(id);
   toast('✅ 已清除完成項目');
 }
 
-function renderActionItems() {
-  const listEl = document.getElementById('todo-list');
-  const emptyEl = document.getElementById('todo-empty');
-  if (!listEl) return;
+// ── 艾森豪矩陣渲染 ──
+const QMETA = {
+  ui:   {color:'var(--red)'},
+  ii:   {color:'#3b6af5'},
+  iii:  {color:'var(--orange)'},
+  pool: {color:'var(--muted)'}
+};
+const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
-  if (!actionItems.length) {
-    listEl.innerHTML = '';
-    if (emptyEl) emptyEl.style.display = 'block';
-    return;
-  }
-  if (emptyEl) emptyEl.style.display = 'none';
-
-  const typeInfo = {
-    return_receipt: ['📋', '歸還紅單'],
-    get_receipt:    ['📥', '取回紅單'],
-    revisit:        ['📅', '安排拜訪'],
-    prepare:        ['🎒', '準備物品'],
-    follow_up:      ['🔔', '追蹤確認'],
-    other:          ['📌', '其他']
-  };
-
-  const sorted = [...actionItems].sort((a, b) => {
-    if (a.done !== b.done) return a.done ? 1 : -1;
-    const p = { high:0, medium:1, low:2 };
-    return (p[a.priority]||1) - (p[b.priority]||1);
+function renderEisenhower() {
+  ['ui','ii','iii','pool'].forEach(q => {
+    const el = document.getElementById('eq-' + q);
+    if (!el) return;
+    const items = todosCache.filter(t => (t.quadrant||'pool') === q);
+    if (!items.length) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px 0">（空）</div>';
+      return;
+    }
+    el.innerHTML = items.map(t => renderTodoCard(t)).join('');
   });
+}
 
-  listEl.innerHTML = sorted.map(item => {
-    const [icon, label] = typeInfo[item.type] || typeInfo.other;
-    const checked = item.done ? 'checked' : '';
-    return `<div class="todo-item ${item.done?'done':''}">
-      <div class="todo-check ${checked}" onclick="toggleTodo(${item.id})">
-        ${item.done ? '✓' : ''}
+function renderTodoCard(t) {
+  const icon = TYPE_ICON[t.type] || '📌';
+  const color = (QMETA[t.quadrant||'pool']||QMETA.pool).color;
+  const dateBadge = t.scheduledDate
+    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#e0f2fe;color:#0284c7">📅 ${t.scheduledDate}</span>` : '';
+  const aiSugg = (t.aiSuggestions||[]).length
+    ? `<div style="margin-top:5px;font-size:11px;color:var(--muted2)">💡 ${t.aiSuggestions.join('、')}</div>` : '';
+  const linkedBadge = (t.relatedTodoIds||[]).length
+    ? `<div style="margin-top:3px;font-size:11px;color:var(--accent)">📌 已連結 ${t.relatedTodoIds.length} 筆關聯待辦</div>` : '';
+  const sourceLink = t.sourceVisitId
+    ? `<div style="margin-top:4px;font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline" onclick="jumpToVisit('${t.pharmacyId}','${t.pharmacyName||''}')">🔗 來源：${t.sourceVisitDate||''} ${t.pharmacyName||''}拜訪</div>` : '';
+  const safeId = t.id.replace(/[^a-z0-9]/gi,'_');
+
+  return `<div class="e-todo-card ${t.done?'done':''}" draggable="true"
+    ondragstart="eTodoDragStart(event,'${t.id}')" ondragend="eTodoDragEnd(event)">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div class="todo-check ${t.done?'checked':''}" onclick="toggleTodo('${t.id}')">
+        ${t.done?'✓':''}
       </div>
-      <div style="flex:1">
-        <div class="todo-text">${icon} ${item.task}</div>
-        <div class="todo-source">
-          <span style="padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700" class="todo-priority-${item.priority}">${item.priority==='high'?'⚠️ 緊急':item.priority==='low'?'低優先':'一般'}</span>
-          &nbsp;${label} · ${item.createdAt}
-          ${item.pharmacyId ? ` · <span style="color:var(--accent)">${item.pharmacyId}</span>` : ''}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;line-height:1.4;${t.done?'text-decoration:line-through;color:var(--muted)':''}">
+          ${icon} ${t.task}
         </div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+          ${t.pharmacyName?`<span style="font-size:11px;color:var(--accent);font-weight:600">${t.pharmacyName}</span>`:''}
+          ${dateBadge}
+        </div>
+        ${aiSugg}
+        <div style="margin-top:8px">
+          <div style="font-size:11px;color:var(--muted2);margin-bottom:3px">✏️ 解決方案</div>
+          <textarea class="e-resolution" id="res-${safeId}"
+            placeholder="輸入解決方式，提及藥局名稱可自動建立關聯…"
+            onblur="saveResolution('${t.id}',this.value)">${t.resolution||''}</textarea>
+          ${linkedBadge}
+        </div>
+        ${sourceLink}
       </div>
-      <button class="del-btn" onclick="deleteTodo(${item.id})">✕</button>
+      <button class="del-btn" onclick="todoDelete('${t.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+// ── 艾森豪矩陣拖曳 ──
+let _eDraggingId = null;
+
+function eTodoDragStart(ev, id) {
+  _eDraggingId = id;
+  ev.dataTransfer.setData('text/plain', id);
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.currentTarget.style.opacity = '0.4';
+}
+
+function eTodoDragEnd(ev) {
+  if (ev && ev.currentTarget) ev.currentTarget.style.opacity = '';
+  _eDraggingId = null;
+}
+
+function eDragOver(ev) {
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.classList.add('drag-over');
+}
+
+function eDragLeave(ev) {
+  ev.currentTarget.classList.remove('drag-over');
+}
+
+async function eDrop(ev, quadrant) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-over');
+  const id = ev.dataTransfer.getData('text/plain') || _eDraggingId;
+  if (!id) return;
+  const item = todosCache.find(t => t.id === id);
+  if (!item || item.quadrant === quadrant) return;
+  item.quadrant = quadrant;
+  renderEisenhower();
+  await todoApiUpdate(id, { quadrant });
+  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', pool:'待辦池'};
+  toast(`✅ 已移至「${labels[quadrant]}」`);
+}
+
+// ── 解決方案自動儲存 + 藥局交叉連結 ──
+async function saveResolution(id, value) {
+  const item = todosCache.find(t => t.id === id);
+  if (!item || item.resolution === value) return;
+  item.resolution = value;
+  await todoApiUpdate(id, { resolution: value });
+
+  if (value.trim() && pharmacies.length) {
+    const phList = pharmacies.map(p => p.name || p['店名']).filter(Boolean);
+    try {
+      const d = await post('/ai-pharmacy-detect', { text: value, pharmacyList: phList });
+      const found = (d.found || []).filter(name => name !== item.pharmacyName);
+      for (const phName of found) {
+        const ph = pharmacies.find(p => (p.name||p['店名']) === phName);
+        const res = await todoApiCreate({
+          task: `[協作] ${item.pharmacyName||''}：${item.task}`,
+          quadrant: 'pool', pharmacyId: ph?.id||ph?.['Customer_ID']||'',
+          pharmacyName: phName, type: item.type || 'other', aiSuggestions: [],
+        });
+        if (res?.todo?.id) {
+          item.relatedTodoIds = [...(item.relatedTodoIds||[]), res.todo.id];
+          todosCache.push(res.todo);
+          await todoApiUpdate(id, { relatedTodoIds: item.relatedTodoIds });
+        }
+      }
+      if (found.length) {
+        renderEisenhower(); updateTodoBadge();
+        toast(`📌 已自動在 ${found.join('、')} 建立關聯待辦`);
+      }
+    } catch {}
+  }
+}
+
+function jumpToVisit(pharmacyId, pharmacyName) {
+  nav(document.querySelectorAll('.nav-tab')[3], 'visits');
+  if (pharmacyId) { fillVisitSearch(pharmacyId, pharmacyName); loadVisits(); }
+}
+
+// ── 新增待辦 Modal ──
+function openNewTodoModal() {
+  document.getElementById('new-todo-modal').style.display = 'flex';
+  document.getElementById('nt-ph-search').value = '';
+  document.getElementById('nt-ph-id').value = '';
+  document.getElementById('nt-ph-name').value = '';
+  document.getElementById('nt-task').value = '';
+  document.getElementById('nt-quadrant').value = 'pool';
+  document.getElementById('nt-date').value = '';
+  document.getElementById('nt-ai-area').style.display = 'none';
+  document.getElementById('nt-suggestions').style.display = 'none';
+  _ntAiSuggestions = [];
+}
+
+function closeNewTodoModal() {
+  document.getElementById('new-todo-modal').style.display = 'none';
+}
+
+function ntPhSearch(q) {
+  const dd = document.getElementById('nt-ph-dd');
+  if (!q.trim()) { dd.style.display = 'none'; return; }
+  const matches = pharmacies.filter(p => (p.name||p['店名']||'').includes(q)).slice(0, 8);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.style.display = 'block';
+  dd.innerHTML = matches.map(p => {
+    const name = p.name || p['店名'] || '';
+    const id = p.id || p['Customer_ID'] || '';
+    return `<div class="ph-dropdown-item" style="padding:8px 12px;cursor:pointer;font-size:13px"
+      onmousedown="ntPhSelect('${id}','${name}')"
+      onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <span style="font-weight:600">${name}</span>
+      <span style="font-size:11px;color:var(--muted);margin-left:8px">${id}</span>
     </div>`;
   }).join('');
 }
 
-// ══════════════════════════════
-// 月曆待辦拖曳
-// ══════════════════════════════
+function ntPhSelect(id, name) {
+  document.getElementById('nt-ph-search').value = name;
+  document.getElementById('nt-ph-id').value = id;
+  document.getElementById('nt-ph-name').value = name;
+  document.getElementById('nt-ph-dd').style.display = 'none';
+  if (document.getElementById('nt-task').value.trim()) {
+    document.getElementById('nt-ai-area').style.display = 'block';
+  }
+}
+
+function ntTaskInput() {
+  const task = document.getElementById('nt-task').value.trim();
+  document.getElementById('nt-ai-area').style.display = task ? 'block' : 'none';
+}
+
+async function fetchNtAiSuggestions() {
+  const phName = document.getElementById('nt-ph-name').value;
+  const task = document.getElementById('nt-task').value.trim();
+  if (!task) { toast('請先輸入待辦事項'); return; }
+  const btn = document.getElementById('nt-ai-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px"></span>';
+  try {
+    const d = await post('/ai-todo-suggest', { pharmacyName: phName, task });
+    _ntAiSuggestions = d.suggestions || [];
+    const el = document.getElementById('nt-suggestions');
+    el.style.display = 'block';
+    el.innerHTML = _ntAiSuggestions.map((s, i) => `
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="nt-sugg-${i}" checked style="margin-top:2px"> ${s}
+      </label>`).join('') || '<div style="color:var(--muted);font-size:13px">（無建議）</div>';
+  } catch(e) {
+    toast('❌ AI 建議失敗：' + e.message);
+  } finally {
+    btn.disabled = false; btn.innerHTML = '取得建議';
+  }
+}
+
+async function submitNewTodo() {
+  const task = document.getElementById('nt-task').value.trim();
+  if (!task) { toast('請輸入待辦事項'); return; }
+  const selected = _ntAiSuggestions.filter((_, i) => {
+    const cb = document.getElementById('nt-sugg-' + i);
+    return cb && cb.checked;
+  });
+  const res = await todoApiCreate({
+    task,
+    quadrant: document.getElementById('nt-quadrant').value,
+    pharmacyId: document.getElementById('nt-ph-id').value,
+    pharmacyName: document.getElementById('nt-ph-name').value,
+    scheduledDate: document.getElementById('nt-date').value || null,
+    aiSuggestions: selected, type: 'other',
+  });
+  if (res?.ok) {
+    todosCache.push(res.todo);
+    closeNewTodoModal();
+    renderEisenhower(); updateTodoBadge(); renderCalTodoPool();
+    toast('✅ 待辦已建立');
+  }
+}
+
+// ── 月曆待辦拖曳池 ──
 function renderCalTodoPool() {
   const el = document.getElementById('cal-todo-pool');
   if (!el) return;
-  const unscheduled = actionItems.filter(a => !a.done && !a.scheduledDate);
+  const unscheduled = todosCache.filter(t => !t.done && !t.scheduledDate);
   el.style.display = 'block';
-  const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
+  const tiMap = TYPE_ICON;
   if (!unscheduled.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">✅ 所有待辦已排入日程</div>`;
     return;
   }
+  const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)' };
   el.innerHTML = `
     <div style="font-size:11px;font-weight:700;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
       📌 未排定待辦（拖曳到日期格排入行程）
     </div>
     ${unscheduled.map(item => {
       const icon = tiMap[item.type] || '📌';
-      const prioColor = item.priority==='high'?'var(--red)':item.priority==='low'?'var(--green)':'var(--orange)';
-      return `<div class="todo-chip" id="todo-chip-${item.id}" draggable="true"
-        ondragstart="todoChipDragStart(event,${item.id})"
-        ondragend="todoChipDragEnd(${item.id})">
+      const prioColor = qColor[item.quadrant||'pool'];
+      const safeId = item.id.replace(/[^a-z0-9]/gi,'_');
+      return `<div class="todo-chip" id="todo-chip-${safeId}" draggable="true"
+        ondragstart="todoChipDragStart(event,'${item.id}')"
+        ondragend="todoChipDragEnd('${item.id}')">
         <span style="color:${prioColor};font-size:12px">●</span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon} ${item.task}</span>
-        ${item.pharmacyId ? `<span style="font-size:10px;color:var(--muted);flex-shrink:0">${item.pharmacyId}</span>` : ''}
+        ${item.pharmacyName?`<span style="font-size:10px;color:var(--muted);flex-shrink:0">${item.pharmacyName}</span>`:''}
       </div>`;
     }).join('')}`;
 }
@@ -2127,48 +2457,48 @@ function renderCalTodoPool() {
 function todoChipDragStart(ev, id) {
   ev.dataTransfer.setData('text/plain', String(id));
   ev.dataTransfer.effectAllowed = 'move';
-  const el = document.getElementById('todo-chip-' + id);
+  const safeId = id.replace(/[^a-z0-9]/gi,'_');
+  const el = document.getElementById('todo-chip-' + safeId);
   if (el) el.classList.add('dragging');
 }
 
 function todoChipDragEnd(id) {
-  const el = document.getElementById('todo-chip-' + id);
+  const safeId = id.replace(/[^a-z0-9]/gi,'_');
+  const el = document.getElementById('todo-chip-' + safeId);
   if (el) el.classList.remove('dragging');
 }
 
-function calOnDropCell(ev, ds) {
+async function calOnDropCell(ev, ds) {
   ev.preventDefault();
   ev.currentTarget.classList.remove('drag-target');
-  const id = parseInt(ev.dataTransfer.getData('text/plain'));
+  const id = ev.dataTransfer.getData('text/plain');
   if (!id) return;
-  const item = actionItems.find(a => a.id === id);
+  const item = todosCache.find(t => t.id === id);
   if (!item) return;
   item.scheduledDate = ds;
-  calSelectDay(ds);
-  renderCalTodoPool();
+  calSelectDay(ds); renderCalTodoPool(); renderCalendar();
   toast(`✅ 已排入 ${ds}`);
+  await todoApiUpdate(id, { scheduledDate: ds });
 }
 
-function calOnDrop(ev, ds) {
+async function calOnDrop(ev, ds) {
   ev.preventDefault();
   ev.currentTarget.classList.remove('drag-over');
-  const id = parseInt(ev.dataTransfer.getData('text/plain'));
+  const id = ev.dataTransfer.getData('text/plain');
   if (!id) return;
-  const item = actionItems.find(a => a.id === id);
+  const item = todosCache.find(t => t.id === id);
   if (!item) return;
   item.scheduledDate = ds;
-  renderCalTodoPool();
-  renderDayPanel(ds);
-  renderCalendar();
+  renderCalTodoPool(); renderDayPanel(ds); renderCalendar();
   toast(`✅ 已排入 ${ds}`);
+  await todoApiUpdate(id, { scheduledDate: ds });
 }
 
-function todoUnschedule(id, ds) {
-  const item = actionItems.find(a => a.id === id);
+async function todoUnschedule(id, ds) {
+  const item = todosCache.find(t => t.id === id);
   if (item) item.scheduledDate = null;
-  renderCalTodoPool();
-  renderDayPanel(ds);
-  renderCalendar();
+  renderCalTodoPool(); renderDayPanel(ds); renderCalendar();
+  await todoApiUpdate(id, { scheduledDate: null });
 }
 
 function exportRoute() {

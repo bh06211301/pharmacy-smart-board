@@ -3,6 +3,10 @@ main = "worker.js"
 compatibility_date = "2024-09-23"
 account_id = "f9c6f3f26e64a3df873681836b9fdbf3"
 
+[[kv_namespaces]]
+binding = "TODOS_KV"
+id = "85f8b8c8077a42048b8113fd05df020e"
+
 [vars]
 SHEET_PHARMACY = "1qJ62K5Hd2bKP9DdQTjwJOOy0njNICMSPiayW7YJZdNM"
 SHEET_VISIT    = "10rofUuKtji4tKGyUv6cvbsiTEq1ynRP0zJxohc3l68U"

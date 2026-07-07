@@ -20,7 +20,7 @@ const GAS_VISIT_URL = 'https://script.google.com/macros/s/AKfycbxBDS60OKaAhxeS53
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Content-Type': 'application/json',
 };
@@ -76,9 +76,24 @@ export default {
         return await handleCustomerStatus(request);
       }
 
-      // ★ 新增：業務待辦清單
+      // ★ 新增：業務待辦清單（舊版，保留相容）
       if (path === '/todos') {
         return await handleTodos(request);
+      }
+
+      // ★ 新版待辦清單（KV 持久化）
+      if (path === '/todos-v2') {
+        return await handleTodosV2(request, env);
+      }
+
+      // ★ AI 待辦建議
+      if (path === '/ai-todo-suggest' && request.method === 'POST') {
+        return await handleAiTodoSuggest(request, env);
+      }
+
+      // ★ 藥局名稱偵測（字串比對）
+      if (path === '/ai-pharmacy-detect' && request.method === 'POST') {
+        return await handlePharmacyDetect(request);
       }
 
       if (path === '/all-visits' && request.method === 'GET') {
@@ -398,8 +413,14 @@ async function handleAnalyzeTasks(request, env) {
 
   if (!visits || !visits.length) return json({ error: '缺少拜訪紀錄' }, 400);
 
+  // 建立 visitId → 拜訪日期/藥局名 對照表，供後續連結用
+  const visitMeta = {};
+  visits.forEach(v => {
+    if (v.visitId) visitMeta[v.visitId] = { date: v.date, pharmacyId: v.pharmacyId, pharmacyName: v.pharmacyName };
+  });
+
   const notesText = visits.slice(0, 30).map(v =>
-    `【${v.date}】${v.pharmacyId ? v.pharmacyId + ' · ' : ''}${v.purpose ? '目的：' + v.purpose + '。' : ''}${v.summary || v.content || ''}${v.actionItems ? '（待辦：' + v.actionItems + '）' : ''}`
+    `[visitId:${v.visitId}]【${v.date}】${v.pharmacyId ? v.pharmacyId + '（' + (v.pharmacyName||'') + '）' : ''}${v.purpose ? '目的：' + v.purpose + '。' : ''}${v.summary || v.content || ''}${v.actionItems ? '（待辦：' + v.actionItems + '）' : ''}`
   ).join('\n');
 
   const prompt = `你是業務助理AI，分析以下拜訪紀錄，提取具體的待辦事項。
@@ -412,11 +433,11 @@ async function handleAnalyzeTasks(request, env) {
 - Action Items 欄位有內容 → 直接轉換為待辦任務
 - 待追蹤、待確認的事項 → 轉換為任務
 
-拜訪紀錄：
+拜訪紀錄（每行開頭的 [visitId:xxx] 是該筆紀錄的 ID，請原樣放入輸出）：
 ${notesText}
 
 請輸出 JSON 陣列（最多10項最重要的），無待辦則回傳 []：
-[{"task":"完整任務描述（含藥局名）","type":"return_receipt|get_receipt|revisit|prepare|follow_up|other","priority":"high|medium|low","pharmacyId":"藥局ID"}]
+[{"task":"完整任務描述（含藥局名）","type":"return_receipt|get_receipt|revisit|prepare|follow_up|other","priority":"high|medium|low","pharmacyId":"藥局ID","pharmacyName":"藥局名稱","sourceVisitId":"對應的visitId"}]
 
 只輸出純 JSON，不要 markdown 或說明文字。`;
 
@@ -438,6 +459,11 @@ ${notesText}
     const cleaned = rawText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
     tasks = JSON.parse(cleaned);
     if (!Array.isArray(tasks)) tasks = [];
+    // 補充 sourceVisitDate
+    tasks = tasks.map(t => {
+      const meta = t.sourceVisitId ? visitMeta[t.sourceVisitId] : null;
+      return { ...t, sourceVisitDate: meta?.date || null };
+    });
   } catch { tasks = []; }
 
   return json({ ok: true, tasks });
@@ -670,7 +696,125 @@ async function handleTodos(request) {
 }
 
 // ============================================================
-// 10. 新增拜訪紀錄（代理到 GAS）
+// 10. 新版待辦清單（Cloudflare KV 持久化）
+// ============================================================
+const TODOS_KV_KEY = 'todos:all';
+
+async function handleTodosV2(request, env) {
+  const kv = env.TODOS_KV;
+  if (!kv) return json({ error: 'KV binding 未設定' }, 500);
+
+  // GET — 讀取全部
+  if (request.method === 'GET') {
+    const raw = await kv.get(TODOS_KV_KEY);
+    const todos = raw ? JSON.parse(raw) : [];
+    return json({ todos });
+  }
+
+  // POST — 新增一筆
+  if (request.method === 'POST') {
+    const body = await request.json();
+    const raw = await kv.get(TODOS_KV_KEY);
+    const todos = raw ? JSON.parse(raw) : [];
+    const newTodo = {
+      id: `todo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      task: body.task || '',
+      quadrant: body.quadrant || 'pool',
+      pharmacyId: body.pharmacyId || '',
+      pharmacyName: body.pharmacyName || '',
+      scheduledDate: body.scheduledDate || null,
+      done: false,
+      doneAt: null,
+      aiSuggestions: body.aiSuggestions || [],
+      resolution: '',
+      relatedTodoIds: [],
+      sourceVisitId: body.sourceVisitId || null,
+      sourceVisitDate: body.sourceVisitDate || null,
+      type: body.type || 'other',
+      createdAt: new Date().toISOString(),
+    };
+    todos.push(newTodo);
+    await kv.put(TODOS_KV_KEY, JSON.stringify(todos));
+    return json({ ok: true, todo: newTodo });
+  }
+
+  // PUT — 更新一筆（部分更新）
+  if (request.method === 'PUT') {
+    const body = await request.json();
+    if (!body.id) return json({ error: '缺少 id' }, 400);
+    const raw = await kv.get(TODOS_KV_KEY);
+    const todos = raw ? JSON.parse(raw) : [];
+    const idx = todos.findIndex(t => t.id === body.id);
+    if (idx === -1) return json({ error: '找不到此待辦' }, 404);
+
+    const updated = { ...todos[idx] };
+    const allowedFields = ['task','quadrant','pharmacyId','pharmacyName','scheduledDate','done','doneAt','aiSuggestions','resolution','relatedTodoIds','sourceVisitId','sourceVisitDate','type'];
+    for (const f of allowedFields) {
+      if (body[f] !== undefined) updated[f] = body[f];
+    }
+    if (body.done === true && !updated.doneAt) updated.doneAt = new Date().toISOString();
+    if (body.done === false) updated.doneAt = null;
+    todos[idx] = updated;
+    await kv.put(TODOS_KV_KEY, JSON.stringify(todos));
+    return json({ ok: true, todo: updated });
+  }
+
+  // DELETE — 刪除一筆
+  if (request.method === 'DELETE') {
+    const url = new URL(request.url);
+    const id = url.searchParams.get('id');
+    if (!id) return json({ error: '缺少 id' }, 400);
+    const raw = await kv.get(TODOS_KV_KEY);
+    let todos = raw ? JSON.parse(raw) : [];
+    todos = todos.filter(t => t.id !== id);
+    await kv.put(TODOS_KV_KEY, JSON.stringify(todos));
+    return json({ ok: true });
+  }
+
+  return json({ error: '不支援此 method' }, 405);
+}
+
+// ============================================================
+// 11. AI 待辦建議（Gemini）
+// ============================================================
+async function handleAiTodoSuggest(request, env) {
+  const { pharmacyName, task } = await request.json();
+  if (!task) return json({ error: '缺少 task' }, 400);
+
+  const prompt = `你是業務助理，業務員要去拜訪藥局。
+藥局：${pharmacyName || '（未指定）'}
+待辦事項：${task}
+
+請列出 2~4 條「業務員這次需要準備或注意的具體事項」，每條一行，不要編號，不要解釋，直接列出重點。`;
+
+  const geminiRes = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 300, temperature: 0.4 }
+    })
+  });
+  const geminiData = await geminiRes.json();
+  if (!geminiRes.ok) return json({ error: `Gemini 錯誤：${geminiData?.error?.message}` }, 500);
+
+  const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const suggestions = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  return json({ ok: true, suggestions });
+}
+
+// ============================================================
+// 12. 藥局名稱偵測（字串比對，不耗 Gemini quota）
+// ============================================================
+async function handlePharmacyDetect(request) {
+  const { text, pharmacyList } = await request.json();
+  if (!text || !Array.isArray(pharmacyList)) return json({ found: [] });
+  const found = pharmacyList.filter(name => name && text.includes(name));
+  return json({ found: [...new Set(found)] });
+}
+
+// ============================================================
+// 13. 新增拜訪紀錄（代理到 GAS）
 // ============================================================
 async function handleAddVisit(request) {
   const body = await request.json();
