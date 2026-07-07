@@ -231,6 +231,7 @@ select.task-input{cursor:pointer}
 .e-q-iii{border-left:3px solid var(--orange)}
 .e-q-iv{border-left:3px solid var(--muted2)}
 .e-q-pool{border-left:3px solid var(--muted);background:var(--surface2)}
+.e-q-dad{border-left:3px solid #d97706;background:#fffbeb}
 .e-q-example{font-size:10px;color:var(--muted2);line-height:1.5;margin-top:3px}
 .e-pool-section{margin-top:14px}
 .e-todo-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);cursor:grab;transition:all .15s}
@@ -608,6 +609,18 @@ let allVisitsCache = [];
       <div id="eq-pool"></div>
     </div>
   </div>
+  <div class="e-pool-section">
+    <div class="e-quadrant e-q-dad" ondragover="eDragOver(event)" ondrop="eDrop(event,'dad')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">👴</span>
+        <div>
+          <div class="e-q-title" style="color:#d97706">老爸聯絡事項</div>
+          <div class="e-q-sub">送貨/請款後自動新增・帳單・資料袋・紅單</div>
+        </div>
+      </div>
+      <div id="eq-dad"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ══ 新增待辦 Modal ══ -->
@@ -641,6 +654,7 @@ let allVisitsCache = [];
             <option value="ii">📋 重要不緊急</option>
             <option value="iii">⚡ 緊急不重要</option>
             <option value="iv">🗑 不緊急不重要</option>
+            <option value="dad">👴 老爸聯絡事項</option>
           </select>
           <div id="nt-ai-quadrant-badge" style="display:none;margin-top:5px;font-size:11px;color:var(--accent)"></div>
         </div>
@@ -1832,7 +1846,7 @@ function renderDayPanel(ds) {
       ${(()=>{
         const dayTodos = todosCache.filter(a => !a.done && a.scheduledDate === ds);
         const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
-        const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)' };
+        const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)', dad:'#d97706' };
         return `
       <div style="margin-top:16px">
         <div class="cal-section-label">📌 今日待辦（${dayTodos.length} 項）</div>
@@ -1867,6 +1881,7 @@ function renderDayPanel(ds) {
               style="width:100%;box-sizing:border-box">
             <div id="new-visit-ph-dd" class="ph-dropdown"></div>
           </div>
+          <input type="hidden" id="new-visit-ph-id" value="">
           <select id="new-visit-purpose" class="task-input" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--white)">
             <option value="">拜訪目的（選填）</option>
             <option>例行拜訪</option>
@@ -1874,6 +1889,8 @@ function renderDayPanel(ds) {
             <option>訂單追蹤</option>
             <option>客訴處理</option>
             <option>新客開發</option>
+            <option value="送貨">送貨 📦</option>
+            <option value="請款">請款 🧾</option>
             <option>收款</option>
             <option>其他</option>
           </select>
@@ -1961,20 +1978,27 @@ function visitPhSearch(q) {
   if (!matches.length) { dd.style.display = 'none'; return; }
   dd.innerHTML = matches.map(p => {
     const name = (p.name || p['店名'] || '').replace(/'/g, "\\'");
-    return `<div class="ph-option" onclick="visitPhSelect('${name}')">${p.name||p['店名']||''}</div>`;
+    const id   = (p.id   || p['Customer_ID'] || '').replace(/'/g, "\\'");
+    const isDad = DAD_PHARMACY_IDS.has(p.id || p['Customer_ID'] || '');
+    return `<div class="ph-option" onclick="visitPhSelect('${name}','${id}')">
+      ${isDad ? '<span style="color:#d97706;font-size:10px;margin-right:4px">👴</span>' : ''}${p.name||p['店名']||''}
+    </div>`;
   }).join('');
   dd.style.display = 'block';
 }
 
-function visitPhSelect(name) {
+function visitPhSelect(name, id) {
   const inp = document.getElementById('new-visit-ph-inp');
+  const idEl = document.getElementById('new-visit-ph-id');
   const dd  = document.getElementById('new-visit-ph-dd');
   if (inp) inp.value = name;
+  if (idEl) idEl.value = id || '';
   if (dd)  dd.style.display = 'none';
 }
 
 async function submitNewVisit(ds) {
   const phName  = document.getElementById('new-visit-ph-inp')?.value?.trim();
+  const phId    = document.getElementById('new-visit-ph-id')?.value?.trim() || '';
   const purpose = document.getElementById('new-visit-purpose')?.value;
   const content = document.getElementById('new-visit-content')?.value?.trim();
   if (!phName)  { toast('請輸入藥局名稱'); return; }
@@ -1982,9 +2006,10 @@ async function submitNewVisit(ds) {
   const btn = document.getElementById('new-visit-submit-btn');
   if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
   try {
+    const visitId = 'V_' + Date.now();
     await post('/add-visit', {
       action:       'addVisit',
-      visitId:      'V_' + Date.now(),
+      visitId,
       pharmacyName: phName,
       date:         ds,
       purpose:      purpose || '例行拜訪',
@@ -1992,6 +2017,31 @@ async function submitNewVisit(ds) {
     });
     toast('✅ 拜訪紀錄已儲存！');
     document.getElementById('new-visit-content').value = '';
+
+    // ── 自動建立老爸聯絡事項 ──
+    const isDelivery = purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content);
+    const isPayment  = purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content);
+    const isRedSlip  = isDelivery || isPayment || /紅單|交貨/.test(content);
+    const isDad      = phId && DAD_PHARMACY_IDS.has(phId);
+    const createdTodos = [];
+
+    if (isDad && isDelivery) {
+      await todoApiCreate({ task: `【${phName}】還帳單給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+      createdTodos.push('還帳單給爸爸');
+    }
+    if (isDad && isPayment) {
+      await todoApiCreate({ task: `【${phName}】交資料袋給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+      createdTodos.push('交資料袋給爸爸');
+    }
+    if (isRedSlip) {
+      await todoApiCreate({ task: `【${phName}】把紅單放回抽屜（等整理日整理）`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+      createdTodos.push('紅單放回抽屜');
+    }
+    if (createdTodos.length) {
+      toast(`✅ 已自動加入老爸聯絡事項：${createdTodos.join('、')}`);
+      loadTodos();
+    }
+
     await loadAllVisits();
   } catch(e) {
     toast('❌ 儲存失敗：' + e.message);
@@ -2242,12 +2292,14 @@ const QMETA = {
   ii:   {color:'#3b6af5',      label:'📋 重要不緊急'},
   iii:  {color:'var(--orange)', label:'⚡ 緊急不重要'},
   iv:   {color:'var(--muted2)', label:'🗑 不緊急不重要'},
-  pool: {color:'var(--muted)',  label:'📦 待辦池'}
+  pool: {color:'var(--muted)',  label:'📦 待辦池'},
+  dad:  {color:'#d97706',       label:'👴 老爸聯絡事項'},
 };
+const DAD_PHARMACY_IDS = new Set(['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129']);
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
-  ['ui','ii','iii','iv','pool'].forEach(q => {
+  ['ui','ii','iii','iv','pool','dad'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
     const items = todosCache.filter(t => (t.quadrant||'pool') === q);
