@@ -621,6 +621,16 @@ let allVisitsCache = [];
       <div id="eq-dad"></div>
     </div>
   </div>
+  <div id="done-section" style="display:none;margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;background:var(--surface)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <button onclick="toggleDoneSection()" style="background:none;border:none;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;padding:0;color:var(--text)">
+        <span id="done-section-arrow" style="font-size:10px;color:var(--muted)">▶</span>
+        <span id="done-section-title" style="font-weight:600">✅ 已完成（0 筆）</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="clearDoneTodos()" style="font-size:11px;color:var(--muted2)">清除全部</button>
+    </div>
+    <div id="done-list" style="display:none;margin-top:10px"></div>
+  </div>
 </div>
 
 <!-- ══ 新增待辦 Modal ══ -->
@@ -2275,6 +2285,8 @@ async function toggleTodo(id) {
   const item = todosCache.find(t => t.id === id);
   if (!item) return;
   item.done = !item.done;
+  if (item.done) item.doneAt = new Date().toISOString();
+  else item.doneAt = null;
   renderEisenhower(); updateTodoBadge(); renderCalendar();
   await todoApiUpdate(id, { done: item.done });
 }
@@ -2309,13 +2321,68 @@ function renderEisenhower() {
   ['ui','ii','iii','iv','pool','dad'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
-    const items = todosCache.filter(t => (t.quadrant||'pool') === q);
+    const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done);
     if (!items.length) {
       el.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px 0">（空）</div>';
       return;
     }
     el.innerHTML = items.map(t => renderTodoCard(t)).join('');
   });
+  renderDoneSection();
+}
+
+function renderDoneSection() {
+  const done = todosCache.filter(t => t.done);
+  const section = document.getElementById('done-section');
+  if (!section) return;
+  if (!done.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  const title = document.getElementById('done-section-title');
+  if (title) title.textContent = '✅ 已完成（' + done.length + ' 筆）';
+  const list = document.getElementById('done-list');
+  if (!list || list.style.display === 'none') return;
+  const sorted = [...done].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
+  list.innerHTML = sorted.map(t => renderDoneCard(t)).join('');
+}
+
+function renderDoneCard(t) {
+  const icon = TYPE_ICON[t.type] || '📌';
+  let doneTime = '';
+  if (t.doneAt) {
+    const d = new Date(t.doneAt);
+    doneTime = (d.getMonth()+1).toString().padStart(2,'0') + '/' + d.getDate().toString().padStart(2,'0') + ' ' + d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  }
+  return `<div class="e-todo-card done" style="margin-bottom:8px;opacity:.65">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div class="todo-check checked" onclick="toggleTodo('${t.id}')" title="取消完成" style="cursor:pointer">✓</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;line-height:1.4;text-decoration:line-through;color:var(--muted)">
+          ${icon} ${t.task}
+        </div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+          ${t.pharmacyName?`<span style="font-size:11px;color:var(--accent);font-weight:600">${t.pharmacyName}</span>`:''}
+          ${doneTime?`<span style="font-size:11px;color:var(--muted);background:var(--surface2);padding:1px 6px;border-radius:8px">✅ 完成於 ${doneTime}</span>`:''}
+        </div>
+      </div>
+      <button class="del-btn" onclick="todoDelete('${t.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+function toggleDoneSection() {
+  const list = document.getElementById('done-list');
+  const arrow = document.getElementById('done-section-arrow');
+  if (!list) return;
+  if (list.style.display !== 'none') {
+    list.style.display = 'none';
+    if (arrow) arrow.textContent = '▶';
+  } else {
+    list.style.display = 'block';
+    if (arrow) arrow.textContent = '▼';
+    const done = todosCache.filter(t => t.done);
+    const sorted = [...done].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
+    list.innerHTML = sorted.map(t => renderDoneCard(t)).join('');
+  }
 }
 
 function renderTodoCard(t) {
@@ -2476,26 +2543,48 @@ function closeNewTodoModal() {
 
 function ntPhSearch(q) {
   const dd = document.getElementById('nt-ph-dd');
-  if (!q.trim()) { dd.style.display = 'none'; return; }
+  if (!q.trim()) {
+    dd.style.display = 'none';
+    document.getElementById('nt-ph-id').value = '';
+    document.getElementById('nt-ph-name').value = '';
+    return;
+  }
   const matches = pharmacies.filter(p => (p.name||p['店名']||'').includes(q)).slice(0, 8);
-  if (!matches.length) { dd.style.display = 'none'; return; }
-  dd.style.display = 'block';
-  dd.innerHTML = matches.map(p => {
+  const rows = matches.map(p => {
     const name = p.name || p['店名'] || '';
     const id = p.id || p['Customer_ID'] || '';
     return `<div class="ph-dropdown-item" style="padding:8px 12px;cursor:pointer;font-size:13px"
-      onmousedown="ntPhSelect('${id}','${name}')"
+      onmousedown="ntPhSelect('${id}','${name.replace(/'/g,'&#39;')}')"
       onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <span style="font-weight:600">${name}</span>
       <span style="font-size:11px;color:var(--muted);margin-left:8px">${id}</span>
     </div>`;
-  }).join('');
+  });
+  const safeQ = q.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  rows.push(`<div class="ph-dropdown-item" style="padding:8px 12px;cursor:pointer;font-size:13px;${matches.length?'border-top:1px solid var(--border)':''}"
+    onmousedown="ntPhSelectManual()"
+    onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+    ✏️ 直接使用「<strong>${safeQ}</strong>」（新藥局）
+  </div>`);
+  dd.style.display = 'block';
+  dd.innerHTML = rows.join('');
 }
 
 function ntPhSelect(id, name) {
   document.getElementById('nt-ph-search').value = name;
   document.getElementById('nt-ph-id').value = id;
   document.getElementById('nt-ph-name').value = name;
+  document.getElementById('nt-ph-dd').style.display = 'none';
+  if (document.getElementById('nt-task').value.trim()) {
+    document.getElementById('nt-ai-area').style.display = 'block';
+  }
+}
+
+function ntPhSelectManual() {
+  const q = document.getElementById('nt-ph-search').value.trim();
+  if (!q) return;
+  document.getElementById('nt-ph-id').value = '';
+  document.getElementById('nt-ph-name').value = q;
   document.getElementById('nt-ph-dd').style.display = 'none';
   if (document.getElementById('nt-task').value.trim()) {
     document.getElementById('nt-ai-area').style.display = 'block';
