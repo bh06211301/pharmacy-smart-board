@@ -379,6 +379,7 @@ let allVisitsCache = [];
       <div class="page-sub" id="today-sub">使用左側「AI 生成今日排程」開始規劃</div>
     </div>
     <div class="btn-group">
+      <button class="btn btn-ghost btn-sm" onclick="loadTodayFromCalendar()">📅 從月曆匯入</button>
       <button class="btn btn-ghost btn-sm" onclick="exportRoute()">匯出行程</button>
       <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
     </div>
@@ -825,6 +826,7 @@ async function init() {
   await loadCustomerStatuses();
   loadPharmacies();
   loadAllVisits();
+  loadTodayFromCalendar(true);
 }
 
 function setDot(color, txt) {
@@ -1217,7 +1219,21 @@ function confirmRoute() {
 // ══════════════════════════════
 function renderTodayRoute() {
   const el = document.getElementById('route-list');
-  if (!todayRoute.length) return;
+  if (!todayRoute.length) {
+    const today = fmtDs(new Date());
+    const dp = getCalPlan()[today];
+    const cnt = dp?.pharmacies?.length || 0;
+    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted)">
+      <div style="font-size:30px;margin-bottom:12px">📅</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">尚未規劃今日路線</div>
+      ${cnt
+        ? `<div style="font-size:12px;margin-bottom:14px">月曆今日已排定 <b style="color:var(--accent)">${cnt} 家</b></div>
+           <button class="btn btn-primary btn-sm" onclick="loadTodayFromCalendar()">📅 從月曆匯入今日計畫</button>`
+        : `<div style="font-size:12px">前往「📅 月曆」排定行程<br>或到「📥 任務投入」加入藥局後排程</div>`
+      }
+    </div>`;
+    return;
+  }
   const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
   el.innerHTML = todayRoute.map((r, i) => `
     <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;border-top:${i?'1px solid var(--border)':''};cursor:pointer;transition:background .15s"
@@ -1242,6 +1258,40 @@ function updateTodayStats() {
   document.getElementById('stat-new').textContent = todayRoute.filter(r=>r.isNew||r.isDad).length||'—';
   document.getElementById('today-sub').textContent =
     `共 ${todayRoute.length} 站 · ${todayRoute.filter(r=>r.lastVisitDays>21).length} 家逾期 · ${todayRoute.filter(r=>r.isNew).length} 家新藥局`;
+}
+
+// ══════════════════════════════
+// 從月曆匯入今日計畫
+// ══════════════════════════════
+async function loadTodayFromCalendar(silent) {
+  const today = fmtDs(new Date());
+  const plan = getCalPlan();
+  const dp = plan[today];
+  if (!dp?.pharmacies?.length) {
+    if (!silent) toast('月曆今日尚未排定藥局');
+    renderTodayRoute();
+    return;
+  }
+  const el = document.getElementById('route-list');
+  if (el) el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted)">
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+      <span class="spinner"></span><span style="font-size:13px">正在載入月曆計畫…</span>
+    </div>
+  </div>`;
+  const enriched = await Promise.all(dp.pharmacies.map(async (ph, i) => {
+    let lastVisitDays = null;
+    try {
+      if (ph.id) {
+        const v = await get('/visits/' + encodeURIComponent(ph.id));
+        lastVisitDays = v.lastVisitDays ?? null;
+      }
+    } catch {}
+    return { id: ph.id, name: ph.name, addr: ph.address || '', seq: i + 1, lastVisitDays, isNew: false, isDad: false, hasDelivery: false };
+  }));
+  todayRoute = enriched;
+  renderTodayRoute();
+  updateTodayStats();
+  if (!silent) toast(`✅ 已從月曆匯入 ${enriched.length} 家`);
 }
 
 // ══════════════════════════════
@@ -1443,6 +1493,7 @@ function nav(tabEl, pageId) {
     renderCalTodoPool();
     if (!allVisitsCache.length) loadAllVisits();
   }
+  if (pageId === 'today' && !todayRoute.length) loadTodayFromCalendar(true);
 }
 
 // ══════════════════════════════
