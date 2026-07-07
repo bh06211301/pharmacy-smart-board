@@ -106,6 +106,7 @@ export default {
         return await handleProductOrders(request, env);
       }
 
+
       if (path === '/all-visits' && request.method === 'GET') {
         return await handleAllVisits(env);
       }
@@ -897,66 +898,105 @@ async function handleGetProducts(env) {
 }
 
 // ============================================================
-// 15. 依產品查詢進貨藥局與日期
+// 15. 依產品查詢進貨藥局（product sheet join order sheet）
 // ============================================================
 async function handleProductOrders(request, env) {
   const reqUrl = new URL(request.url);
   const product = reqUrl.searchParams.get('product') || '';
   if (!product) return json({ error: '缺少 product 參數' }, 400);
 
-  const sheetId = env.SHEET_ORDER;
-  const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-  const res = await fetch(sheetUrl);
-  const text = await res.text();
-  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
-  const data = JSON.parse(jsonStr);
+  // 同時讀取產品清單和出貨明細
+  const [prodRes, orderRes] = await Promise.all([
+    fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_PRODUCT}/gviz/tq?tqx=out:json`),
+    fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_ORDER}/gviz/tq?tqx=out:json`),
+  ]);
 
-  const rows = data?.table?.rows || [];
-  const cols = data?.table?.cols || [];
-  const colNames = cols.map(c => c.label);
-  const colMap = {};
-  cols.forEach((c, i) => { colMap[c.label] = i; });
-
-  const productCols = ['品名', '產品名稱', '商品名稱', '藥品名稱', '產品', '品項'];
-  const dateCols   = ['出貨日期', '日期', '訂購日期', '訂單日期', '出貨時間', '出貨年月日'];
-
-  const productColName = productCols.find(n => colMap[n] !== undefined);
-  const dateColName    = dateCols.find(n => colMap[n] !== undefined);
-
-  if (!productColName) {
-    return json({ ok: false, columns: colNames, result: [], error: '找不到品名欄位' });
+  function parseGviz(text) {
+    const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+    const data = JSON.parse(jsonStr);
+    const cols = data?.table?.cols || [];
+    const rows = data?.table?.rows || [];
+    const colMap = {};
+    cols.forEach((c, i) => { colMap[c.label] = i; });
+    return { rows, cols, colMap };
   }
 
-  function parseDate(cell) {
-    if (!cell) return '';
-    if (cell.f) return cell.f;
-    const v = String(cell.v || '');
-    if (v.startsWith('Date(')) {
-      const parts = v.replace('Date(', '').replace(')', '').split(',').map(Number);
-      return `${parts[0]}-${String(parts[1] + 1).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+  const prodData  = parseGviz(await prodRes.text());
+  const orderData = parseGviz(await orderRes.text());
+
+  // ── 從產品清單找符合名稱的產品，取得數字前綴 ID ──
+  const nameCol = ['產品名稱','品名','商品名稱','藥品名稱'].find(n => prodData.colMap[n] !== undefined);
+  // 出貨明細 產品ID 格式為「數字+字母」如 "3A"；產品清單以 小產品編號（數字）對應
+  const numIdCol = ['小產品編號','產品個別編號'].find(n => prodData.colMap[n] !== undefined);
+
+  if (!nameCol) return json({ ok: false, result: [], error: '產品清單找不到名稱欄位' });
+
+  // 收集符合搜尋名稱的數字 ID 集合，及對應的完整產品名稱
+  const matchedNums = new Set();  // 數字 ID，如 17
+  const numToName = {};
+  prodData.rows.forEach(row => {
+    const name = String(row.c[prodData.colMap[nameCol]]?.v || '');
+    if (!name.includes(product)) return;
+    if (numIdCol) {
+      const num = String(row.c[prodData.colMap[numIdCol]]?.v || '').trim();
+      if (num) { matchedNums.add(num); numToName[num] = name; }
     }
-    return v;
+  });
+
+  // ── 從出貨明細按數字前綴查詢（"17A", "17B" 都屬於數字 17）──
+  const oMap = orderData.colMap;
+  const pharmacyMap = {};
+
+  // 訂單編號格式：YYMMDDNN（2位年+月+日+序號），如 "26011200" = 2026-01-12
+  function extractDateFromOrderNo(orderNo) {
+    const s = String(orderNo || '').replace(/\D/g, ''); // 只保留數字
+    if (s.length >= 6) {
+      const yy = parseInt(s.slice(0, 2), 10);
+      const mm = parseInt(s.slice(2, 4), 10);
+      const dd = parseInt(s.slice(4, 6), 10);
+      if (yy >= 10 && yy <= 99 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+        return `${2000 + yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      }
+    }
+    // 嘗試 YYYY-MM-DD
+    const mDash = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (mDash) return `${mDash[1]}-${mDash[2]}-${mDash[3]}`;
+    return '';
   }
 
-  const pharmacyMap = {};
-  rows.forEach(row => {
-    const pName = String(row.c[colMap[productColName]]?.v || '');
-    if (!pName.includes(product)) return;
-    const pharmacy = row.c[colMap['店名_備份']]?.v || '';
+  orderData.rows.forEach(row => {
+    const prodId  = String(row.c[oMap['產品ID']]?.v || '');
+    const numMatch = prodId.match(/^(\d+)/);
+    if (!numMatch) return;
+    const num = numMatch[1];
+    if (!matchedNums.has(num)) return;
+
+    const pharmacy = row.c[oMap['店名_備份']]?.v || '';
     if (!pharmacy) return;
-    const date = dateColName ? parseDate(row.c[colMap[dateColName]]) : '';
-    if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacy, orders: [] };
-    pharmacyMap[pharmacy].orders.push({ product: pName, date });
+
+    const qty    = parseFloat(row.c[oMap['數量']]?.v || 0);
+    const amount = parseFloat(row.c[oMap['小計']]?.v || 0);
+    const date   = extractDateFromOrderNo(row.c[oMap['訂單編號']]?.v || '');
+
+    if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacyId: pharmacy, totalQty: 0, totalAmount: 0, dates: new Set(), prodName: '' };
+    pharmacyMap[pharmacy].totalQty    += qty;
+    pharmacyMap[pharmacy].totalAmount += amount;
+    pharmacyMap[pharmacy].prodName     = numToName[num] || product;
+    if (date) pharmacyMap[pharmacy].dates.add(date);
   });
 
   const result = Object.values(pharmacyMap)
-    .map(p => {
-      const dates = [...new Set(p.orders.map(o => o.date))].filter(Boolean).sort().reverse();
-      return { pharmacy: p.pharmacy, orderCount: p.orders.length, lastDate: dates[0] || '', recentDates: dates.slice(0, 5) };
-    })
+    .map(p => ({
+      pharmacyId: p.pharmacyId,
+      prodName: p.prodName,
+      totalQty: p.totalQty,
+      totalAmount: p.totalAmount,
+      lastDate: [...p.dates].sort().reverse()[0] || '',
+    }))
     .sort((a, b) => (b.lastDate > a.lastDate ? 1 : -1));
 
-  return json({ ok: true, product, result, productColName, dateColName, columns: colNames });
+  const hasDate = result.some(r => r.lastDate);
+  return json({ ok: true, product, result, numIdCol, nameCol, hasDate, matchedNums: [...matchedNums] });
 }
 
 // ============================================================

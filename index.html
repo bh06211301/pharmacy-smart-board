@@ -2487,17 +2487,28 @@ async function queryProductOrders() {
       resultEl.innerHTML = `<span style="color:var(--muted)">查無「${product}」的進貨紀錄</span>`;
       return;
     }
+    // 用本地 pharmacies 快取把 Customer ID 換成藥局名稱
+    const idToPhName = {};
+    (pharmacies || []).forEach(p => {
+      const id = p.id || p['Customer_ID'] || '';
+      const name = p.name || p['店名'] || '';
+      if (id) idToPhName[id] = name;
+    });
+
     resultEl.style.display = 'block';
     resultEl.innerHTML = `
-      <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局有進過「${product}」</div>
-      ${d.result.map(p => `
+      <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局有進過「${d.result[0]?.prodName || product}」${d.hasDate ? '' : '（無訂購日期資料）'}</div>
+      ${d.result.map(p => {
+        const phName = idToPhName[p.pharmacyId] || p.pharmacyId;
+        return `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
           <div>
-            <span style="font-weight:600">${p.pharmacy}</span>
-            <span style="font-size:11px;color:var(--muted);margin-left:6px">共 ${p.orderCount} 次</span>
+            <span style="font-weight:600">${phName}</span>
+            <span style="font-size:11px;color:var(--muted);margin-left:6px">數量：${p.totalQty}・$${p.totalAmount.toLocaleString()}</span>
           </div>
-          <div style="font-size:12px;color:var(--accent)">最後：${p.lastDate || '日期未知'}</div>
-        </div>`).join('')}`;
+          <div style="font-size:12px;color:var(--accent)">${p.lastDate ? '最後：' + p.lastDate : '無日期'}</div>
+        </div>`;
+      }).join('')}`;
   } catch(e) {
     resultEl.style.display = 'block';
     resultEl.innerHTML = `<span style="color:var(--red)">查詢失敗：${e.message}</span>`;
