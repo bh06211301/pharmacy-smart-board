@@ -2659,7 +2659,7 @@ async function queryProductOrders() {
         return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
           <div>
             <span style="font-weight:600">${phName}</span>
-            <span style="font-size:11px;color:var(--muted);margin-left:6px">數量：${p.totalQty}・$${p.totalAmount.toLocaleString()}</span>
+            <span style="font-size:11px;color:var(--muted);margin-left:6px">進貨 ${p.orderCount} 次・${p.totalQty} 個・$${p.totalAmount.toLocaleString()}</span>
           </div>
           <div style="font-size:12px;color:var(--accent)">${p.lastDate ? '最後：' + p.lastDate : '無日期'}</div>
         </div>`;

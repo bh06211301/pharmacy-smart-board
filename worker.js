@@ -981,10 +981,12 @@ async function handleProductOrders(request, env) {
     const qty    = parseFloat(row.c[oMap['數量']]?.v || 0);
     const amount = parseFloat(row.c[oMap['小計']]?.v || 0);
 
-    if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacyId: pharmacy, totalQty: 0, totalAmount: 0, dates: new Set(), prodName: '' };
+    if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacyId: pharmacy, totalQty: 0, totalAmount: 0, orderNos: new Set(), dates: new Set(), prodName: '' };
     pharmacyMap[pharmacy].totalQty    += qty;
     pharmacyMap[pharmacy].totalAmount += amount;
     pharmacyMap[pharmacy].prodName     = idToName[prodId] || product;
+    const orderNo = row.c[oMap['訂單編號']]?.v;
+    if (orderNo) pharmacyMap[pharmacy].orderNos.add(String(orderNo));
     if (date) pharmacyMap[pharmacy].dates.add(date);
   });
 
@@ -992,6 +994,7 @@ async function handleProductOrders(request, env) {
     .map(p => ({
       pharmacyId:  p.pharmacyId,
       prodName:    p.prodName,
+      orderCount:  p.orderNos.size,
       totalQty:    p.totalQty,
       totalAmount: p.totalAmount,
       lastDate:    [...p.dates].sort().reverse()[0] || '',
