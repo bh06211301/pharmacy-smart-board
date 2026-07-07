@@ -663,6 +663,11 @@ let allVisitsCache = [];
         <div class="modal-field-label" style="margin-bottom:0">📦 調貨來源</div>
         <button class="btn btn-sm" id="nt-stock-btn" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px" onclick="queryProductOrders()">🔍 查哪家有進過貨</button>
       </div>
+      <!-- 多產品選擇（偵測到多個符合品名時顯示） -->
+      <div id="nt-stock-multi" style="display:none;margin-bottom:8px;background:var(--surface2);border-radius:8px;padding:8px 10px;font-size:13px">
+        <div style="color:var(--muted);margin-bottom:6px;font-size:12px">找到多個符合的產品，請選擇：</div>
+        <div id="nt-stock-multi-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
       <div id="nt-stock-result" style="display:none;background:var(--surface2);border-radius:8px;padding:10px 12px;font-size:13px"></div>
     </div>
     <div class="modal-footer">
@@ -2387,11 +2392,13 @@ async function openNewTodoModal() {
   document.getElementById('nt-ai-quadrant-badge').style.display = 'none';
   document.getElementById('nt-stock-area').style.display = 'none';
   document.getElementById('nt-stock-result').style.display = 'none';
+  document.getElementById('nt-stock-multi').style.display = 'none';
   _ntAiSuggestions = [];
+  _ntStockSelected = '';
   // 載入產品清單（只在第一次載入）
   if (!productsCache.length) {
     try {
-      const r = await fetch('/products');
+      const r = await fetch(WORKER + '/products');
       const d = await r.json();
       if (d.ok) productsCache = d.products || [];
     } catch {}
@@ -2430,56 +2437,126 @@ function ntPhSelect(id, name) {
   }
 }
 
+// 從產品名稱提取所有可能的別稱（去括號、去劑型詞）
+function getProductAliases(productName) {
+  const aliases = [productName];
+  // 去掉括號內容
+  const noBracket = productName.replace(/\(.*?\)/g, '').trim();
+  if (noBracket && noBracket !== productName) aliases.push(noBracket);
+  // 去掉劑型後綴
+  const noForm = noBracket.replace(/(錠|膠囊|粉|液|霜|貼|片|包|顆|素|丸|糊|乳|凝膠|口含錠|腸溶錠)$/, '').trim();
+  if (noForm && noForm !== noBracket && noForm.length >= 2) aliases.push(noForm);
+  // 括號內的備用名稱
+  const bracketContent = productName.match(/\(([^)]+)\)/);
+  if (bracketContent) {
+    const inner = bracketContent[1].trim();
+    if (inner.length >= 2) aliases.push(inner);
+    const innerNoForm = inner.replace(/(錠|膠囊|粉|液|霜|貼|片|包|顆|素|丸|糊|乳|凝膠|口含錠|腸溶錠)$/, '').trim();
+    if (innerNoForm && innerNoForm !== inner && innerNoForm.length >= 2) aliases.push(innerNoForm);
+  }
+  return [...new Set(aliases)];
+}
+
+// 從文字中找符合的產品（含模糊搜尋）
+function detectProductsInText(text) {
+  if (!productsCache.length) return [];
+  const found = [];
+  const seen = new Set();
+  productsCache.forEach(product => {
+    if (seen.has(product)) return;
+    const aliases = getProductAliases(product);
+    for (const alias of aliases) {
+      if (alias.length >= 2 && text.includes(alias)) {
+        found.push({ product, matchedAlias: alias, exact: alias === product });
+        seen.add(product);
+        break;
+      }
+    }
+  });
+  return found;
+}
+
+let _ntStockSelected = '';  // 目前選定的產品名
+
 function ntTaskInput() {
   const task = document.getElementById('nt-task').value.trim();
   document.getElementById('nt-ai-area').style.display = task ? 'block' : 'none';
 
-  // 偵測「調貨」關鍵字 + 產品名稱
-  const hasStockKeyword = task.includes('調貨') || task.includes('借貨') || task.includes('調藥');
-  const matchedProduct = hasStockKeyword
-    ? productsCache.find(p => task.includes(p))
-    : null;
+  const hasStockKeyword = task.includes('調貨') || task.includes('借貨') || task.includes('調藥') || task.includes('缺貨');
+  const stockArea  = document.getElementById('nt-stock-area');
+  const multiArea  = document.getElementById('nt-stock-multi');
+  const multiList  = document.getElementById('nt-stock-multi-list');
+  const stockBtn   = document.getElementById('nt-stock-btn');
 
-  const stockArea = document.getElementById('nt-stock-area');
-  const stockBtn  = document.getElementById('nt-stock-btn');
-  if (hasStockKeyword && matchedProduct) {
-    stockArea.style.display = 'block';
-    stockBtn.dataset.product = matchedProduct;
-    stockBtn.textContent = `🔍 查「${matchedProduct}」進貨紀錄`;
-    document.getElementById('nt-stock-result').style.display = 'none';
-  } else if (hasStockKeyword) {
-    stockArea.style.display = 'block';
-    stockBtn.dataset.product = '';
-    stockBtn.textContent = '🔍 查哪家有進過貨';
-    document.getElementById('nt-stock-result').style.display = 'none';
+  if (!hasStockKeyword) { stockArea.style.display = 'none'; return; }
+
+  stockArea.style.display = 'block';
+  document.getElementById('nt-stock-result').style.display = 'none';
+
+  const matched = detectProductsInText(task);
+
+  if (matched.length === 0) {
+    // 沒偵測到產品：手動輸入
+    multiArea.style.display = 'none';
+    _ntStockSelected = '';
+    stockBtn.textContent = '🔍 輸入產品名查詢';
+  } else if (matched.length === 1) {
+    // 唯一符合：直接設定
+    multiArea.style.display = 'none';
+    _ntStockSelected = matched[0].product;
+    const shortN = getProductAliases(matched[0].product)[2] || getProductAliases(matched[0].product)[1] || matched[0].product;
+    stockBtn.textContent = `🔍 查「${shortN}」進貨紀錄`;
   } else {
-    stockArea.style.display = 'none';
+    // 多個符合：顯示選擇晶片
+    multiArea.style.display = 'block';
+    _ntStockSelected = matched[0].product;
+    multiList.innerHTML = matched.map((m, i) => {
+      const shortN = getProductAliases(m.product)[2] || getProductAliases(m.product)[1] || m.product;
+      return `<span onclick="ntStockSelect(this,'${m.product.replace(/'/g,"\\'")}','${shortN.replace(/'/g,"\\'")}')"
+        style="padding:4px 10px;border-radius:20px;cursor:pointer;font-size:12px;border:1px solid ${i===0?'var(--accent)':'var(--border)'};background:${i===0?'var(--accent)':'transparent'};color:${i===0?'#fff':'var(--text)'}">${shortN}</span>`;
+    }).join('');
+    const firstShort = getProductAliases(matched[0].product)[2] || getProductAliases(matched[0].product)[1] || matched[0].product;
+    stockBtn.textContent = `🔍 查「${firstShort}」進貨紀錄`;
   }
 }
 
-async function queryProductOrders() {
-  const btn = document.getElementById('nt-stock-btn');
-  let product = btn.dataset.product || '';
+function ntStockSelect(el, fullName, shortName) {
+  _ntStockSelected = fullName;
+  document.getElementById('nt-stock-btn').textContent = `🔍 查「${shortName}」進貨紀錄`;
+  document.getElementById('nt-stock-result').style.display = 'none';
+  // 更新晶片樣式
+  document.querySelectorAll('#nt-stock-multi-list span').forEach(s => {
+    s.style.borderColor = 'var(--border)';
+    s.style.background = 'transparent';
+    s.style.color = 'var(--text)';
+  });
+  el.style.borderColor = 'var(--accent)';
+  el.style.background = 'var(--accent)';
+  el.style.color = '#fff';
+}
 
-  // 若沒有自動偵測到，讓使用者手動輸入
+async function queryProductOrders() {
+  let product = _ntStockSelected;
+
   if (!product) {
     product = prompt('請輸入產品名稱（部分名稱即可）：') || '';
     if (!product.trim()) return;
     product = product.trim();
   }
 
+  const btn = document.getElementById('nt-stock-btn');
   btn.disabled = true;
+  const origText = btn.textContent;
   btn.textContent = '查詢中…';
   const resultEl = document.getElementById('nt-stock-result');
   resultEl.style.display = 'none';
 
   try {
-    const r = await fetch(`/product-orders?product=${encodeURIComponent(product)}`);
+    const r = await fetch(WORKER + `/product-orders?product=${encodeURIComponent(product)}`);
     const d = await r.json();
     if (!d.ok) {
       resultEl.style.display = 'block';
       resultEl.innerHTML = `<span style="color:var(--red)">查詢失敗：${d.error || '未知錯誤'}</span>`;
-      if (d.columns) resultEl.innerHTML += `<br><small style="color:var(--muted)">欄位：${d.columns.join(', ')}</small>`;
       return;
     }
     if (!d.result.length) {
@@ -2487,7 +2564,7 @@ async function queryProductOrders() {
       resultEl.innerHTML = `<span style="color:var(--muted)">查無「${product}」的進貨紀錄</span>`;
       return;
     }
-    // 用本地 pharmacies 快取把 Customer ID 換成藥局名稱
+
     const idToPhName = {};
     (pharmacies || []).forEach(p => {
       const id = p.id || p['Customer_ID'] || '';
@@ -2500,8 +2577,7 @@ async function queryProductOrders() {
       <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局有進過「${d.result[0]?.prodName || product}」${d.hasDate ? '' : '（無訂購日期資料）'}</div>
       ${d.result.map(p => {
         const phName = idToPhName[p.pharmacyId] || p.pharmacyId;
-        return `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
           <div>
             <span style="font-weight:600">${phName}</span>
             <span style="font-size:11px;color:var(--muted);margin-left:6px">數量：${p.totalQty}・$${p.totalAmount.toLocaleString()}</span>
@@ -2514,7 +2590,7 @@ async function queryProductOrders() {
     resultEl.innerHTML = `<span style="color:var(--red)">查詢失敗：${e.message}</span>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = btn.dataset.product ? `🔍 查「${btn.dataset.product}」進貨紀錄` : '🔍 查哪家有進過貨';
+    btn.textContent = origText;
   }
 }
 
