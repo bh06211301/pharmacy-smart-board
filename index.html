@@ -630,7 +630,12 @@ let allVisitsCache = [];
       </button>
       <button class="btn btn-ghost btn-sm" onclick="clearDoneTodos()" style="font-size:11px;color:var(--muted2)">清除全部</button>
     </div>
-    <div id="done-list" style="display:none;margin-top:10px"></div>
+    <div id="done-filter-row" style="display:none;margin-top:8px">
+      <input type="text" class="modal-input" id="done-filter-input"
+        placeholder="搜尋任務名稱或藥局…" oninput="filterDoneList(this.value)"
+        style="font-size:12px;padding:6px 10px">
+    </div>
+    <div id="done-list" style="display:none;margin-top:8px"></div>
   </div>
 </div>
 
@@ -2303,6 +2308,13 @@ async function loadTodos() {
     const d = await get('/todos-v2');
     todosCache = d.todos || [];
   } catch { todosCache = []; }
+  // 完成超過 30 天自動刪除
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const expired = todosCache.filter(t => t.done && t.doneAt && t.doneAt < cutoff);
+  if (expired.length) {
+    todosCache = todosCache.filter(t => !(t.done && t.doneAt && t.doneAt < cutoff));
+    expired.forEach(t => todoApiDelete(t.id));
+  }
   renderEisenhower();
   renderCalTodoPool();
   updateTodoBadge();
@@ -2392,8 +2404,18 @@ function renderDoneSection() {
   if (title) title.textContent = '✅ 已完成（' + done.length + ' 筆）';
   const list = document.getElementById('done-list');
   if (!list || list.style.display === 'none') return;
-  const sorted = [...done].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
+  const q = (document.getElementById('done-filter-input')||{}).value||'';
+  const filtered = q.trim() ? done.filter(t => (t.task||'').includes(q) || (t.pharmacyName||'').includes(q)) : done;
+  const sorted = [...filtered].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
   list.innerHTML = sorted.map(t => renderDoneCard(t)).join('');
+}
+
+function filterDoneList(q) {
+  const done = todosCache.filter(t => t.done);
+  const filtered = q.trim() ? done.filter(t => (t.task||'').includes(q) || (t.pharmacyName||'').includes(q)) : done;
+  const sorted = [...filtered].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
+  const list = document.getElementById('done-list');
+  if (list) list.innerHTML = sorted.map(t => renderDoneCard(t)).join('');
 }
 
 function renderDoneCard(t) {
@@ -2423,13 +2445,18 @@ function renderDoneCard(t) {
 function toggleDoneSection() {
   const list = document.getElementById('done-list');
   const arrow = document.getElementById('done-section-arrow');
+  const filterRow = document.getElementById('done-filter-row');
+  const inp = document.getElementById('done-filter-input');
   if (!list) return;
   if (list.style.display !== 'none') {
     list.style.display = 'none';
     if (arrow) arrow.textContent = '▶';
+    if (filterRow) filterRow.style.display = 'none';
+    if (inp) inp.value = '';
   } else {
     list.style.display = 'block';
     if (arrow) arrow.textContent = '▼';
+    if (filterRow) filterRow.style.display = 'block';
     const done = todosCache.filter(t => t.done);
     const sorted = [...done].sort((a,b) => (b.doneAt||'') > (a.doneAt||'') ? 1 : -1);
     list.innerHTML = sorted.map(t => renderDoneCard(t)).join('');
