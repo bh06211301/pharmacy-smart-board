@@ -898,14 +898,15 @@ async function handleGetProducts(env) {
 }
 
 // ============================================================
-// 15. 依產品查詢進貨藥局（product sheet join order sheet）
+// 15. 依產品查詢進貨藥局（精準比對 產品編號2，支援時間篩選）
 // ============================================================
 async function handleProductOrders(request, env) {
   const reqUrl = new URL(request.url);
   const product = reqUrl.searchParams.get('product') || '';
+  // months=0 代表不限時間，預設 12 個月
+  const months  = parseInt(reqUrl.searchParams.get('months') || '12', 10);
   if (!product) return json({ error: '缺少 product 參數' }, 400);
 
-  // 同時讀取產品清單和出貨明細
   const [prodRes, orderRes] = await Promise.all([
     fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_PRODUCT}/gviz/tq?tqx=out:json`),
     fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_ORDER}/gviz/tq?tqx=out:json`),
@@ -924,32 +925,34 @@ async function handleProductOrders(request, env) {
   const prodData  = parseGviz(await prodRes.text());
   const orderData = parseGviz(await orderRes.text());
 
-  // ── 從產品清單找符合名稱的產品，取得數字前綴 ID ──
-  const nameCol = ['產品名稱','品名','商品名稱','藥品名稱'].find(n => prodData.colMap[n] !== undefined);
-  // 出貨明細 產品ID 格式為「數字+字母」如 "3A"；產品清單以 小產品編號（數字）對應
-  const numIdCol = ['小產品編號','產品個別編號'].find(n => prodData.colMap[n] !== undefined);
+  const nameCol  = ['產品名稱','品名','商品名稱','藥品名稱'].find(n => prodData.colMap[n] !== undefined);
+  const idCol2   = prodData.colMap['產品編號2'] !== undefined ? '產品編號2' : null; // 精準 ID，如 "8A"
 
   if (!nameCol) return json({ ok: false, result: [], error: '產品清單找不到名稱欄位' });
+  if (!idCol2)  return json({ ok: false, result: [], error: '產品清單找不到產品編號2欄位' });
 
-  // 收集符合搜尋名稱的數字 ID 集合，及對應的完整產品名稱
-  const matchedNums = new Set();  // 數字 ID，如 17
-  const numToName = {};
+  // 收集符合名稱的所有 產品編號2（精準 set，如 {"8A","8B","8C"}）
+  const matchedIds = new Set();  // 精準 ID
+  const idToName   = {};         // "8A" → "優樂寧"
   prodData.rows.forEach(row => {
     const name = String(row.c[prodData.colMap[nameCol]]?.v || '');
     if (!name.includes(product)) return;
-    if (numIdCol) {
-      const num = String(row.c[prodData.colMap[numIdCol]]?.v || '').trim();
-      if (num) { matchedNums.add(num); numToName[num] = name; }
-    }
+    const pid2 = String(row.c[prodData.colMap[idCol2]]?.v || '').trim();
+    if (pid2) { matchedIds.add(pid2); idToName[pid2] = name; }
   });
 
-  // ── 從出貨明細按數字前綴查詢（"17A", "17B" 都屬於數字 17）──
-  const oMap = orderData.colMap;
-  const pharmacyMap = {};
+  if (!matchedIds.size) {
+    return json({ ok: true, product, result: [], hasDate: false, note: '產品清單中找不到符合的品名' });
+  }
 
-  // 訂單編號格式：YYMMDDNN（2位年+月+日+序號），如 "26011200" = 2026-01-12
-  function extractDateFromOrderNo(orderNo) {
-    const s = String(orderNo || '').replace(/\D/g, ''); // 只保留數字
+  // 時間截止點
+  const cutoff = months > 0
+    ? new Date(Date.now() - months * 30 * 86400000).toISOString().slice(0, 10)
+    : '';
+
+  // 訂單編號格式：YYMMDDNN → 2026-01-12
+  function extractDate(orderNo) {
+    const s = String(orderNo || '').replace(/\D/g, '');
     if (s.length >= 6) {
       const yy = parseInt(s.slice(0, 2), 10);
       const mm = parseInt(s.slice(2, 4), 10);
@@ -958,45 +961,45 @@ async function handleProductOrders(request, env) {
         return `${2000 + yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
       }
     }
-    // 嘗試 YYYY-MM-DD
-    const mDash = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (mDash) return `${mDash[1]}-${mDash[2]}-${mDash[3]}`;
-    return '';
+    const m = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
   }
 
+  const oMap = orderData.colMap;
+  const pharmacyMap = {};
+
   orderData.rows.forEach(row => {
-    const prodId  = String(row.c[oMap['產品ID']]?.v || '');
-    const numMatch = prodId.match(/^(\d+)/);
-    if (!numMatch) return;
-    const num = numMatch[1];
-    if (!matchedNums.has(num)) return;
+    const prodId = String(row.c[oMap['產品ID']]?.v || '').trim();
+    if (!matchedIds.has(prodId)) return;   // ← 精準比對，不再只看前綴
 
     const pharmacy = row.c[oMap['店名_備份']]?.v || '';
     if (!pharmacy) return;
 
+    const date = extractDate(row.c[oMap['訂單編號']]?.v || '');
+    if (cutoff && date && date < cutoff) return;  // 時間篩選
+
     const qty    = parseFloat(row.c[oMap['數量']]?.v || 0);
     const amount = parseFloat(row.c[oMap['小計']]?.v || 0);
-    const date   = extractDateFromOrderNo(row.c[oMap['訂單編號']]?.v || '');
 
     if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacyId: pharmacy, totalQty: 0, totalAmount: 0, dates: new Set(), prodName: '' };
     pharmacyMap[pharmacy].totalQty    += qty;
     pharmacyMap[pharmacy].totalAmount += amount;
-    pharmacyMap[pharmacy].prodName     = numToName[num] || product;
+    pharmacyMap[pharmacy].prodName     = idToName[prodId] || product;
     if (date) pharmacyMap[pharmacy].dates.add(date);
   });
 
   const result = Object.values(pharmacyMap)
     .map(p => ({
-      pharmacyId: p.pharmacyId,
-      prodName: p.prodName,
-      totalQty: p.totalQty,
+      pharmacyId:  p.pharmacyId,
+      prodName:    p.prodName,
+      totalQty:    p.totalQty,
       totalAmount: p.totalAmount,
-      lastDate: [...p.dates].sort().reverse()[0] || '',
+      lastDate:    [...p.dates].sort().reverse()[0] || '',
     }))
     .sort((a, b) => (b.lastDate > a.lastDate ? 1 : -1));
 
   const hasDate = result.some(r => r.lastDate);
-  return json({ ok: true, product, result, numIdCol, nameCol, hasDate, matchedNums: [...matchedNums] });
+  return json({ ok: true, product, result, hasDate, months, matchedIds: [...matchedIds] });
 }
 
 // ============================================================

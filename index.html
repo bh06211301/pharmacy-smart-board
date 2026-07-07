@@ -682,6 +682,13 @@ let allVisitsCache = [];
         <div style="color:var(--muted);margin-bottom:6px;font-size:12px">找到多個符合的產品，請選擇：</div>
         <div id="nt-stock-multi-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
+      <!-- 時間篩選 -->
+      <div id="nt-stock-months" style="display:none;margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted);align-self:center">時間範圍：</span>
+        <span class="stock-month-btn active" data-months="6" onclick="setStockMonths(this,6)" style="padding:2px 10px;border-radius:12px;font-size:11px;cursor:pointer;background:var(--accent);color:#fff;border:1px solid var(--accent)">近6個月</span>
+        <span class="stock-month-btn" data-months="12" onclick="setStockMonths(this,12)" style="padding:2px 10px;border-radius:12px;font-size:11px;cursor:pointer;background:transparent;color:var(--text);border:1px solid var(--border)">近12個月</span>
+        <span class="stock-month-btn" data-months="0" onclick="setStockMonths(this,0)" style="padding:2px 10px;border-radius:12px;font-size:11px;cursor:pointer;background:transparent;color:var(--text);border:1px solid var(--border)">全部</span>
+      </div>
       <div id="nt-stock-result" style="display:none;background:var(--surface2);border-radius:8px;padding:10px 12px;font-size:13px"></div>
     </div>
     <div class="modal-footer">
@@ -2447,6 +2454,12 @@ async function openNewTodoModal() {
   document.getElementById('nt-stock-multi').style.display = 'none';
   _ntAiSuggestions = [];
   _ntStockSelected = '';
+  _ntStockMonths   = 6;
+  document.querySelectorAll('.stock-month-btn').forEach((b,i) => {
+    b.style.background = i===0 ? 'var(--accent)' : 'transparent';
+    b.style.color = i===0 ? '#fff' : 'var(--text)';
+    b.style.borderColor = i===0 ? 'var(--accent)' : 'var(--border)';
+  });
   // 載入產品清單（只在第一次載入）
   if (!productsCache.length) {
     try {
@@ -2529,6 +2542,7 @@ function detectProductsInText(text) {
 }
 
 let _ntStockSelected = '';  // 目前選定的產品名
+let _ntStockMonths   = 6;   // 預設近 6 個月
 
 function ntTaskInput() {
   const task = document.getElementById('nt-task').value.trim();
@@ -2544,6 +2558,7 @@ function ntTaskInput() {
 
   stockArea.style.display = 'block';
   document.getElementById('nt-stock-result').style.display = 'none';
+  document.getElementById('nt-stock-months').style.display = 'flex';
 
   const matched = detectProductsInText(task);
 
@@ -2587,6 +2602,17 @@ function ntStockSelect(el, fullName, shortName) {
   el.style.color = '#fff';
 }
 
+function setStockMonths(el, months) {
+  _ntStockMonths = months;
+  document.querySelectorAll('.stock-month-btn').forEach(b => {
+    const active = b === el;
+    b.style.background = active ? 'var(--accent)' : 'transparent';
+    b.style.color = active ? '#fff' : 'var(--text)';
+    b.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+  });
+  if (_ntStockSelected) queryProductOrders();  // 切換時間就重查
+}
+
 async function queryProductOrders() {
   let product = _ntStockSelected;
 
@@ -2594,6 +2620,7 @@ async function queryProductOrders() {
     product = prompt('請輸入產品名稱（部分名稱即可）：') || '';
     if (!product.trim()) return;
     product = product.trim();
+    _ntStockSelected = product;
   }
 
   const btn = document.getElementById('nt-stock-btn');
@@ -2604,7 +2631,7 @@ async function queryProductOrders() {
   resultEl.style.display = 'none';
 
   try {
-    const r = await fetch(WORKER + `/product-orders?product=${encodeURIComponent(product)}`);
+    const r = await fetch(WORKER + `/product-orders?product=${encodeURIComponent(product)}&months=${_ntStockMonths}`);
     const d = await r.json();
     if (!d.ok) {
       resultEl.style.display = 'block';
@@ -2626,7 +2653,7 @@ async function queryProductOrders() {
 
     resultEl.style.display = 'block';
     resultEl.innerHTML = `
-      <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局有進過「${d.result[0]?.prodName || product}」${d.hasDate ? '' : '（無訂購日期資料）'}</div>
+      <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局${_ntStockMonths > 0 ? '（近' + _ntStockMonths + '個月）' : '（全部）'}有進過「${d.result[0]?.prodName || product}」${d.hasDate ? '' : '（無訂購日期資料）'}</div>
       ${d.result.map(p => {
         const phName = idToPhName[p.pharmacyId] || p.pharmacyId;
         return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
