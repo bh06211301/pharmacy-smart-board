@@ -292,6 +292,7 @@ let todayRoute = [];
 let lastScript = '';
 let customerStatuses = {};
 let todosCache = [];
+let productsCache = [];
 let areaFilter = {city:'', district:''};
 let allVisitsCache = [];
 </script>
@@ -655,6 +656,14 @@ let allVisitsCache = [];
         <button class="btn btn-ai btn-sm" id="nt-ai-btn" onclick="fetchNtAiSuggestions()">取得建議</button>
       </div>
       <div id="nt-suggestions" style="display:none;background:var(--surface2);border-radius:8px;padding:10px 12px"></div>
+    </div>
+    <!-- 調貨來源查詢 -->
+    <div class="modal-field" id="nt-stock-area" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="modal-field-label" style="margin-bottom:0">📦 調貨來源</div>
+        <button class="btn btn-sm" id="nt-stock-btn" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px" onclick="queryProductOrders()">🔍 查哪家有進過貨</button>
+      </div>
+      <div id="nt-stock-result" style="display:none;background:var(--surface2);border-radius:8px;padding:10px 12px;font-size:13px"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeNewTodoModal()">取消</button>
@@ -2365,7 +2374,7 @@ function jumpToVisit(pharmacyId, pharmacyName) {
 }
 
 // ── 新增待辦 Modal ──
-function openNewTodoModal() {
+async function openNewTodoModal() {
   document.getElementById('new-todo-modal').style.display = 'flex';
   document.getElementById('nt-ph-search').value = '';
   document.getElementById('nt-ph-id').value = '';
@@ -2376,7 +2385,17 @@ function openNewTodoModal() {
   document.getElementById('nt-ai-area').style.display = 'none';
   document.getElementById('nt-suggestions').style.display = 'none';
   document.getElementById('nt-ai-quadrant-badge').style.display = 'none';
+  document.getElementById('nt-stock-area').style.display = 'none';
+  document.getElementById('nt-stock-result').style.display = 'none';
   _ntAiSuggestions = [];
+  // 載入產品清單（只在第一次載入）
+  if (!productsCache.length) {
+    try {
+      const r = await fetch('/products');
+      const d = await r.json();
+      if (d.ok) productsCache = d.products || [];
+    } catch {}
+  }
 }
 
 function closeNewTodoModal() {
@@ -2414,6 +2433,78 @@ function ntPhSelect(id, name) {
 function ntTaskInput() {
   const task = document.getElementById('nt-task').value.trim();
   document.getElementById('nt-ai-area').style.display = task ? 'block' : 'none';
+
+  // 偵測「調貨」關鍵字 + 產品名稱
+  const hasStockKeyword = task.includes('調貨') || task.includes('借貨') || task.includes('調藥');
+  const matchedProduct = hasStockKeyword
+    ? productsCache.find(p => task.includes(p))
+    : null;
+
+  const stockArea = document.getElementById('nt-stock-area');
+  const stockBtn  = document.getElementById('nt-stock-btn');
+  if (hasStockKeyword && matchedProduct) {
+    stockArea.style.display = 'block';
+    stockBtn.dataset.product = matchedProduct;
+    stockBtn.textContent = `🔍 查「${matchedProduct}」進貨紀錄`;
+    document.getElementById('nt-stock-result').style.display = 'none';
+  } else if (hasStockKeyword) {
+    stockArea.style.display = 'block';
+    stockBtn.dataset.product = '';
+    stockBtn.textContent = '🔍 查哪家有進過貨';
+    document.getElementById('nt-stock-result').style.display = 'none';
+  } else {
+    stockArea.style.display = 'none';
+  }
+}
+
+async function queryProductOrders() {
+  const btn = document.getElementById('nt-stock-btn');
+  let product = btn.dataset.product || '';
+
+  // 若沒有自動偵測到，讓使用者手動輸入
+  if (!product) {
+    product = prompt('請輸入產品名稱（部分名稱即可）：') || '';
+    if (!product.trim()) return;
+    product = product.trim();
+  }
+
+  btn.disabled = true;
+  btn.textContent = '查詢中…';
+  const resultEl = document.getElementById('nt-stock-result');
+  resultEl.style.display = 'none';
+
+  try {
+    const r = await fetch(`/product-orders?product=${encodeURIComponent(product)}`);
+    const d = await r.json();
+    if (!d.ok) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:var(--red)">查詢失敗：${d.error || '未知錯誤'}</span>`;
+      if (d.columns) resultEl.innerHTML += `<br><small style="color:var(--muted)">欄位：${d.columns.join(', ')}</small>`;
+      return;
+    }
+    if (!d.result.length) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:var(--muted)">查無「${product}」的進貨紀錄</span>`;
+      return;
+    }
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+      <div style="margin-bottom:6px;font-size:12px;color:var(--muted)">共 ${d.result.length} 家藥局有進過「${product}」</div>
+      ${d.result.map(p => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <span style="font-weight:600">${p.pharmacy}</span>
+            <span style="font-size:11px;color:var(--muted);margin-left:6px">共 ${p.orderCount} 次</span>
+          </div>
+          <div style="font-size:12px;color:var(--accent)">最後：${p.lastDate || '日期未知'}</div>
+        </div>`).join('')}`;
+  } catch(e) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `<span style="color:var(--red)">查詢失敗：${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = btn.dataset.product ? `🔍 查「${btn.dataset.product}」進貨紀錄` : '🔍 查哪家有進過貨';
+  }
 }
 
 async function fetchNtAiSuggestions() {

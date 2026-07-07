@@ -96,6 +96,16 @@ export default {
         return await handlePharmacyDetect(request);
       }
 
+      // ★ 產品清單
+      if (path === '/products' && request.method === 'GET') {
+        return await handleGetProducts(env);
+      }
+
+      // ★ 依產品查詢進貨藥局
+      if (path === '/product-orders' && request.method === 'GET') {
+        return await handleProductOrders(request, env);
+      }
+
       if (path === '/all-visits' && request.method === 'GET') {
         return await handleAllVisits(env);
       }
@@ -855,6 +865,98 @@ async function handleAddVisit(request) {
   });
   const data = await res.json();
   return json(data);
+}
+
+// ============================================================
+// 14. 產品清單
+// ============================================================
+async function handleGetProducts(env) {
+  const sheetId = env.SHEET_PRODUCT;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+
+  const rows = data?.table?.rows || [];
+  const cols = data?.table?.cols || [];
+  const colNames = cols.map(c => c.label);
+
+  const candidates = ['品名', '產品名稱', '商品名稱', '藥品名稱', '產品', '藥品', '品項'];
+  const productColIdx = cols.findIndex(c => candidates.includes(c.label));
+
+  if (productColIdx === -1) {
+    return json({ ok: false, columns: colNames, products: [], error: '找不到品名欄位，請確認欄位名稱' });
+  }
+
+  const products = [...new Set(
+    rows.map(r => String(r.c[productColIdx]?.v || '')).filter(Boolean)
+  )].sort();
+
+  return json({ ok: true, products, productCol: cols[productColIdx].label, columns: colNames });
+}
+
+// ============================================================
+// 15. 依產品查詢進貨藥局與日期
+// ============================================================
+async function handleProductOrders(request, env) {
+  const reqUrl = new URL(request.url);
+  const product = reqUrl.searchParams.get('product') || '';
+  if (!product) return json({ error: '缺少 product 參數' }, 400);
+
+  const sheetId = env.SHEET_ORDER;
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+  const res = await fetch(sheetUrl);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+
+  const rows = data?.table?.rows || [];
+  const cols = data?.table?.cols || [];
+  const colNames = cols.map(c => c.label);
+  const colMap = {};
+  cols.forEach((c, i) => { colMap[c.label] = i; });
+
+  const productCols = ['品名', '產品名稱', '商品名稱', '藥品名稱', '產品', '品項'];
+  const dateCols   = ['出貨日期', '日期', '訂購日期', '訂單日期', '出貨時間', '出貨年月日'];
+
+  const productColName = productCols.find(n => colMap[n] !== undefined);
+  const dateColName    = dateCols.find(n => colMap[n] !== undefined);
+
+  if (!productColName) {
+    return json({ ok: false, columns: colNames, result: [], error: '找不到品名欄位' });
+  }
+
+  function parseDate(cell) {
+    if (!cell) return '';
+    if (cell.f) return cell.f;
+    const v = String(cell.v || '');
+    if (v.startsWith('Date(')) {
+      const parts = v.replace('Date(', '').replace(')', '').split(',').map(Number);
+      return `${parts[0]}-${String(parts[1] + 1).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+    }
+    return v;
+  }
+
+  const pharmacyMap = {};
+  rows.forEach(row => {
+    const pName = String(row.c[colMap[productColName]]?.v || '');
+    if (!pName.includes(product)) return;
+    const pharmacy = row.c[colMap['店名_備份']]?.v || '';
+    if (!pharmacy) return;
+    const date = dateColName ? parseDate(row.c[colMap[dateColName]]) : '';
+    if (!pharmacyMap[pharmacy]) pharmacyMap[pharmacy] = { pharmacy, orders: [] };
+    pharmacyMap[pharmacy].orders.push({ product: pName, date });
+  });
+
+  const result = Object.values(pharmacyMap)
+    .map(p => {
+      const dates = [...new Set(p.orders.map(o => o.date))].filter(Boolean).sort().reverse();
+      return { pharmacy: p.pharmacy, orderCount: p.orders.length, lastDate: dates[0] || '', recentDates: dates.slice(0, 5) };
+    })
+    .sort((a, b) => (b.lastDate > a.lastDate ? 1 : -1));
+
+  return json({ ok: true, product, result, productColName, dateColName, columns: colNames });
 }
 
 // ============================================================
