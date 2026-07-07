@@ -2911,6 +2911,20 @@ function todoChipDragEnd(id) {
   if (el) el.classList.remove('dragging');
 }
 
+function _syncTodoPhToCalPlan(item, ds) {
+  if (!item.pharmacyId) return;
+  const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === item.pharmacyId);
+  const name = item.pharmacyName || ph?.name || ph?.['店名'] || item.pharmacyId;
+  const address = ph?.address || ph?.['地址'] || '';
+  const plan = getCalPlan();
+  if (!plan[ds]) plan[ds] = { pharmacies: [], route: null };
+  if (!plan[ds].pharmacies.find(p => p.id === item.pharmacyId)) {
+    plan[ds].pharmacies.push({ id: item.pharmacyId, name, address });
+    plan[ds].route = null;
+    saveCalPlan(plan);
+  }
+}
+
 async function calOnDropCell(ev, ds) {
   ev.preventDefault();
   ev.currentTarget.classList.remove('drag-target');
@@ -2919,6 +2933,7 @@ async function calOnDropCell(ev, ds) {
   const item = todosCache.find(t => t.id === id);
   if (!item) return;
   item.scheduledDate = ds;
+  _syncTodoPhToCalPlan(item, ds);
   calSelectDay(ds); renderCalTodoPool(); renderCalendar();
   toast(`✅ 已排入 ${ds}`);
   await todoApiUpdate(id, { scheduledDate: ds });
@@ -2932,6 +2947,7 @@ async function calOnDrop(ev, ds) {
   const item = todosCache.find(t => t.id === id);
   if (!item) return;
   item.scheduledDate = ds;
+  _syncTodoPhToCalPlan(item, ds);
   renderCalTodoPool(); renderDayPanel(ds); renderCalendar();
   toast(`✅ 已排入 ${ds}`);
   await todoApiUpdate(id, { scheduledDate: ds });
