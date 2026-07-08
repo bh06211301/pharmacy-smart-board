@@ -320,7 +320,6 @@ let allVisitsCache = [];
   </div>
   <div class="nav-tabs">
     <button class="nav-tab active"   onclick="nav(this,'today')">📍 今日行程</button>
-    <button class="nav-tab"          onclick="nav(this,'tasks')">📥 任務投入</button>
     <button class="nav-tab"          onclick="nav(this,'pharmacies')">🏪 藥局清單</button>
     <button class="nav-tab"          onclick="nav(this,'visits')">📋 拜訪紀錄</button>
     <button class="nav-tab"          onclick="nav(this,'todo')">📌 待辦清單</button>
@@ -347,26 +346,22 @@ let allVisitsCache = [];
       <span class="icon">🗺️</span> 今日路線
       <span class="sidebar-badge badge-blue" id="sb-route">—</span>
     </div>
-    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[1],'tasks')">
-      <span class="icon">📥</span> 任務待排
-      <span class="sidebar-badge badge-red" id="sb-tasks">0</span>
-    </div>
   </div>
   <div class="sidebar-divider"></div>
   <div style="margin-bottom:6px">
     <div class="sidebar-label">藥局資料</div>
-    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[2],'pharmacies')">
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[1],'pharmacies')">
       <span class="icon">🏪</span> 藥局清單
       <span class="sidebar-badge badge-green" id="sb-ph">—</span>
     </div>
-    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[3],'visits')">
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[2],'visits')">
       <span class="icon">📋</span> 拜訪紀錄查詢
     </div>
-    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[2],'pharmacies');setTimeout(()=>{document.getElementById('ph-filter').value='dead';renderTable()},100)">
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[1],'pharmacies');setTimeout(()=>{document.getElementById('ph-filter').value='dead';renderTable()},100)">
       <span class="icon">🚫</span> 死客戶管理
       <span class="sidebar-badge badge-gray" id="sb-dead">—</span>
     </div>
-    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[4],'todo')">
+    <div class="sidebar-item" onclick="nav(document.querySelectorAll('.nav-tab')[3],'todo')">
       <span class="icon">📌</span> 待辦事項
       <span class="sidebar-badge badge-orange" id="sb-todo">—</span>
     </div>
@@ -377,8 +372,8 @@ let allVisitsCache = [];
     <div id="area-sidebar"></div>
   </div>
   <div class="sidebar-divider"></div>
-  <button class="btn btn-ai" style="width:100%;justify-content:center;padding:11px" onclick="openScheduleModal()">
-    ✦ AI 生成今日排程
+  <button class="btn btn-ai" style="width:100%;justify-content:center;padding:11px" onclick="nav(document.querySelectorAll('.nav-tab')[0],'today');setTimeout(runSchedule,100)">
+    ✦ AI 路線排序
   </button>
 </div>
 
@@ -390,14 +385,38 @@ let allVisitsCache = [];
   <div class="page-header">
     <div>
       <div class="page-title" id="today-title">今日行程</div>
-      <div class="page-sub" id="today-sub">使用左側「AI 生成今日排程」開始規劃</div>
+      <div class="page-sub" id="today-sub">搜尋藥局加入後按「⚡ AI 路線排序」</div>
     </div>
     <div class="btn-group">
       <button class="btn btn-ghost btn-sm" onclick="loadTodayFromCalendar()">📅 從月曆匯入</button>
-      <button class="btn btn-ghost btn-sm" onclick="exportRoute()">匯出行程</button>
       <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
     </div>
   </div>
+  <!-- 快速加入藥局 -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-body" style="padding:12px 16px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="ph-select-wrap" style="flex:2;min-width:160px;position:relative">
+          <input class="task-input" id="today-ph-inp" placeholder="搜尋藥局加入今日行程..." autocomplete="off"
+            oninput="phSearchToday(this.value)" onfocus="phSearchToday(this.value)"
+            style="height:36px;padding:6px 12px">
+          <div class="ph-dropdown" id="today-ph-dd"></div>
+        </div>
+        <select class="task-input" id="today-ph-type" style="flex:none;width:140px;height:36px;padding:6px 10px">
+          <option value="visit">🔄 例行拜訪</option>
+          <option value="new">🆕 新藥局</option>
+          <option value="dad">👨‍⚕️ 爸爸客戶</option>
+          <option value="deliver">📦 自送</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="addTaskToday()">＋ 加入</button>
+        <button class="btn btn-ai btn-sm" id="today-sched-btn" onclick="runSchedule()">⚡ AI 路線排序</button>
+        <button class="btn btn-ghost btn-sm" id="today-clear-btn" onclick="clearTodayTasks()" style="display:none">🗑 清除任務</button>
+      </div>
+      <div id="today-task-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+    </div>
+  </div>
+  <!-- 待確認路線預覽 -->
+  <div id="today-pending"></div>
   <div class="stat-row">
     <div class="stat-card">
       <div class="stat-top"><div class="stat-icon-wrap" style="background:var(--accent-light)">🗺️</div><span class="stat-change change-up">AI排序</span></div>
@@ -426,7 +445,7 @@ let allVisitsCache = [];
         <div style="padding:40px;text-align:center;color:var(--muted)">
           <div style="font-size:30px;margin-bottom:12px">✦</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:6px">尚未規劃今日路線</div>
-          <div style="font-size:12px">點左側「AI 生成今日排程」<br>或前往「任務投入」加入藥局後再排程</div>
+          <div style="font-size:12px">在上方搜尋藥局加入後<br>按「⚡ AI 路線排序」開始規劃</div>
         </div>
       </div>
     </div>
@@ -457,40 +476,6 @@ let allVisitsCache = [];
       </div>
     </div>
   </div>
-</div>
-
-<!-- ══ 任務投入 ══ -->
-<div class="page" id="page-tasks">
-  <div class="page-header">
-    <div><div class="page-title">📥 任務投入</div><div class="page-sub">加入要拜訪的藥局，AI 自動排序路線</div></div>
-    <button class="btn btn-ai" id="schedule-btn" onclick="runSchedule()">✦ AI 一鍵排程</button>
-  </div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-header"><div class="card-title">新增拜訪任務</div></div>
-    <div class="card-body">
-      <div class="task-input-row">
-        <div class="ph-select-wrap" style="flex:2;min-width:180px">
-          <input class="task-input" id="t-name" placeholder="輸入藥局名稱搜尋..." autocomplete="off"
-            oninput="phSearch(this.value)" onfocus="phSearch(this.value)">
-          <div class="ph-dropdown" id="ph-dd"></div>
-        </div>
-        <input class="task-input" id="t-addr" placeholder="地址（自動填入）" style="flex:2">
-        <input class="task-input" id="t-pharmacist" placeholder="藥師姓名" style="max-width:110px">
-        <select class="task-input" id="t-type" style="max-width:150px">
-          <option value="visit">🔄 例行拜訪</option>
-          <option value="new">🆕 新開藥局</option>
-          <option value="dad">👨‍⚕️ 爸爸老客戶</option>
-          <option value="deliver">📦 自送出貨</option>
-        </select>
-        <input class="task-input" id="t-note" placeholder="備註" style="flex:1.5">
-        <button class="btn btn-primary" onclick="addTask()">＋ 加入</button>
-      </div>
-    </div>
-  </div>
-  <div id="task-list">
-    <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">尚無任務 — 請從上方搜尋藥局加入</div>
-  </div>
-  <div id="schedule-result"></div>
 </div>
 
 <!-- ══ 藥局清單 ══ -->
@@ -779,27 +764,6 @@ let allVisitsCache = [];
 
 <div class="toast" id="toast"></div>
 
-<!-- AI 排程 Modal -->
-<div class="modal-overlay" id="scheduleModal">
-  <div class="modal">
-    <div class="modal-title">✦ AI 生成今日排程</div>
-    <div class="modal-field">
-      <div class="modal-label">出發地點</div>
-      <input class="modal-input" id="m-origin" value="板橋辦公室">
-    </div>
-    <div class="modal-field">
-      <div class="modal-label" id="m-task-label">目前任務（0 家）</div>
-      <div id="m-task-preview" style="font-size:12px;color:var(--muted);padding:6px 0">
-        請先到「任務投入」頁面加入要拜訪的藥局
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('scheduleModal')">取消</button>
-      <button class="btn btn-ai" onclick="modalSchedule()">✦ 開始排程</button>
-    </div>
-  </div>
-</div>
-
 <!-- 死客戶標記 Modal -->
 <div class="modal-overlay" id="deadModal">
   <div class="modal" style="width:440px">
@@ -1050,6 +1014,35 @@ function phSearch(val) {
   dd.classList.add('open');
 }
 
+function phSearchToday(val) {
+  const dd = document.getElementById('today-ph-dd');
+  if (!val || !pharmacies.length) { dd.classList.remove('open'); return; }
+  const hits = pharmacies.filter(p =>
+    (p.name||p['店名']||'').toLowerCase().includes(val.toLowerCase()) ||
+    (p.id||p['Customer_ID']||'').toLowerCase().includes(val.toLowerCase())
+  ).slice(0, 8);
+  if (!hits.length) { dd.classList.remove('open'); return; }
+  dd.innerHTML = hits.map(p => {
+    const id = p.id||p['Customer_ID']||'';
+    const name = p.name||p['店名']||'';
+    const addr = p.address||p['地址']||'';
+    const doc = p.pharmacist||p['Key Man']||'';
+    const dead = isDead(id);
+    return `<div class="ph-option" onclick="fillTaskToday('${id}','${name.replace(/'/g,"\\'")}','${addr.replace(/'/g,"\\'")}','${doc.replace(/'/g,"\\'")}')">
+      <strong>${name}</strong> <span style="color:var(--muted);font-size:11px">${id}</span>
+      ${dead?'<span class="dead-badge">死客戶</span>':''}
+      ${addr?`<div style="font-size:11px;color:var(--muted)">${addr}</div>`:''}
+    </div>`;
+  }).join('');
+  dd.classList.add('open');
+}
+
+function fillTaskToday(id, name, addr, doc) {
+  const inp = document.getElementById('today-ph-inp');
+  if (inp) { inp.value = name; inp.dataset.phId = id; inp.dataset.phAddr = addr; }
+  document.getElementById('today-ph-dd').classList.remove('open');
+}
+
 function phSearchVisit(val) {
   const dd = document.getElementById('ph-dd-visit');
   if (!val || !pharmacies.length) { dd.classList.remove('open'); return; }
@@ -1088,6 +1081,44 @@ document.addEventListener('click', e => {
 // ══════════════════════════════
 // 任務管理
 // ══════════════════════════════
+function addTaskToday() {
+  const inp = document.getElementById('today-ph-inp');
+  const name = inp?.value.trim();
+  if (!name) { toast('請輸入藥局名稱'); return; }
+  const id = inp?.dataset.phId || '';
+  const addr = inp?.dataset.phAddr || '';
+  const type = document.getElementById('today-ph-type')?.value || 'visit';
+  const found = id ? pharmacies.find(p => (p.id||p['Customer_ID']||'') === id) : null;
+  if (id && isDead(id)) {
+    if (!confirm(`「${name}」已被標記為死客戶，確定要加入？`)) return;
+  }
+  tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: found?.pharmacist||found?.['Key Man']||'', type, note: '' });
+  renderTaskChips();
+  if (inp) { inp.value = ''; inp.dataset.phId = ''; inp.dataset.phAddr = ''; }
+  toast(`✅ ${name} 已加入`);
+}
+
+function renderTaskChips() {
+  const el = document.getElementById('today-task-chips');
+  const clearBtn = document.getElementById('today-clear-btn');
+  if (!el) return;
+  if (!tasks.length) { el.innerHTML = ''; if (clearBtn) clearBtn.style.display = 'none'; return; }
+  if (clearBtn) clearBtn.style.display = '';
+  el.innerHTML = tasks.map((t,i) => {
+    const typeColor = {visit:'var(--accent)',new:'var(--purple)',dad:'var(--teal)',deliver:'var(--green)'}[t.type]||'var(--accent)';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:${typeColor}18;color:${typeColor};font-size:12px;font-weight:600">
+      ${t.name}
+      <span onclick="removeTask(${t.id});renderTaskChips()" style="cursor:pointer;color:${typeColor};font-size:14px;line-height:1">×</span>
+    </span>`;
+  }).join('');
+}
+
+function clearTodayTasks() {
+  tasks = [];
+  renderTaskChips();
+  document.getElementById('today-pending').innerHTML = '';
+}
+
 function addTask() {
   const name = document.getElementById('t-name').value.trim();
   const addr = document.getElementById('t-addr').value.trim();
@@ -1107,11 +1138,11 @@ function addTask() {
 
   tasks.push({ id: Date.now(), pharmacyId, name, addr, pharmacist, type, note });
   renderTasks();
+  renderTaskChips();
   document.getElementById('t-name').value = '';
   document.getElementById('t-addr').value = '';
   document.getElementById('t-pharmacist').value = '';
   document.getElementById('t-note').value = '';
-  document.getElementById('sb-tasks').textContent = tasks.length;
   toast(`✅ ${name} 已加入`);
 }
 
@@ -1121,15 +1152,15 @@ function quickAddTask(id, name, addr, doc) {
   }
   tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: doc, type: 'visit', note: '' });
   renderTasks();
-  document.getElementById('sb-tasks').textContent = tasks.length;
-  nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
+  renderTaskChips();
+  nav(document.querySelectorAll('.nav-tab')[0], 'today');
   toast(`✅ ${name} 已加入任務`);
 }
 
 function removeTask(tid) {
   tasks = tasks.filter(t => t.id !== tid);
   renderTasks();
-  document.getElementById('sb-tasks').textContent = tasks.length;
+  renderTaskChips();
 }
 
 function renderTasks() {
@@ -1168,9 +1199,9 @@ function renderTasks() {
 // ══════════════════════════════
 async function runSchedule() {
   if (!tasks.length) { toast('請先加入任務'); return; }
-  const btn = document.getElementById('schedule-btn');
+  const btn = document.getElementById('today-sched-btn') || document.getElementById('schedule-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 規劃中...';
-  const resultEl = document.getElementById('schedule-result');
+  const resultEl = document.getElementById('today-pending') || document.getElementById('schedule-result');
   resultEl.innerHTML = `<div class="ai-result-wrap">
     <div class="loading-line" style="width:55%"></div>
     <div class="loading-line" style="width:80%"></div>
@@ -1193,7 +1224,7 @@ async function runSchedule() {
         lastVisitDays: t.lastVisitDays || null,
         isNew: t.type === 'new', isDad: t.type === 'dad', hasDelivery: t.type === 'deliver'
       })),
-      origin: document.getElementById('m-origin')?.value || '板橋'
+      origin: '新北市汐止區湖東街五巷25號'
     };
     const data = await post('/optimize-route', payload);
     window._pendingRoute = data.route || enriched;
@@ -1201,14 +1232,14 @@ async function runSchedule() {
   } catch(e) {
     resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 排程失敗：${e.message}</div>`;
   } finally {
-    btn.disabled = false; btn.innerHTML = '✦ AI 一鍵排程';
+    btn.disabled = false; btn.innerHTML = '⚡ AI 路線排序';
   }
 }
 
 function renderScheduleResult(data, original) {
   const route = data.route || original;
   const summary = data.summary || '';
-  const el = document.getElementById('schedule-result');
+  const el = document.getElementById('today-pending') || document.getElementById('schedule-result');
   const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
   const typeLabel = r => r.isNew?'🆕 新藥局':r.isDad?'👨‍⚕️ 爸爸客戶':r.hasDelivery?'🚗 自送':r.lastVisitDays>21?'⚠️ 逾期':'🔄 拜訪';
   el.innerHTML = `<div class="ai-result-wrap" style="margin-top:16px">
@@ -1238,7 +1269,7 @@ function renderScheduleResult(data, original) {
     </div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
       <button class="btn btn-primary" onclick="confirmRoute()">✓ 確認排入今日行程</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('schedule-result').innerHTML=''">清除</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('today-pending').innerHTML='';document.getElementById('schedule-result')&&(document.getElementById('schedule-result').innerHTML='')">清除</button>
     </div>
   </div>`;
 }
@@ -1259,10 +1290,74 @@ function confirmRoute() {
     }
   });
   saveCalPlan(plan);
+  calculateRouteDetails(todayRoute);
   renderTodayRoute();
   updateTodayStats();
   toast('✅ 已排入今日行程！');
   setTimeout(() => nav(document.querySelectorAll('.nav-tab')[0], 'today'), 800);
+}
+
+async function calculateRouteDetails(route) {
+  if (!route.length) return;
+  window._routeDetails = null;
+  const ORIGIN = '新北市汐止區湖東街五巷25號';
+  const DEST   = '台北市內湖區新民街422號';
+  const START_MIN = 8 * 60 + 30; // 08:30
+
+  const loadMaps = () => new Promise(res => {
+    if (window.google?.maps) { res(); return; }
+    window._onGMapReady = function() {
+      if (document.getElementById('cal-map-modal')?.classList.contains('open')) initCalMap();
+      res();
+    };
+    if (!document.getElementById('gmap-script')) {
+      const s = document.createElement('script'); s.id = 'gmap-script';
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
+      document.head.appendChild(s);
+    }
+  });
+
+  try {
+    await loadMaps();
+    const svc = new google.maps.DirectionsService();
+    const result = await new Promise((res, rej) => {
+      svc.route({
+        origin: ORIGIN,
+        destination: DEST,
+        waypoints: route.map(r => ({ location: r.addr || r.name, stopover: true })),
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (r, status) => status === 'OK' ? res(r) : rej(status));
+    });
+    const legs = result.routes[0].legs; // legs[0]=origin→stop1, ..., legs[n]=stopN→home
+    let totalMeters = 0;
+    const arrivalTimes = [];
+    let cumMin = START_MIN;
+    legs.forEach((leg, i) => {
+      totalMeters += leg.distance.value;
+      cumMin += leg.duration.value / 60;
+      if (i < route.length) { // stops (not home)
+        arrivalTimes.push(Math.round(cumMin));
+        cumMin += 30; // 30 min visit
+      }
+    });
+    const homeArrival = arrivalTimes.length ? arrivalTimes[arrivalTimes.length-1] + 30 + Math.round((legs[legs.length-1]?.duration.value||0)/60) : cumMin;
+    const totalKm = totalMeters / 1000;
+    const fuelCost = Math.round(totalKm / 24 * 32);
+    const hwKm = Math.max(0, totalKm * 0.3 - 20);
+    const hwCost = Math.round(hwKm * 1.3);
+    window._routeDetails = { arrivalTimes, homeArrival, totalKm: Math.round(totalKm), fuelCost, hwCost };
+    renderTodayRoute();
+  } catch(e) {
+    // If Directions API fails, show route without times
+    window._routeDetails = null;
+    renderTodayRoute();
+  }
+}
+
+function fmtMin(min) {
+  const h = Math.floor(min / 60) % 24;
+  const m = Math.floor(min % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 
 // ══════════════════════════════
@@ -1280,7 +1375,7 @@ function renderTodayRoute() {
       ${cnt
         ? `<div style="font-size:12px;margin-bottom:14px">月曆今日已排定 <b style="color:var(--accent)">${cnt} 家</b></div>
            <button class="btn btn-primary btn-sm" onclick="loadTodayFromCalendar()">📅 從月曆匯入今日計畫</button>`
-        : `<div style="font-size:12px">前往「📅 月曆」排定行程<br>或到「📥 任務投入」加入藥局後排程</div>`
+        : `<div style="font-size:12px">前往「📅 月曆」排定行程<br>或在上方搜尋藥局加入後按「⚡ AI 路線排序」</div>`
       }
     </div>`;
     return;
@@ -1298,7 +1393,10 @@ function renderTodayRoute() {
   const connector = `<div style="display:flex;align-items:center;gap:0;padding:0 33px">
     <div style="width:2px;height:14px;background:var(--border);margin-left:13px"></div>
   </div>`;
-  const stops = todayRoute.map((r, i) => `
+  const stops = todayRoute.map((r, i) => {
+    const arr = window._routeDetails?.arrivalTimes?.[i];
+    const timeStr = arr ? `<span style="font-size:11px;font-weight:700;color:var(--green);margin-left:6px">⏰ ${fmtMin(arr)}</span>` : '';
+    return `
     ${connector}
     <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;cursor:pointer;transition:background .15s"
       onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
@@ -1308,16 +1406,37 @@ function renderTodayRoute() {
         <div style="font-size:13px;font-weight:600">${r.name}
           ${r.lastVisitDays>21?`<span class="overdue-badge">逾期${r.lastVisitDays}天</span>`:''}
           ${typeLabel(r)?`<span style="font-size:10px;color:var(--muted);margin-left:4px">${typeLabel(r)}</span>`:''}
+          ${timeStr}
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.addr||''} ${r.lastVisitDays?`· 上次：${r.lastVisitDays}天前`:''}</div>
       </div>
       <span style="font-size:14px;color:var(--muted2)">›</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+
+  const rd = window._routeDetails;
+  const homeTimeStr = rd?.homeArrival ? fmtMin(rd.homeArrival) : '';
+  const homeLate = rd?.homeArrival && rd.homeArrival > 18*60;
+  const homeWarn = homeLate ? `<span style="color:var(--red);font-size:11px;font-weight:700"> ⚠️ 預計 ${fmtMin(rd.homeArrival)} 到家</span>` : (homeTimeStr ? `<span style="color:var(--green);font-size:11px;font-weight:700"> ✅ ${homeTimeStr} 到家</span>` : '');
+
   el.innerHTML =
     endpointRow('🏢','出發：公司（汐止）','新北市汐止區湖東街五巷25號','var(--green-light)','var(--green)') +
     stops +
     connector +
-    endpointRow('🏠','返家：內湖','台北市內湖區新民街422號','var(--orange-light)','var(--orange)');
+    endpointRow('🏠','返家：內湖' + homeWarn,'台北市內湖區新民街422號','var(--orange-light)','var(--orange)');
+
+  if (rd) {
+    const total = rd.fuelCost + rd.hwCost;
+    const costBar = `<div style="padding:10px 20px;border-top:1px solid var(--border);background:var(--gray-light);display:flex;gap:16px;font-size:12px;color:var(--text2)">
+      <span>🚗 路程約 ${rd.totalKm} km</span>
+      <span>⛽ 油費 <b>$${rd.fuelCost}</b></span>
+      ${rd.hwCost > 0 ? `<span>🛣️ 高速 <b>$${rd.hwCost}</b></span>` : ''}
+      <span style="font-weight:700;color:var(--text)">總計 $${total}</span>
+      ${homeLate ? `<span style="color:var(--red);font-weight:700">⚠️ 超出 18:00 返家</span>` : ''}
+    </div>`;
+    el.innerHTML += costBar;
+  }
+
   document.getElementById('sb-route').textContent = todayRoute.length + '站';
 }
 
@@ -1530,22 +1649,13 @@ async function genNextScript(id, name, lastVisit) {
 // Modal & 工具
 // ══════════════════════════════
 function openScheduleModal() {
-  document.getElementById('m-task-label').textContent = `目前任務（${tasks.length} 家）`;
-  document.getElementById('m-task-preview').textContent =
-    tasks.length ? tasks.map(t=>t.name).join('、') : '請先到「任務投入」加入藥局';
-  document.getElementById('scheduleModal').classList.add('open');
+  nav(document.querySelectorAll('.nav-tab')[0], 'today');
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 function modalSchedule() {
-  closeModal('scheduleModal');
-  if (!tasks.length) {
-    nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
-    toast('⚠️ 請先加入要拜訪的藥局');
-    return;
-  }
-  nav(document.querySelectorAll('.nav-tab')[1], 'tasks');
+  nav(document.querySelectorAll('.nav-tab')[0], 'today');
   setTimeout(runSchedule, 200);
 }
 
@@ -1642,7 +1752,7 @@ function toggleCity(key) {
 
 function filterByDistrict(district, city) {
   areaFilter = {city: city||'', district: district||''};
-  nav(document.querySelectorAll('.nav-tab')[2], 'pharmacies');
+  nav(document.querySelectorAll('.nav-tab')[1], 'pharmacies');
   setTimeout(() => {
     document.getElementById('ph-kw').value = '';
     document.getElementById('ph-filter').value = 'all';
@@ -2296,7 +2406,7 @@ async function analyzeAllTasks() {
     if (added) {
       renderEisenhower(); updateTodoBadge();
       toast(`✅ AI 發現 ${added} 個待辦事項，已加入待辦清單`);
-      nav(document.querySelectorAll('.nav-tab')[4], 'todo');
+      nav(document.querySelectorAll('.nav-tab')[3], 'todo');
     } else {
       toast('✅ AI 分析完成：無新增待辦');
     }
@@ -2502,10 +2612,9 @@ function renderDoneCard(t) {
       <div class="todo-check checked" onclick="toggleTodo('${t.id}')" title="取消完成" style="cursor:pointer">✓</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;line-height:1.4;text-decoration:line-through;color:var(--muted)">
-          ${icon} ${t.task}
+          ${t.pharmacyName?`<span style="background:#eff6ff;color:#2563eb;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:700;margin-right:4px;opacity:.7">${t.pharmacyName}</span>`:''}${icon} ${t.task}
         </div>
         <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-          ${t.pharmacyName?`<span style="font-size:11px;color:var(--accent);font-weight:600">${t.pharmacyName}</span>`:''}
           ${doneTime?`<span style="font-size:11px;color:var(--muted);background:var(--surface2);padding:1px 6px;border-radius:8px">✅ 完成於 ${doneTime}</span>`:''}
         </div>
       </div>
@@ -2584,10 +2693,9 @@ function renderTodoCard(t) {
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;line-height:1.4;${t.done?'text-decoration:line-through;color:var(--muted)':''}">
-          ${icon} ${t.task}
+          ${t.pharmacyName?`<span style="background:#eff6ff;color:#2563eb;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:700;margin-right:4px">${t.pharmacyName}</span>`:''}${icon} ${t.task}
         </div>
         <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
-          ${t.pharmacyName?`<span style="font-size:11px;color:var(--accent);font-weight:600">${t.pharmacyName}</span>`:''}
           ${dateBadge}
         </div>
         ${aiSugg}
@@ -2678,7 +2786,7 @@ async function saveResolution(id, value) {
 }
 
 function jumpToVisit(pharmacyId, pharmacyName) {
-  nav(document.querySelectorAll('.nav-tab')[3], 'visits');
+  nav(document.querySelectorAll('.nav-tab')[2], 'visits');
   if (pharmacyId) { fillVisitSearch(pharmacyId, pharmacyName); loadVisits(); }
 }
 
