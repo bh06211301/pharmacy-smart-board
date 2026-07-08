@@ -1345,7 +1345,11 @@ async function calculateRouteDetails(route) {
     const fuelCost = Math.round(totalKm / 24 * 32);
     const hwKm = Math.max(0, totalKm * 0.3 - 20);
     const hwCost = Math.round(hwKm * 1.3);
-    window._routeDetails = { arrivalTimes, homeArrival, totalKm: Math.round(totalKm), fuelCost, hwCost };
+    const legDetails = legs.map(l => ({
+      km: Math.round(l.distance.value / 100) / 10,
+      min: Math.round(l.duration.value / 60)
+    }));
+    window._routeDetails = { arrivalTimes, homeArrival, totalKm: Math.round(totalKm), fuelCost, hwCost, legDetails };
     renderTodayRoute();
   } catch(e) {
     // If Directions API fails, show route without times
@@ -1363,6 +1367,34 @@ function fmtMin(min) {
 // ══════════════════════════════
 // 今日路線渲染
 // ══════════════════════════════
+let _routeDragFrom = null, _routeDragging = false;
+function routeDragStart(e, idx) {
+  _routeDragFrom = idx;
+  _routeDragging = true;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => { if (e.currentTarget) e.currentTarget.style.opacity = '0.45'; }, 0);
+}
+function routeDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.style.background = 'var(--accent-light)';
+  e.currentTarget.style.borderLeft = '3px solid var(--accent)';
+}
+function routeDrop(e, toIdx) {
+  e.preventDefault();
+  e.currentTarget.style.background = '';
+  e.currentTarget.style.borderLeft = '3px solid transparent';
+  _routeDragging = false;
+  if (_routeDragFrom === null || _routeDragFrom === toIdx) { _routeDragFrom = null; return; }
+  const [item] = todayRoute.splice(_routeDragFrom, 1);
+  todayRoute.splice(toIdx, 0, item);
+  todayRoute.forEach((r, i) => r.seq = i + 1);
+  _routeDragFrom = null;
+  window._routeDetails = null;
+  renderTodayRoute();
+  calculateRouteDetails(todayRoute);
+  toast('↕️ 順序已更新，重新計算路線中…');
+}
+
 function renderTodayRoute() {
   const el = document.getElementById('route-list');
   if (!todayRoute.length) {
@@ -1393,13 +1425,27 @@ function renderTodayRoute() {
   const connector = `<div style="display:flex;align-items:center;gap:0;padding:0 33px">
     <div style="width:2px;height:14px;background:var(--border);margin-left:13px"></div>
   </div>`;
+  const legConnector = (legIdx) => {
+    const leg = window._routeDetails?.legDetails?.[legIdx];
+    return leg
+      ? `<div style="display:flex;align-items:center;gap:8px;padding:2px 20px 2px 33px">
+           <div style="width:2px;height:10px;background:var(--border);flex-shrink:0"></div>
+           <span style="font-size:10px;color:var(--muted2);white-space:nowrap">🚗 ${leg.min}分 · ${leg.km}km</span>
+         </div>`
+      : connector;
+  };
   const stops = todayRoute.map((r, i) => {
     const arr = window._routeDetails?.arrivalTimes?.[i];
     const timeStr = arr ? `<span style="font-size:11px;font-weight:700;color:var(--green);margin-left:6px">⏰ ${fmtMin(arr)}</span>` : '';
     return `
-    ${connector}
-    <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;cursor:pointer;transition:background .15s"
-      onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
+    ${legConnector(i)}
+    <div draggable="true"
+      ondragstart="routeDragStart(event,${i})"
+      ondragover="routeDragOver(event)"
+      ondragleave="this.style.background='';this.style.borderLeft='3px solid transparent'"
+      ondrop="routeDrop(event,${i})"
+      style="display:flex;align-items:center;gap:12px;padding:13px 20px;cursor:pointer;transition:background .15s;border-left:3px solid transparent"
+      onmouseover="if(!window._routeDragging)this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
       onclick="fetchScript(${i})">
       <div style="width:28px;height:28px;border-radius:50%;background:${typeColor(r)};color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
       <div style="flex:1">
@@ -1410,7 +1456,7 @@ function renderTodayRoute() {
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.addr||''} ${r.lastVisitDays?`· 上次：${r.lastVisitDays}天前`:''}</div>
       </div>
-      <span style="font-size:14px;color:var(--muted2)">›</span>
+      <span style="font-size:12px;color:var(--muted2);cursor:grab;user-select:none">⠿</span>
     </div>`;
   }).join('');
 
@@ -1422,7 +1468,7 @@ function renderTodayRoute() {
   el.innerHTML =
     endpointRow('🏢','出發：公司（汐止）','新北市汐止區湖東街五巷25號','var(--green-light)','var(--green)') +
     stops +
-    connector +
+    legConnector(todayRoute.length) +
     endpointRow('🏠','返家：內湖' + homeWarn,'台北市內湖區新民街422號','var(--orange-light)','var(--orange)');
 
   if (rd) {
@@ -1998,7 +2044,12 @@ function renderDayPanel(ds) {
   // pharmacy list
   const phHtml = dp.pharmacies.length
     ? dp.pharmacies.map((ph, i) => `
-        <div class="cal-ph-item">
+        <div class="cal-ph-item" draggable="true"
+          ondragstart="calPhDragStart(event,${i},'${ds}')"
+          ondragover="calPhDragOver(event)"
+          ondragleave="calPhDragLeave(event)"
+          ondrop="calPhDrop(event,${i},'${ds}')">
+          <span style="cursor:grab;color:var(--muted2);font-size:14px;padding-right:4px;user-select:none">⠿</span>
           <span class="cal-ph-num">${i+1}</span>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ph.name}</div>
@@ -2219,6 +2270,38 @@ function calRemovePh(ds, pharmacyId) {
   saveCalPlan(plan);
   renderCalendar();
   renderDayPanel(ds);
+}
+
+let _calPhDragFrom = null;
+function calPhDragStart(e, idx, ds) {
+  _calPhDragFrom = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => { if (e.currentTarget) e.currentTarget.style.opacity = '0.45'; }, 0);
+}
+function calPhDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.style.background = 'var(--accent-light)';
+  e.currentTarget.style.outline = '2px solid var(--accent)';
+}
+function calPhDragLeave(e) {
+  e.currentTarget.style.background = '';
+  e.currentTarget.style.outline = '';
+}
+function calPhDrop(e, toIdx, ds) {
+  e.preventDefault();
+  e.currentTarget.style.background = '';
+  e.currentTarget.style.outline = '';
+  if (_calPhDragFrom === null || _calPhDragFrom === toIdx) { _calPhDragFrom = null; return; }
+  const plan = getCalPlan();
+  const phs = plan[ds]?.pharmacies;
+  if (!phs) return;
+  const [item] = phs.splice(_calPhDragFrom, 1);
+  phs.splice(toIdx, 0, item);
+  plan[ds].route = null;
+  saveCalPlan(plan);
+  renderCalendar();
+  renderDayPanel(ds);
+  _calPhDragFrom = null;
 }
 
 function visitPhSearch(q) {
