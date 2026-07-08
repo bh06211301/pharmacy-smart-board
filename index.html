@@ -2648,6 +2648,15 @@ function renderNewPhCard(t) {
   const name = t.pharmacyName || t.task || '（未命名）';
   const addr = t.newPhAddress || '';
   const contact = t.newPhContact || '';
+  const city = t.newPhCity || '';
+  const hi = t.healthInsurance || '';
+  const hiBadge = hi.includes('尚未健保')
+    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#fef9c3;color:#a16207">❗ 尚未健保</span>`
+    : hi.includes('已有健保')
+      ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#dcfce7;color:#166534">✅ 已有健保</span>`
+      : '';
+  const trackerBadge = t.source === 'tracker'
+    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#f3e8ff;color:#7c3aed">🤖 系統偵測</span>` : '';
   const dateBadge = t.scheduledDate
     ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#e0f2fe;color:#0284c7">📅 首訪 ${t.scheduledDate}</span>` : '';
   return `<div class="e-todo-card" draggable="true"
@@ -2658,10 +2667,10 @@ function renderNewPhCard(t) {
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:var(--purple);${t.done?'text-decoration:line-through;opacity:.5':''}">🆕 ${name}</div>
-        ${addr?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📍 ${addr}</div>`:''}
+        ${city||addr?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📍 ${city?city+' ':''}${addr}</div>`:''}
         ${contact?`<div style="font-size:11px;color:var(--muted);margin-top:1px">👤 ${contact}</div>`:''}
         ${t.solution?`<div style="font-size:11px;color:var(--text2);margin-top:4px;background:var(--surface2);border-radius:6px;padding:4px 8px">📝 ${t.solution}</div>`:''}
-        <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${dateBadge}</div>
+        <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${hiBadge}${trackerBadge}${dateBadge}</div>
         <textarea class="e-resolution" placeholder="備註（開發進度、聯絡人等）…"
           style="margin-top:6px"
           onblur="saveResolution('${t.id}',this.value)">${t.resolution||''}</textarea>

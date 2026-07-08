@@ -743,6 +743,10 @@ async function handleTodosV2(request, env) {
       sourceVisitId: body.sourceVisitId || null,
       sourceVisitDate: body.sourceVisitDate || null,
       type: body.type || 'other',
+      newPhAddress: body.newPhAddress || '',
+      newPhCity: body.newPhCity || '',
+      healthInsurance: body.healthInsurance || '',
+      source: body.source || '',
       createdAt: new Date().toISOString(),
     };
     todos.push(newTodo);
@@ -760,7 +764,7 @@ async function handleTodosV2(request, env) {
     if (idx === -1) return json({ error: '找不到此待辦' }, 404);
 
     const updated = { ...todos[idx] };
-    const allowedFields = ['task','quadrant','pharmacyId','pharmacyName','scheduledDate','done','doneAt','aiSuggestions','resolution','relatedTodoIds','sourceVisitId','sourceVisitDate','type'];
+    const allowedFields = ['task','quadrant','pharmacyId','pharmacyName','scheduledDate','done','doneAt','aiSuggestions','resolution','relatedTodoIds','sourceVisitId','sourceVisitDate','type','newPhAddress','newPhCity','healthInsurance','source'];
     for (const f of allowedFields) {
       if (body[f] !== undefined) updated[f] = body[f];
     }
