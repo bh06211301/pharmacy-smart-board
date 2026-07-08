@@ -608,7 +608,11 @@ body{
 
   <!-- MAIN: 今日使命 -->
   <div id="main-wrap">
-    <div class="section-title">今日優先拜訪</div>
+    <div class="section-title" id="main-section-title">今日優先拜訪</div>
+    <div id="plan-source-badge" style="display:none;margin-bottom:10px;padding:8px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:13px;color:#1d4ed8;font-weight:600">
+      📅 依照今日計畫順序
+      <span style="font-size:11px;font-weight:400;color:#3b82f6;margin-left:6px">（從主頁面月曆匯入）</span>
+    </div>
     <div id="mission-banner" class="mission-banner">
       <div class="trophy">🏆</div>
       <h2>今日使命達成！</h2>
@@ -1245,8 +1249,14 @@ function renderCard(ph) {
 
 function render() {
   const wrap = document.getElementById('cards-wrap');
+  // 更新來源標籤
+  const badge = document.getElementById('plan-source-badge');
+  if (badge) badge.style.display = usingCalendarPlan ? '' : 'none';
+
   if (!cards.length) {
-    wrap.innerHTML = '<div class="loading-wrap">找不到今日推薦藥局</div>';
+    wrap.innerHTML = usingCalendarPlan
+      ? '<div class="loading-wrap">今日計畫尚未排入藥局，請到主頁面月曆新增</div>'
+      : '<div class="loading-wrap">找不到今日推薦藥局</div>';
     return;
   }
   wrap.innerHTML = cards.map(renderCard).join('');
@@ -1360,6 +1370,8 @@ function showToast(msg) {
 }
 
 // ── LOAD DATA ─────────────────────────────────────────────────
+let usingCalendarPlan = false;
+
 async function loadData() {
   try {
     const [recRes, stRes, visitsRes] = await Promise.all([
@@ -1379,23 +1391,54 @@ async function loadData() {
     const visitMap  = buildVisitMap(allVisits);
 
     const recs = recJson.recommended || recJson.recommendations || recJson || [];
+    // 建立 id → recommend 資料 map，供 calendarPlan 取用
+    const recMap = {};
+    recs.forEach(p => { recMap[p.id] = p; });
 
-    cards = recs
-      .filter(p => statuses[p.id] !== 'dead')
-      .slice(0, 8)
-      .map(p => ({
-        id:          p.id,
-        name:        p.name,
-        district:    p.district || '',
-        daysSince:   p.daysSince,
-        totalAmount: p.totalAmount || 0,
-        hasPending:  p.hasPending || false,
-        neverVisited:p.neverVisited || false,
-        visitStats:  visitMap[p.id] || null,
-        lat:         p.lat || p.latitude || null,
-        lng:         p.lng || p.longitude || null,
-        addr:        p.addr || p.address || '',
-      }));
+    // ── 優先讀取 index.html 排好的今日計畫 ────────────────────
+    const calendarPlan = JSON.parse(localStorage.getItem('calendarPlan') || '{}');
+    const todayPlan    = calendarPlan[todayStr()];
+    const planPhs      = todayPlan?.pharmacies || [];
+
+    if (planPhs.length > 0) {
+      usingCalendarPlan = true;
+      cards = planPhs
+        .filter(p => statuses[p.id] !== 'dead')
+        .map(p => {
+          const rec = recMap[p.id] || {};
+          return {
+            id:          p.id,
+            name:        p.name,
+            district:    rec.district || '',
+            daysSince:   rec.daysSince ?? null,
+            totalAmount: rec.totalAmount || 0,
+            hasPending:  rec.hasPending || false,
+            neverVisited:rec.neverVisited || false,
+            visitStats:  visitMap[p.id] || null,
+            lat:         rec.lat || rec.latitude || null,
+            lng:         rec.lng || rec.longitude || null,
+            addr:        p.address || rec.addr || rec.address || '',
+          };
+        });
+    } else {
+      usingCalendarPlan = false;
+      cards = recs
+        .filter(p => statuses[p.id] !== 'dead')
+        .slice(0, 8)
+        .map(p => ({
+          id:          p.id,
+          name:        p.name,
+          district:    p.district || '',
+          daysSince:   p.daysSince,
+          totalAmount: p.totalAmount || 0,
+          hasPending:  p.hasPending || false,
+          neverVisited:p.neverVisited || false,
+          visitStats:  visitMap[p.id] || null,
+          lat:         p.lat || p.latitude || null,
+          lng:         p.lng || p.longitude || null,
+          addr:        p.addr || p.address || '',
+        }));
+    }
 
     render();
   } catch (err) {
