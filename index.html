@@ -1213,6 +1213,16 @@ function confirmRoute() {
     ...r, seq: i + 1,
     name: r.name || tasks.find(t => t.pharmacyId === r.id)?.name || r.id
   }));
+  // 同步到 calendarPlan，讓月曆計畫也顯示這批藥局
+  const today = fmtDs(new Date());
+  const plan = getCalPlan();
+  if (!plan[today]) plan[today] = { pharmacies: [], route: null };
+  todayRoute.forEach(r => {
+    if (r.id && !plan[today].pharmacies.find(p => p.id === r.id)) {
+      plan[today].pharmacies.push({ id: r.id, name: r.name, address: r.addr || '' });
+    }
+  });
+  saveCalPlan(plan);
   renderTodayRoute();
   updateTodayStats();
   toast('✅ 已排入今日行程！');
@@ -2949,6 +2959,11 @@ function _syncTodoPhToCalPlan(item, ds) {
     plan[ds].pharmacies.push({ id: item.pharmacyId, name, address });
     plan[ds].route = null;
     saveCalPlan(plan);
+    // 若拖到今日，同步更新記憶體中的 todayRoute
+    const today = fmtDs(new Date());
+    if (ds === today && !todayRoute.find(r => (r.id||'') === item.pharmacyId)) {
+      todayRoute.push({ id: item.pharmacyId, name, addr: address, seq: todayRoute.length + 1, lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false });
+    }
   }
 }
 
