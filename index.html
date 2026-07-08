@@ -232,6 +232,7 @@ select.task-input{cursor:pointer}
 .e-q-iv{border-left:3px solid var(--muted2)}
 .e-q-pool{border-left:3px solid var(--muted);background:var(--surface2)}
 .e-q-dad{border-left:3px solid #d97706;background:#fffbeb}
+.e-q-newph{border-left:3px solid var(--purple);background:#faf5ff}
 .e-q-example{font-size:10px;color:var(--muted2);line-height:1.5;margin-top:3px}
 .e-pool-section{margin-top:14px}
 .e-todo-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);cursor:grab;transition:all .15s}
@@ -635,6 +636,27 @@ let allVisitsCache = [];
       <div id="eq-dad"></div>
     </div>
   </div>
+  <div class="e-pool-section">
+    <div class="e-quadrant e-q-newph" ondragover="eDragOver(event)" ondrop="eDrop(event,'newph')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">🆕</span>
+        <div style="flex:1">
+          <div class="e-q-title" style="color:var(--purple)">新開藥局</div>
+          <div class="e-q-sub">潛在客戶名單・可拖曳到月曆安排首訪</div>
+        </div>
+        <button onclick="openNewTodoModal('newph')" class="btn btn-ghost btn-sm" style="flex-shrink:0;font-size:11px">詳細新增</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input id="newph-name-inp" class="task-input" placeholder="藥局名稱 *" style="flex:1;font-size:12px"
+          onkeydown="if(event.key==='Enter')quickAddNewPh()">
+        <input id="newph-addr-inp" class="task-input" placeholder="地址（選填）" style="flex:1;font-size:12px"
+          onkeydown="if(event.key==='Enter')quickAddNewPh()">
+        <button onclick="quickAddNewPh()" class="btn btn-primary btn-sm" style="flex-shrink:0">＋ 加入</button>
+      </div>
+      <div id="eq-newph"></div>
+    </div>
+  </div>
+
   <div id="done-section" style="display:none;margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;background:var(--surface)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
       <button onclick="toggleDoneSection()" style="background:none;border:none;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;padding:0;color:var(--text)">
@@ -684,6 +706,7 @@ let allVisitsCache = [];
             <option value="iii">⚡ 緊急不重要</option>
             <option value="iv">🗑 不緊急不重要</option>
             <option value="dad">👴 老爸聯絡事項</option>
+            <option value="newph">🆕 新開藥局</option>
           </select>
           <div id="nt-ai-quadrant-badge" style="display:none;margin-top:5px;font-size:11px;color:var(--accent)"></div>
         </div>
@@ -1263,19 +1286,38 @@ function renderTodayRoute() {
     return;
   }
   const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
-  el.innerHTML = todayRoute.map((r, i) => `
-    <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;border-top:${i?'1px solid var(--border)':''};cursor:pointer;transition:background .15s"
+  const typeLabel = r => r.isNew?'🆕 新藥局':r.isDad?'👨‍⚕️ 爸爸客戶':r.hasDelivery?'📦 自送':'';
+  const endpointRow = (icon, label, addr, bg, color) =>
+    `<div style="display:flex;align-items:center;gap:12px;padding:11px 20px;background:${bg}">
+      <div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:700;color:${color}">${label}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:1px">${addr}</div>
+      </div>
+    </div>`;
+  const connector = `<div style="display:flex;align-items:center;gap:0;padding:0 33px">
+    <div style="width:2px;height:14px;background:var(--border);margin-left:13px"></div>
+  </div>`;
+  const stops = todayRoute.map((r, i) => `
+    ${connector}
+    <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;cursor:pointer;transition:background .15s"
       onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
       onclick="fetchScript(${i})">
       <div style="width:28px;height:28px;border-radius:50%;background:${typeColor(r)};color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
       <div style="flex:1">
         <div style="font-size:13px;font-weight:600">${r.name}
           ${r.lastVisitDays>21?`<span class="overdue-badge">逾期${r.lastVisitDays}天</span>`:''}
+          ${typeLabel(r)?`<span style="font-size:10px;color:var(--muted);margin-left:4px">${typeLabel(r)}</span>`:''}
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.addr||''} ${r.lastVisitDays?`· 上次：${r.lastVisitDays}天前`:''}</div>
       </div>
       <span style="font-size:14px;color:var(--muted2)">›</span>
     </div>`).join('');
+  el.innerHTML =
+    endpointRow('🏢','出發：公司（汐止）','新北市汐止區湖東街五巷25號','var(--green-light)','var(--green)') +
+    stops +
+    connector +
+    endpointRow('🏠','返家：內湖','台北市內湖區新民街422號','var(--orange-light)','var(--orange)');
   document.getElementById('sb-route').textContent = todayRoute.length + '站';
 }
 
@@ -2399,18 +2441,19 @@ async function clearDoneTodos() {
 
 // ── 艾森豪矩陣渲染 ──
 const QMETA = {
-  ui:   {color:'var(--red)',    label:'❗ 緊急重要'},
-  ii:   {color:'#3b6af5',      label:'📋 重要不緊急'},
-  iii:  {color:'var(--orange)', label:'⚡ 緊急不重要'},
-  iv:   {color:'var(--muted2)', label:'🗑 不緊急不重要'},
-  pool: {color:'var(--muted)',  label:'📦 待辦池'},
-  dad:  {color:'#d97706',       label:'👴 老爸聯絡事項'},
+  ui:    {color:'var(--red)',    label:'❗ 緊急重要'},
+  ii:    {color:'#3b6af5',      label:'📋 重要不緊急'},
+  iii:   {color:'var(--orange)', label:'⚡ 緊急不重要'},
+  iv:    {color:'var(--muted2)', label:'🗑 不緊急不重要'},
+  pool:  {color:'var(--muted)',  label:'📦 待辦池'},
+  dad:   {color:'#d97706',       label:'👴 老爸聯絡事項'},
+  newph: {color:'var(--purple)', label:'🆕 新開藥局'},
 };
 const DAD_PHARMACY_IDS = new Set(['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129']);
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
-  ['ui','ii','iii','iv','pool','dad'].forEach(q => {
+  ['ui','ii','iii','iv','pool','dad','newph'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
     const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done);
@@ -2492,7 +2535,35 @@ function toggleDoneSection() {
   }
 }
 
+function renderNewPhCard(t) {
+  const name = t.pharmacyName || t.task || '（未命名）';
+  const addr = t.newPhAddress || '';
+  const contact = t.newPhContact || '';
+  const dateBadge = t.scheduledDate
+    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#e0f2fe;color:#0284c7">📅 首訪 ${t.scheduledDate}</span>` : '';
+  return `<div class="e-todo-card" draggable="true"
+    ondragstart="eTodoDragStart(event,'${t.id}')" ondragend="eTodoDragEnd(event)">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div class="todo-check ${t.done?'checked':''}" onclick="toggleTodo('${t.id}')" title="${t.done?'取消':'標記首訪完成'}">
+        ${t.done?'✓':''}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:var(--purple);${t.done?'text-decoration:line-through;opacity:.5':''}">🆕 ${name}</div>
+        ${addr?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📍 ${addr}</div>`:''}
+        ${contact?`<div style="font-size:11px;color:var(--muted);margin-top:1px">👤 ${contact}</div>`:''}
+        ${t.solution?`<div style="font-size:11px;color:var(--text2);margin-top:4px;background:var(--surface2);border-radius:6px;padding:4px 8px">📝 ${t.solution}</div>`:''}
+        <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${dateBadge}</div>
+        <textarea class="e-resolution" placeholder="備註（開發進度、聯絡人等）…"
+          style="margin-top:6px"
+          onblur="saveResolution('${t.id}',this.value)">${t.resolution||''}</textarea>
+      </div>
+      <button class="del-btn" onclick="todoDelete('${t.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
 function renderTodoCard(t) {
+  if (t.quadrant === 'newph') return renderNewPhCard(t);
   const icon = TYPE_ICON[t.type] || '📌';
   const color = (QMETA[t.quadrant||'pool']||QMETA.pool).color;
   const dateBadge = t.scheduledDate
@@ -2569,8 +2640,8 @@ async function eDrop(ev, quadrant) {
   item.quadrant = quadrant;
   renderEisenhower();
   await todoApiUpdate(id, { quadrant });
-  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', iv:'不緊急不重要', pool:'待辦池'};
-  toast(`✅ 已移至「${labels[quadrant]}」`);
+  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', iv:'不緊急不重要', pool:'待辦池', dad:'老爸聯絡事項', newph:'新開藥局'};
+  toast(`✅ 已移至「${labels[quadrant]||quadrant}」`);
 }
 
 // ── 解決方案自動儲存 + 藥局交叉連結 ──
@@ -2612,13 +2683,13 @@ function jumpToVisit(pharmacyId, pharmacyName) {
 }
 
 // ── 新增待辦 Modal ──
-async function openNewTodoModal() {
+async function openNewTodoModal(defaultQuadrant = 'pool') {
   document.getElementById('new-todo-modal').style.display = 'flex';
   document.getElementById('nt-ph-search').value = '';
   document.getElementById('nt-ph-id').value = '';
   document.getElementById('nt-ph-name').value = '';
   document.getElementById('nt-task').value = '';
-  document.getElementById('nt-quadrant').value = 'pool';
+  document.getElementById('nt-quadrant').value = defaultQuadrant;
   document.getElementById('nt-date').value = '';
   document.getElementById('nt-ai-area').style.display = 'none';
   document.getElementById('nt-suggestions').style.display = 'none';
@@ -2739,6 +2810,35 @@ function detectProductsInText(text) {
 
 let _ntStockSelected = '';  // 目前選定的產品名
 let _ntStockMonths   = 6;   // 預設近 6 個月
+
+async function quickAddNewPh() {
+  const nameEl = document.getElementById('newph-name-inp');
+  const addrEl = document.getElementById('newph-addr-inp');
+  const name = (nameEl?.value || '').trim();
+  const addr = (addrEl?.value || '').trim();
+  if (!name) { toast('請輸入藥局名稱'); nameEl?.focus(); return; }
+  const created = await todoApiCreate({
+    task: name,
+    quadrant: 'newph',
+    pharmacyId: '',
+    pharmacyName: name,
+    newPhAddress: addr,
+    type: 'revisit',
+    done: false,
+    scheduledDate: null,
+    aiSuggestions: [],
+    solution: '',
+    relatedTodoIds: []
+  });
+  if (created?.id) {
+    todosCache.unshift(created);
+    renderEisenhower();
+    updateTodoBadge();
+  }
+  if (nameEl) nameEl.value = '';
+  if (addrEl) addrEl.value = '';
+  toast(`✅ 已加入新藥局：${name}`);
+}
 
 function ntTaskInput() {
   const task = document.getElementById('nt-task').value.trim();
@@ -2903,17 +3003,20 @@ async function fetchNtAiSuggestions() {
 async function submitNewTodo() {
   const task = document.getElementById('nt-task').value.trim();
   if (!task) { toast('請輸入待辦事項'); return; }
+  const quadrant = document.getElementById('nt-quadrant').value;
   const selected = _ntAiSuggestions.filter((_, i) => {
     const cb = document.getElementById('nt-sugg-' + i);
     return cb && cb.checked;
   });
+  const phName = document.getElementById('nt-ph-name').value;
   const res = await todoApiCreate({
     task,
-    quadrant: document.getElementById('nt-quadrant').value,
+    quadrant,
     pharmacyId: document.getElementById('nt-ph-id').value,
-    pharmacyName: document.getElementById('nt-ph-name').value,
+    // newph 時若未從清單選藥局，直接用 task 當藥局名稱
+    pharmacyName: phName || (quadrant === 'newph' ? task : ''),
     scheduledDate: document.getElementById('nt-date').value || null,
-    aiSuggestions: selected, type: 'other',
+    aiSuggestions: selected, type: quadrant === 'newph' ? 'revisit' : 'other',
   });
   if (res?.ok) {
     todosCache.push(res.todo);
