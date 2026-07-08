@@ -281,6 +281,19 @@ select.task-input{cursor:pointer}
 .cal-ph-remove:hover{color:var(--red)}
 .cal-route-box{background:var(--surface2);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:13px}
 .cal-section-label{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px}
+
+/* 地圖選店 Modal */
+#cal-map-modal{display:none;position:fixed;inset:0;background:rgba(16,24,40,.55);z-index:3000;align-items:center;justify-content:center}
+#cal-map-modal.open{display:flex}
+.cal-map-wrap{background:var(--white);border-radius:var(--radius);width:min(860px,96vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden}
+.cal-map-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+#cal-map-el{width:100%;height:260px;display:block}
+.cmap-ph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:200px;overflow-y:auto;padding:2px}
+.cmap-ph-card{border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;transition:border-color .15s,background .15s;background:var(--white);position:relative;user-select:none}
+.cmap-ph-card:hover{border-color:var(--accent)}
+.cmap-ph-card.sel{border-color:var(--green);background:var(--green-light)}
+.cmap-area-tab{padding:4px 10px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--white);color:var(--text2);white-space:nowrap;flex-shrink:0;transition:all .15s}
+.cmap-area-tab.active{border-color:var(--accent);background:var(--accent);color:#fff}
 </style>
 </head>
 <body>
@@ -1911,11 +1924,17 @@ function renderDayPanel(ds) {
       <div class="cal-section-label">📌 計畫拜訪</div>
       <div id="cal-ph-list">${phHtml}</div>
 
-      <div style="position:relative;margin-top:8px">
-        <input id="cal-ph-inp" class="task-input" placeholder="搜尋藥局名稱加入…"
-          oninput="calPhSearch(this.value,'${ds}')" onfocus="calPhSearch(this.value,'${ds}')"
-          style="width:100%;box-sizing:border-box" autocomplete="off">
-        <div id="cal-ph-dd" class="ph-dropdown"></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <div style="position:relative;flex:1">
+          <input id="cal-ph-inp" class="task-input" placeholder="搜尋藥局名稱加入…"
+            oninput="calPhSearch(this.value,'${ds}')" onfocus="calPhSearch(this.value,'${ds}')"
+            style="width:100%;box-sizing:border-box" autocomplete="off">
+          <div id="cal-ph-dd" class="ph-dropdown"></div>
+        </div>
+        <button onclick="openCalMapModal('${ds}')"
+          style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
+          🗺️ 地圖選店
+        </button>
       </div>
 
       ${!isOff && dp.pharmacies.length >= 1 ? `
@@ -3008,6 +3027,210 @@ function exportRoute() {
   navigator.clipboard.writeText(txt).then(()=>toast('✅ 行程已複製'));
 }
 
+// ══════════════════════════════
+// 月曆地圖選店
+// ══════════════════════════════
+const GMAPS_KEY = 'AIzaSyBp-5PjGecwMsv-Ug5O__RAf-RzOwOqA3o';
+let _calMap = null, _calMapMarkers = [], _calMapInfoWin = null;
+let _calMapDs = null, _calMapSel = new Set();
+let _calMapArea = 'all', _calMapInited = false;
+
+function openCalMapModal(ds) {
+  _calMapDs = ds;
+  _calMapSel = new Set();
+  const existing = (getCalPlan()[ds]?.pharmacies || []);
+  existing.forEach(p => _calMapSel.add(p.id));
+
+  const modal = document.getElementById('cal-map-modal');
+  modal.classList.add('open');
+
+  const d = new Date(ds + 'T00:00:00');
+  const DNAMES = ['日','一','二','三','四','五','六'];
+  document.getElementById('cal-map-date-lbl').textContent =
+    `${d.getMonth()+1}/${d.getDate()}（${DNAMES[d.getDay()]}）計畫拜訪`;
+  document.getElementById('cal-map-search').value = '';
+  _calMapArea = 'all';
+  buildCalMapAreaTabs();
+  renderCalMapGrid();
+  updateCalMapSelCount();
+
+  if (typeof google !== 'undefined') {
+    if (!_calMapInited) initCalMap();
+    else {
+      google.maps.event.trigger(_calMap, 'resize');
+      updateCalMapMarkers();
+    }
+  } else {
+    loadGoogleMapsScript();
+  }
+}
+
+function closeCalMapModal() {
+  document.getElementById('cal-map-modal').classList.remove('open');
+  if (_calMapInfoWin) _calMapInfoWin.close();
+}
+
+function loadGoogleMapsScript() {
+  if (document.getElementById('gmaps-script')) return;
+  const s = document.createElement('script');
+  s.id = 'gmaps-script';
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
+  s.async = true;
+  s.onerror = () => { document.getElementById('cal-map-loading').innerHTML = '<div style="color:var(--red);font-size:12px;padding:16px;text-align:center">⚠️ Google Maps 載入失敗</div>'; };
+  document.head.appendChild(s);
+}
+
+window._onGMapReady = function() {
+  if (document.getElementById('cal-map-modal')?.classList.contains('open')) initCalMap();
+};
+
+function initCalMap() {
+  if (_calMapInited) return;
+  _calMapInited = true;
+  const loadEl = document.getElementById('cal-map-loading');
+  if (loadEl) loadEl.style.display = 'none';
+  _calMap = new google.maps.Map(document.getElementById('cal-map-el'), {
+    center: { lat: 25.065, lng: 121.658 },
+    zoom: 11,
+    mapTypeControl: false,
+    streetViewControl: false,
+    styles: [{ featureType:'poi', elementType:'labels', stylers:[{visibility:'off'}] }]
+  });
+  _calMapInfoWin = new google.maps.InfoWindow();
+  renderCalMapMarkers();
+}
+
+function renderCalMapMarkers() {
+  _calMapMarkers.forEach(m => m.setMap(null));
+  _calMapMarkers = [];
+  pharmacies.filter(p => p.lat && p.lng).forEach(p => {
+    const id = p.id || p['Customer_ID'] || '';
+    const inSel = _calMapSel.has(id);
+    const marker = new google.maps.Marker({
+      position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
+      map: _calMap, title: p.name || p['店名'] || '',
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
+        fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 }
+    });
+    marker.addListener('click', () => {
+      const name = p.name || p['店名'] || '';
+      const addr = p.address || p['地址'] || '';
+      const sel = _calMapSel.has(id);
+      _calMapInfoWin.setContent(`
+        <div style="font-family:Inter,sans-serif;padding:4px;min-width:160px">
+          <div style="font-size:10px;font-weight:700;color:#3b6ef5;margin-bottom:2px">${id}</div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:2px">${name}</div>
+          <div style="font-size:11px;color:#667085;margin-bottom:8px">${addr}</div>
+          <button onclick="toggleCalMapPh('${id}')"
+            style="width:100%;padding:7px;border:none;border-radius:6px;
+              background:${sel?'#fef3f2':'#3b6ef5'};color:${sel?'#f04438':'#fff'};
+              font-size:12px;font-weight:600;cursor:pointer">
+            ${sel ? '✕ 取消選取' : '＋ 加入計畫'}
+          </button>
+        </div>`);
+      _calMapInfoWin.open(_calMap, marker);
+    });
+    _calMapMarkers.push(marker);
+  });
+}
+
+function updateCalMapMarkers() {
+  const valid = pharmacies.filter(p => p.lat && p.lng);
+  _calMapMarkers.forEach((mk, i) => {
+    const p = valid[i]; if (!p) return;
+    const id = p.id || p['Customer_ID'] || '';
+    const inSel = _calMapSel.has(id);
+    mk.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
+      fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 });
+  });
+}
+
+function buildCalMapAreaTabs() {
+  const counts = {};
+  pharmacies.forEach(p => { const d = p.district || p.area || ''; if (d) counts[d] = (counts[d]||0) + 1; });
+  const priority = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
+  const sorted = [...priority.filter(a => counts[a]), ...Object.keys(counts).filter(a => !priority.includes(a)).sort()];
+  const el = document.getElementById('cal-map-area-tabs');
+  el.innerHTML = `<div class="cmap-area-tab active" onclick="setCalMapArea('all',this)">全部 ${pharmacies.length}</div>`;
+  sorted.forEach(a => {
+    const t = document.createElement('div');
+    t.className = 'cmap-area-tab';
+    t.textContent = `${a} ${counts[a]}`;
+    t.onclick = () => setCalMapArea(a, t);
+    el.appendChild(t);
+  });
+}
+
+function setCalMapArea(area, el) {
+  _calMapArea = area;
+  document.querySelectorAll('.cmap-area-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderCalMapGrid();
+  if (area !== 'all' && _calMap) {
+    const list = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+    if (list.length) {
+      const bounds = new google.maps.LatLngBounds();
+      list.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
+      _calMap.fitBounds(bounds, 60);
+    }
+  }
+}
+
+function renderCalMapGrid() {
+  const kw = (document.getElementById('cal-map-search')?.value || '').toLowerCase();
+  let list = pharmacies;
+  if (_calMapArea !== 'all') list = list.filter(p => (p.district||p.area||'') === _calMapArea);
+  if (kw) list = list.filter(p => (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.id||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw));
+  const grid = document.getElementById('cal-map-grid');
+  if (!list.length) { grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--muted);font-size:12px">無符合藥局</div>'; return; }
+  grid.innerHTML = list.slice(0, 80).map(p => {
+    const id = p.id || p['Customer_ID'] || '';
+    const inSel = _calMapSel.has(id);
+    const name = p.name || p['店名'] || '';
+    const addr = p.address || p['地址'] || '';
+    return `<div class="cmap-ph-card${inSel?' sel':''}" onclick="toggleCalMapPh('${id}')">
+      ${inSel ? `<div style="position:absolute;top:5px;right:5px;width:14px;height:14px;border-radius:50%;background:var(--green);color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;font-weight:700">✓</div>` : ''}
+      <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:2px">${id}</div>
+      <div style="font-size:12px;font-weight:600;padding-right:${inSel?'16px':'0'}">${name}</div>
+      <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${addr}</div>
+    </div>`;
+  }).join('');
+  if (list.length > 80) grid.innerHTML += `<div style="grid-column:1/-1;font-size:11px;color:var(--muted);padding:4px;text-align:center">共${list.length}筆，請搜尋縮小範圍</div>`;
+}
+
+function toggleCalMapPh(id) {
+  if (_calMapSel.has(id)) _calMapSel.delete(id);
+  else _calMapSel.add(id);
+  if (_calMapInited) updateCalMapMarkers();
+  renderCalMapGrid();
+  updateCalMapSelCount();
+  if (_calMapInfoWin) _calMapInfoWin.close();
+}
+
+function updateCalMapSelCount() {
+  const el = document.getElementById('cal-map-sel-count');
+  if (el) el.textContent = _calMapSel.size + ' 家已選';
+}
+
+function confirmCalMapSel() {
+  if (!_calMapDs) return;
+  const plan = getCalPlan();
+  if (!plan[_calMapDs]) plan[_calMapDs] = { pharmacies: [], route: null };
+  // 以選取集合完整覆蓋（支援取消）
+  const newList = [];
+  _calMapSel.forEach(id => {
+    const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === id);
+    newList.push({ id, name: ph?.name||ph?.['店名']||id, address: ph?.address||ph?.['地址']||'' });
+  });
+  plan[_calMapDs].pharmacies = newList;
+  plan[_calMapDs].route = null;
+  saveCalPlan(plan);
+  renderDayPanel(_calMapDs);
+  renderCalendar();
+  closeCalMapModal();
+  toast(`✅ 已選入 ${newList.length} 家至計畫拜訪`);
+}
+
 function openMaps() {
   if (!todayRoute.length) { toast('請先排定行程'); return; }
   const q = todayRoute.map(r=>encodeURIComponent(r.addr||r.name)).join('/');
@@ -3022,5 +3245,42 @@ function toast(msg) {
 
 init();
 </script>
+
+<!-- 地圖選店 Modal -->
+<div id="cal-map-modal">
+  <div class="cal-map-wrap">
+    <div class="cal-map-header">
+      <div>
+        <div style="font-size:14px;font-weight:700">🗺️ 地圖選店</div>
+        <div id="cal-map-date-lbl" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="cal-map-sel-count" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--accent-light);color:var(--accent)">0 家已選</span>
+        <button class="btn btn-primary btn-sm" onclick="confirmCalMapSel()">✓ 加入計畫</button>
+        <button onclick="closeCalMapModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted2);line-height:1;padding:0 4px">×</button>
+      </div>
+    </div>
+
+    <!-- Google Map -->
+    <div style="position:relative;background:#e8f0fe;height:260px;flex-shrink:0;border-bottom:1px solid var(--border)">
+      <div id="cal-map-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;background:#e8f0fe;z-index:5">
+        <span class="spinner" style="width:20px;height:20px;border-width:3px"></span>
+        <span style="font-size:13px;color:var(--muted)">地圖載入中…</span>
+      </div>
+      <div id="cal-map-el" style="width:100%;height:260px"></div>
+    </div>
+
+    <!-- 搜尋 + 地區 -->
+    <div style="padding:10px 14px 6px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+      <input id="cal-map-search" class="task-input" placeholder="搜尋藥局名稱或地址…" style="width:100%;box-sizing:border-box" oninput="renderCalMapGrid()">
+      <div id="cal-map-area-tabs" style="display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px"></div>
+    </div>
+
+    <!-- 藥局格 -->
+    <div style="padding:10px 14px;flex:1;overflow-y:auto">
+      <div id="cal-map-grid" class="cmap-ph-grid"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
