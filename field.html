@@ -494,6 +494,90 @@ body{
   color:#fff;font-size:14px;font-weight:700;cursor:pointer;
 }
 .record-submit-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── SKIP RECORD 確認警告 ── */
+.record-skip-confirm{
+  background:#fff8ed;border:1.5px solid #f97316;
+  border-radius:12px;padding:12px 14px;margin-bottom:14px;
+  display:none;
+}
+.record-skip-confirm.show{display:block}
+.record-skip-warn-text{
+  font-size:13px;color:#92400e;font-weight:600;
+  margin-bottom:10px;line-height:1.5;
+}
+.record-skip-confirm-row{display:flex;gap:8px}
+.record-skip-cancel{
+  flex:1;padding:11px;border:1.5px solid var(--border);
+  border-radius:10px;background:#fff;color:var(--text);
+  font-size:13px;font-weight:700;cursor:pointer;
+}
+.record-skip-confirm-btn{
+  flex:1;padding:11px;border:none;border-radius:10px;
+  background:#f97316;color:#fff;
+  font-size:13px;font-weight:700;cursor:pointer;
+}
+
+/* ── SKIP PHARMACY MODAL ── */
+.skip-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:700;display:none;
+}
+.skip-bg.open{display:block}
+.skip-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:800;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .3s cubic-bezier(.32,0,.67,0);
+}
+.skip-sheet.open{transform:translateX(-50%) translateY(0)}
+.skip-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 18px;
+}
+.skip-title{font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px}
+.skip-ph-name{font-size:13px;color:var(--muted);margin-bottom:18px}
+.skip-reason-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:8px;margin-bottom:16px;
+}
+.skip-reason-chip{
+  padding:12px 8px;border:1.5px solid var(--border);border-radius:10px;
+  background:#fff;font-size:13px;font-weight:600;color:var(--text);
+  cursor:pointer;text-align:center;transition:all .15s;
+}
+.skip-reason-chip.selected{
+  border-color:var(--orange);background:#fff7ed;color:var(--orange);
+}
+.skip-confirm-btn{
+  width:100%;padding:14px;border:none;border-radius:12px;
+  background:var(--orange);color:#fff;
+  font-size:15px;font-weight:800;cursor:pointer;margin-bottom:10px;
+}
+.skip-cancel-btn{
+  width:100%;padding:12px;border:none;background:none;
+  color:var(--muted);font-size:14px;font-weight:600;cursor:pointer;
+}
+
+/* ── MISSION BANNER 跳過清單 ── */
+.skipped-list-wrap{
+  background:rgba(249,115,22,.15);border-radius:12px;
+  padding:12px 14px;margin-top:14px;text-align:left;
+}
+.skipped-list-title{
+  font-size:12px;font-weight:700;color:#fed7aa;
+  margin-bottom:8px;
+}
+.skipped-item{
+  font-size:12px;color:rgba(255,255,255,.8);
+  padding:4px 0;border-bottom:1px solid rgba(255,255,255,.1);
+  display:flex;justify-content:space-between;
+}
+.skipped-item:last-child{border-bottom:none}
+.skipped-reason{color:rgba(255,255,255,.5);font-size:11px}
 </style>
 </head>
 <body>
@@ -534,6 +618,10 @@ body{
         <div class="mstat">⭐ <span id="mb-pts">0</span> 分</div>
         <div class="mstat">🔥 <span id="mb-streak">0</span> 天連勝</div>
       </div>
+      <div class="skipped-list-wrap" id="mb-skipped-wrap" style="display:none">
+        <div class="skipped-list-title">⚠️ 今日未拜訪（記得補行程）</div>
+        <div id="mb-skipped-list"></div>
+      </div>
     </div>
     <!-- NAV MODE: 開始按鈕 (非導航模式時顯示) -->
     <div class="nav-start-wrap" id="nav-start-wrap">
@@ -560,7 +648,11 @@ body{
         <a class="nav-open-maps-btn" id="nav-open-maps" href="#" target="_blank">🗺️ 開啟 Google Maps 導航</a>
         <button class="nav-arrived-btn" onclick="manualArrival()">📍 我到了</button>
       </div>
-      <button class="nav-exit-btn" onclick="exitNavMode()">✕ 結束行程模式</button>
+      <div class="nav-btn-row" style="margin-top:4px">
+        <button class="nav-exit-btn" style="flex:1" onclick="exitNavMode()">✕ 結束行程</button>
+        <button class="nav-exit-btn" style="flex:1;color:var(--orange);border-color:var(--orange)"
+                onclick="openSkipModal()">⏭ 跳過這家</button>
+      </div>
     </div>
 
     <!-- NAV MODE: 接下來的行程 -->
@@ -709,10 +801,34 @@ body{
   </select>
   <label class="record-label">拜訪內容 <span style="color:var(--muted);font-weight:400">（選填）</span></label>
   <textarea class="record-textarea" id="record-content" placeholder="簡短記錄本次拜訪重點..."></textarea>
+  <!-- 略過確認區塊 -->
+  <div class="record-skip-confirm" id="record-skip-confirm">
+    <div class="record-skip-warn-text">⚠️ 略過後此次拜訪不會寫入紀錄<br>建議事後到「拜訪紀錄」頁面補填</div>
+    <div class="record-skip-confirm-row">
+      <button class="record-skip-cancel" onclick="cancelSkipRecord()">繼續填寫</button>
+      <button class="record-skip-confirm-btn" onclick="confirmSkipRecord()">確定略過</button>
+    </div>
+  </div>
   <div class="record-btn-row">
-    <button class="record-skip-btn" onclick="skipRecord()">略過</button>
+    <button class="record-skip-btn" id="record-skip-btn" onclick="askSkipRecord()">略過</button>
     <button class="record-submit-btn" id="record-submit-btn" onclick="submitVisitRecord()">✅ 送出得分</button>
   </div>
+</div>
+
+<!-- SKIP PHARMACY MODAL -->
+<div class="skip-bg" id="skip-bg" onclick="closeSkipModal()"></div>
+<div class="skip-sheet" id="skip-sheet">
+  <div class="skip-handle"></div>
+  <div class="skip-title">⏭ 跳過這家？</div>
+  <div class="skip-ph-name" id="skip-ph-name">—</div>
+  <div class="skip-reason-grid" id="skip-reason-grid">
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'今天休息')">🚪 今天休息</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'已電話聯絡')">📞 已電話聯絡</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'時間不夠')">⏰ 時間不夠</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'下次再拜訪')">📅 下次再拜訪</button>
+  </div>
+  <button class="skip-confirm-btn" onclick="confirmSkipPharmacy()">確認跳過，前往下一站</button>
+  <button class="skip-cancel-btn" onclick="closeSkipModal()">取消</button>
 </div>
 
 <!-- TOAST -->
@@ -752,9 +868,12 @@ function loadToday() {
   const raw = localStorage.getItem('field_today');
   if (raw) {
     const d = JSON.parse(raw);
-    if (d.date === t) return d;
+    if (d.date === t) {
+      if (!d.skipped) d.skipped = [];
+      return d;
+    }
   }
-  return { date: t, done: [], pts: 0 };
+  return { date: t, done: [], skipped: [], pts: 0 };
 }
 function saveToday(d) { localStorage.setItem('field_today', JSON.stringify(d)); }
 
@@ -1157,6 +1276,22 @@ function showMissionComplete() {
   document.getElementById('mb-done').textContent = today.done.length;
   document.getElementById('mb-pts').textContent = today.pts;
   document.getElementById('mb-streak').textContent = streak.count;
+
+  // 顯示跳過的藥局清單
+  const skipped = today.skipped || [];
+  const swrap = document.getElementById('mb-skipped-wrap');
+  const slist = document.getElementById('mb-skipped-list');
+  if (skipped.length > 0) {
+    swrap.style.display = '';
+    slist.innerHTML = skipped.map(s => `
+      <div class="skipped-item">
+        <span>${s.name}</span>
+        <span class="skipped-reason">${s.reason}</span>
+      </div>`).join('');
+  } else {
+    swrap.style.display = 'none';
+  }
+
   banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1474,6 +1609,47 @@ function manualArrival() {
   triggerArrival();
 }
 
+// ── SKIP PHARMACY ─────────────────────────────────────────────
+let selectedSkipReason = '未說明';
+
+function openSkipModal() {
+  if (!navMode || navIndex >= cards.length) return;
+  const ph = cards[navIndex];
+  document.getElementById('skip-ph-name').textContent = ph.name;
+  selectedSkipReason = '未說明';
+  document.querySelectorAll('.skip-reason-chip').forEach(c => c.classList.remove('selected'));
+  document.getElementById('skip-bg').classList.add('open');
+  document.getElementById('skip-sheet').classList.add('open');
+}
+
+function closeSkipModal() {
+  document.getElementById('skip-bg').classList.remove('open');
+  document.getElementById('skip-sheet').classList.remove('open');
+}
+
+function selectSkipReason(el, reason) {
+  selectedSkipReason = reason;
+  document.querySelectorAll('.skip-reason-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function confirmSkipPharmacy() {
+  if (navIndex >= cards.length) return;
+  const ph = cards[navIndex];
+
+  // 存入今日跳過清單
+  if (!today.skipped) today.skipped = [];
+  today.skipped.push({ id: ph.id, name: ph.name, reason: selectedSkipReason });
+  saveToday(today);
+
+  closeSkipModal();
+  showToast(`⏭ 已跳過「${ph.name}」（${selectedSkipReason}）`);
+
+  // 前往下一站
+  navIndex++;
+  updateNavCard();
+}
+
 function openBriefForNav(id) {
   openBrief(id);
   // 覆寫打卡按鈕為「進入作業」
@@ -1533,10 +1709,28 @@ function closeRecordModal() {
   document.getElementById('record-sheet').classList.remove('open');
 }
 
-function skipRecord() {
+// 略過紀錄：先顯示確認警告
+function askSkipRecord() {
+  document.getElementById('record-skip-confirm').classList.add('show');
+  document.getElementById('record-skip-btn').style.display = 'none';
+  document.getElementById('record-submit-btn').style.display = 'none';
+}
+
+function cancelSkipRecord() {
+  document.getElementById('record-skip-confirm').classList.remove('show');
+  document.getElementById('record-skip-btn').style.display = '';
+  document.getElementById('record-submit-btn').style.display = '';
+}
+
+function confirmSkipRecord() {
+  const ph = cards.find(p => p.id === workingPhId);
   closeRecordModal();
   doCheckin(workingPhId);
+  // 提醒事後補填
+  setTimeout(() => showToast(`📝 記得補填「${ph?.name || ''}」的拜訪紀錄`), 600);
 }
+
+function skipRecord() { askSkipRecord(); } // 舊呼叫保留相容
 
 async function submitVisitRecord() {
   const phId = workingPhId;
