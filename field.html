@@ -1397,10 +1397,16 @@ async function loadData() {
       : (visitsJson.visits || visitsJson.records || []);
     const visitMap  = buildVisitMap(allVisits);
 
-    const recs = recJson.recommended || recJson.recommendations || recJson || [];
-    // 建立 id → recommend 資料 map，供 calendarPlan 取用
+    // all = 全部藥局（新版worker），fallback 到 recommended（舊版相容）
+    const allRecs = recJson.all || recJson.recommended || recJson.recommendations || recJson || [];
+    const recs    = recJson.recommended || allRecs;
+
+    // 建立 id 與 name 雙重 key → recommend 資料 map
     const recMap = {};
-    recs.forEach(p => { recMap[p.id] = p; });
+    allRecs.forEach(p => {
+      recMap[p.id]   = p;
+      recMap[p.name] = p;   // 店名也存一份，給 calendarPlan 備用
+    });
 
     // ── 優先讀取 index.html 排好的今日計畫 ────────────────────
     const calendarPlan = JSON.parse(localStorage.getItem('calendarPlan') || '{}');
@@ -1410,21 +1416,31 @@ async function loadData() {
     if (planPhs.length > 0) {
       usingCalendarPlan = true;
       cards = planPhs
-        .filter(p => statuses[p.id] !== 'dead')
+        .filter(p => statuses[p.id] !== 'dead' && statuses[p.name] !== 'dead')
         .map(p => {
-          const rec = recMap[p.id] || {};
+          // 優先用 id 查，找不到改用藥局名稱（visitMap 是用店名當 key）
+          const rec = recMap[p.id] || recMap[p.name] || {};
+          // visitMap 是用店名當 key（worker /all-visits 的 pharmacyId 欄位是店名）
+          const vs  = visitMap[p.name] || visitMap[p.id] || null;
+          // 從 rec 取 daysSince；若 rec 找不到，從 visitStats 的 lastVisit 計算
+          let daysSince = rec.daysSince ?? null;
+          if (daysSince === null && vs?.lastVisit?.date) {
+            daysSince = Math.round(
+              (new Date() - new Date(vs.lastVisit.date.replace(/\//g, '-'))) / 86400000
+            );
+          }
           return {
             id:          p.id,
             name:        p.name,
             district:    rec.district || '',
-            daysSince:   rec.daysSince ?? null,
+            daysSince,
             totalAmount: rec.totalAmount || 0,
             hasPending:  rec.hasPending || false,
-            neverVisited:rec.neverVisited || false,
-            visitStats:  visitMap[p.id] || null,
+            neverVisited:daysSince === null && !vs,
+            visitStats:  vs,
             lat:         rec.lat || rec.latitude || null,
             lng:         rec.lng || rec.longitude || null,
-            addr:        p.address || rec.addr || rec.address || '',
+            addr:        p.address || rec.address || rec.addr || '',
           };
         });
     } else {
@@ -1440,7 +1456,7 @@ async function loadData() {
           totalAmount: p.totalAmount || 0,
           hasPending:  p.hasPending || false,
           neverVisited:p.neverVisited || false,
-          visitStats:  visitMap[p.id] || null,
+          visitStats:  visitMap[p.name] || visitMap[p.id] || null,
           lat:         p.lat || p.latitude || null,
           lng:         p.lng || p.longitude || null,
           addr:        p.addr || p.address || '',

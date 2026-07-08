@@ -640,6 +640,7 @@ async function handleRecommendToday(env) {
     ok: true,
     total: pharmacies.length,
     recommended: top10,
+    all: scored,          // 全部藥局（含計畫內不在前10的）
     generatedAt: new Date().toISOString(),
   });
 }
