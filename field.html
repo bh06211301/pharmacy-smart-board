@@ -324,6 +324,176 @@ body{
   opacity:0;transition:all .3s;pointer-events:none;
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── NAV MODE START BUTTON ── */
+.nav-start-wrap{margin-bottom:16px}
+.nav-start-btn{
+  width:100%;padding:18px;border:none;border-radius:14px;
+  background:linear-gradient(135deg,#10b981,#059669);
+  color:#fff;font-size:16px;font-weight:800;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  box-shadow:0 4px 20px rgba(16,185,129,.35);transition:all .15s;
+}
+.nav-start-btn:active{transform:scale(.97)}
+.nav-start-sub{font-size:12px;font-weight:500;opacity:.85}
+
+/* ── NAV DESTINATION CARD ── */
+.nav-dest-card{
+  background:var(--white);border-radius:var(--radius);
+  padding:18px;margin-bottom:14px;
+  box-shadow:0 4px 20px rgba(59,110,245,.2);
+  border:2px solid var(--accent);
+}
+.nav-dest-header{
+  display:flex;align-items:center;gap:8px;margin-bottom:10px;
+}
+.nav-dest-badge{
+  background:var(--accent);color:#fff;
+  font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;
+}
+.nav-dest-idx{color:var(--muted);font-size:12px;margin-left:auto}
+.nav-dest-name{font-size:20px;font-weight:800;color:var(--text);margin-bottom:3px}
+.nav-dest-sub{font-size:13px;color:var(--muted);margin-bottom:12px}
+.nav-dest-map{
+  width:100%;height:160px;border-radius:10px;
+  border:none;display:block;margin-bottom:12px;background:var(--bg);
+}
+.gps-status{
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg);border-radius:10px;
+  padding:9px 12px;margin-bottom:12px;
+  font-size:13px;font-weight:600;color:var(--text);
+}
+.gps-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--muted);flex-shrink:0;transition:background .3s;
+}
+.gps-dot.searching{background:var(--yellow);animation:gpsPulse 1.5s infinite}
+.gps-dot.ok{background:var(--green);animation:gpsPulse 1.5s infinite}
+.gps-dot.arrived{background:var(--accent)}
+@keyframes gpsPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.75)}}
+.nav-btn-row{display:flex;gap:8px;margin-bottom:8px}
+.nav-open-maps-btn{
+  flex:1;padding:14px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  text-decoration:none;
+}
+.nav-arrived-btn{
+  padding:14px 16px;border:2px solid var(--green);border-radius:12px;
+  background:#fff;color:var(--green);font-size:14px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+.nav-arrived-btn:active{background:var(--green);color:#fff}
+.nav-exit-btn{
+  width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;
+  background:#fff;color:var(--muted);font-size:13px;font-weight:600;
+  cursor:pointer;text-align:center;
+}
+
+/* ── UPCOMING LIST ── */
+.upcoming-title{
+  font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;
+}
+.upcoming-item{
+  display:flex;align-items:center;gap:12px;
+  background:var(--white);border-radius:12px;
+  padding:12px 14px;margin-bottom:8px;
+  box-shadow:var(--shadow);opacity:.7;
+}
+.upcoming-item.done{opacity:.35}
+.upcoming-num{
+  width:24px;height:24px;border-radius:50%;
+  background:var(--bg);color:var(--muted);
+  font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.upcoming-emoji{font-size:24px;flex-shrink:0}
+.upcoming-info{flex:1;min-width:0}
+.upcoming-name{
+  font-size:14px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.upcoming-sub{font-size:12px;color:var(--muted)}
+.upcoming-done-tag{font-size:11px;color:var(--green);font-weight:700;flex-shrink:0}
+
+/* ── WORKING OVERLAY ── */
+.working-overlay{
+  position:fixed;inset:0;
+  background:linear-gradient(160deg,#0f172a,#1e293b,#0f3460);
+  z-index:600;display:none;
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:40px 28px;
+}
+.working-overlay.open{display:flex}
+@keyframes timerPulse{0%,100%{opacity:1}50%{opacity:.6}}
+.working-emoji{font-size:72px;margin-bottom:8px;user-select:none}
+.working-ph-name{color:rgba(255,255,255,.6);font-size:14px;font-weight:600;margin-bottom:4px}
+.working-label{color:#fff;font-size:18px;font-weight:800;margin-bottom:24px}
+.working-timer-display{
+  font-size:56px;font-weight:900;color:#fff;
+  letter-spacing:3px;margin-bottom:6px;
+  animation:timerPulse 2s infinite;
+  font-variant-numeric:tabular-nums;
+}
+.working-start-time{color:rgba(255,255,255,.45);font-size:13px;margin-bottom:40px}
+.working-done-btn{
+  background:var(--green);color:#fff;border:none;
+  padding:16px 32px;border-radius:14px;
+  font-size:16px;font-weight:800;cursor:pointer;
+  width:100%;max-width:280px;
+  box-shadow:0 4px 20px rgba(16,185,129,.4);
+}
+.working-done-btn:active{transform:scale(.97)}
+
+/* ── RECORD MODAL ── */
+.record-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:700;display:none;
+}
+.record-bg.open{display:block}
+.record-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:800;max-height:85vh;overflow-y:auto;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .35s cubic-bezier(.32,0,.67,0);
+}
+.record-sheet.open{transform:translateX(-50%) translateY(0)}
+.record-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 20px;
+}
+.record-title{font-size:17px;font-weight:800;color:var(--text);margin-bottom:4px}
+.record-subtitle{font-size:13px;color:var(--muted);margin-bottom:20px}
+.record-label{
+  font-size:13px;font-weight:700;color:var(--text);
+  margin-bottom:8px;display:block;
+}
+.record-select,.record-textarea{
+  width:100%;padding:12px 14px;border:1.5px solid var(--border);
+  border-radius:10px;font-size:14px;color:var(--text);
+  background:#fff;margin-bottom:16px;font-family:inherit;
+  -webkit-appearance:none;appearance:none;
+}
+.record-select:focus,.record-textarea:focus{outline:none;border-color:var(--accent)}
+.record-textarea{min-height:90px;resize:none;line-height:1.5}
+.record-btn-row{display:flex;gap:10px;margin-top:4px}
+.record-skip-btn{
+  flex:1;padding:14px;border:1.5px solid var(--border);
+  border-radius:12px;background:#fff;color:var(--muted);
+  font-size:14px;font-weight:700;cursor:pointer;
+}
+.record-submit-btn{
+  flex:2;padding:14px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+}
+.record-submit-btn:disabled{opacity:.5;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -365,6 +535,41 @@ body{
         <div class="mstat">🔥 <span id="mb-streak">0</span> 天連勝</div>
       </div>
     </div>
+    <!-- NAV MODE: 開始按鈕 (非導航模式時顯示) -->
+    <div class="nav-start-wrap" id="nav-start-wrap">
+      <button class="nav-start-btn" onclick="startNavMode()">
+        🚀 開始今日導航行程
+        <span class="nav-start-sub">GPS 抵達偵測 · 自動跳出拜訪資料</span>
+      </button>
+    </div>
+
+    <!-- NAV MODE: 當前目的地卡片 -->
+    <div class="nav-dest-card" id="nav-dest-card" style="display:none">
+      <div class="nav-dest-header">
+        <span class="nav-dest-badge">🏃 導航中</span>
+        <span class="nav-dest-idx" id="nav-dest-idx">1 / — 站</span>
+      </div>
+      <div class="nav-dest-name" id="nav-dest-name">—</div>
+      <div class="nav-dest-sub" id="nav-dest-sub">—</div>
+      <iframe id="nav-dest-map" class="nav-dest-map" src="" loading="lazy"></iframe>
+      <div class="gps-status">
+        <div class="gps-dot searching" id="gps-dot"></div>
+        <span id="gps-text">等待 GPS 定位中...</span>
+      </div>
+      <div class="nav-btn-row">
+        <a class="nav-open-maps-btn" id="nav-open-maps" href="#" target="_blank">🗺️ 開啟 Google Maps 導航</a>
+        <button class="nav-arrived-btn" onclick="manualArrival()">📍 我到了</button>
+      </div>
+      <button class="nav-exit-btn" onclick="exitNavMode()">✕ 結束行程模式</button>
+    </div>
+
+    <!-- NAV MODE: 接下來的行程 -->
+    <div id="upcoming-wrap" style="display:none">
+      <div class="upcoming-title">接下來的行程</div>
+      <div id="upcoming-list"></div>
+    </div>
+
+    <!-- 一般模式：藥局卡片清單 -->
     <div id="cards-wrap">
       <div class="loading-wrap">
         <div class="spinner"></div>
@@ -473,7 +678,41 @@ body{
   <div class="ov-sub" id="ov-sub">感情值 +1</div>
   <div class="ov-points" id="ov-pts">+20 分</div>
   <div class="ov-hearts" id="ov-hearts">❤️❤️❤️❤️❤️</div>
-  <button class="ov-btn" onclick="closeCheckin()">繼續下一家 →</button>
+  <button class="ov-btn" id="ov-btn" onclick="handleCheckinClose()">繼續下一家 →</button>
+</div>
+
+<!-- WORKING OVERLAY -->
+<div class="working-overlay" id="working-overlay">
+  <div class="working-emoji" id="working-emoji">🏪</div>
+  <div class="working-ph-name" id="working-ph-name">—</div>
+  <div class="working-label">⏱ 作業進行中</div>
+  <div class="working-timer-display" id="working-timer">00:00</div>
+  <div class="working-start-time" id="working-start-time">—</div>
+  <button class="working-done-btn" onclick="finishWorking()">✅ 完成，填寫拜訪紀錄</button>
+</div>
+
+<!-- RECORD MODAL -->
+<div class="record-bg" id="record-bg"></div>
+<div class="record-sheet" id="record-sheet">
+  <div class="record-handle"></div>
+  <div class="record-title">📝 填寫拜訪紀錄</div>
+  <div class="record-subtitle" id="record-ph-name">—</div>
+  <label class="record-label">拜訪目的</label>
+  <select class="record-select" id="record-purpose">
+    <option value="例行拜訪">例行拜訪</option>
+    <option value="新藥拓展">新藥拓展</option>
+    <option value="回收帳款">回收帳款</option>
+    <option value="送貨">送貨</option>
+    <option value="客訴處理">客訴處理</option>
+    <option value="業務開發">業務開發</option>
+    <option value="其他">其他</option>
+  </select>
+  <label class="record-label">拜訪內容 <span style="color:var(--muted);font-weight:400">（選填）</span></label>
+  <textarea class="record-textarea" id="record-content" placeholder="簡短記錄本次拜訪重點..."></textarea>
+  <div class="record-btn-row">
+    <button class="record-skip-btn" onclick="skipRecord()">略過</button>
+    <button class="record-submit-btn" id="record-submit-btn" onclick="submitVisitRecord()">✅ 送出得分</button>
+  </div>
 </div>
 
 <!-- TOAST -->
@@ -734,6 +973,8 @@ async function openBrief(id) {
 
   const btn = document.getElementById('brief-checkin-btn');
   btn.disabled = true;
+  btn.textContent = '✅ 已到達，打卡得分';
+  btn.onclick = doBriefCheckin;
 
   document.getElementById('brief-bg').classList.add('open');
   document.getElementById('brief-sheet').classList.add('open');
@@ -939,6 +1180,8 @@ function doCheckin(id) {
   document.getElementById('ov-pts').textContent = `+${pts} 分`;
   document.getElementById('ov-hearts').textContent = renderHearts(newH);
 
+  // 導航模式：按鈕文字改為「前往下一站」
+  document.getElementById('ov-btn').textContent = navMode ? '前往下一站 →' : '繼續下一家 →';
   document.getElementById('ov').classList.add('open');
   if (navigator.vibrate) navigator.vibrate(40);
 
@@ -1023,6 +1266,318 @@ async function loadData() {
   } catch (err) {
     document.getElementById('cards-wrap').innerHTML =
       '<div class="loading-wrap">⚠️ 載入失敗，請重新整理</div>';
+  }
+}
+
+// ── NAV MODE STATE ────────────────────────────────────────────
+let navMode = false;
+let navIndex = 0;
+let geoWatchId = null;
+let arrivalHandled = false;
+let workingPhId = null;
+let workStartTime = null;
+let workTimerInterval = null;
+const geocodeCache = {};
+
+// ── GEOCODING ─────────────────────────────────────────────────
+async function getCoords(ph) {
+  if (ph.lat && ph.lng) return { lat: +ph.lat, lng: +ph.lng };
+  const key = ph.addr || ph.name;
+  if (geocodeCache[key]) return geocodeCache[key];
+  try {
+    const q = encodeURIComponent((ph.addr || ph.name) + ' 台灣');
+    const r = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${q}&key=${MAPS_KEY}`
+    );
+    const d = await r.json();
+    if (d.results?.[0]?.geometry?.location) {
+      const loc = d.results[0].geometry.location;
+      geocodeCache[key] = { lat: loc.lat, lng: loc.lng };
+      return geocodeCache[key];
+    }
+  } catch(e) {}
+  return null;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2
+    + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── NAV MODE: 進入 / 離開 ─────────────────────────────────────
+function startNavMode() {
+  if (!cards.length) { showToast('請先等待藥局清單載入'); return; }
+  navMode = true;
+  navIndex = 0;
+  arrivalHandled = false;
+  document.getElementById('nav-start-wrap').style.display = 'none';
+  document.getElementById('cards-wrap').style.display = 'none';
+  document.getElementById('nav-dest-card').style.display = '';
+  document.getElementById('upcoming-wrap').style.display = '';
+  updateNavCard();
+  startGeoWatch();
+  showToast('🚀 導航行程開始！');
+}
+
+function exitNavMode() {
+  navMode = false;
+  stopGeoWatch();
+  document.getElementById('nav-start-wrap').style.display = '';
+  document.getElementById('cards-wrap').style.display = '';
+  document.getElementById('nav-dest-card').style.display = 'none';
+  document.getElementById('upcoming-wrap').style.display = 'none';
+}
+
+// ── NAV MODE: 更新目的地卡片 ──────────────────────────────────
+async function updateNavCard() {
+  // 跳過已打卡的
+  while (navIndex < cards.length && today.done.includes(cards[navIndex].id)) navIndex++;
+
+  if (navIndex >= cards.length) {
+    exitNavMode();
+    showMissionComplete();
+    return;
+  }
+
+  arrivalHandled = false;
+  const ph = cards[navIndex];
+  const ct = charType(ph.daysSince, ph.totalAmount);
+
+  document.getElementById('nav-dest-name').textContent = ct.emoji + ' ' + ph.name;
+  document.getElementById('nav-dest-sub').textContent = [
+    ph.district,
+    ph.daysSince !== null ? `${ph.daysSince} 天前拜訪` : '從未拜訪'
+  ].filter(Boolean).join(' · ');
+  document.getElementById('nav-dest-idx').textContent =
+    `${navIndex + 1} / ${cards.length} 站`;
+
+  // 路線地圖
+  const lastStop = getLastStop();
+  let originQ;
+  if (lastStop?.lat && lastStop?.lng) {
+    originQ = `${lastStop.lat},${lastStop.lng}`;
+  } else {
+    originQ = encodeURIComponent(ORIGIN);
+  }
+
+  const coords = await getCoords(ph);
+  let destQ;
+  if (coords) {
+    destQ = `${coords.lat},${coords.lng}`;
+    ph.lat = coords.lat;
+    ph.lng = coords.lng;
+  } else {
+    destQ = encodeURIComponent(ph.name + ' ' + (ph.district || '') + ' 台灣');
+  }
+
+  document.getElementById('nav-dest-map').src =
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=${originQ}&destination=${destQ}&mode=driving&language=zh-TW`;
+
+  document.getElementById('nav-open-maps').href =
+    `https://www.google.com/maps/dir/?api=1&destination=${destQ}&travelmode=driving`;
+
+  document.getElementById('gps-dot').className = 'gps-dot searching';
+  document.getElementById('gps-text').textContent = '定位中...';
+
+  renderUpcoming();
+}
+
+function renderUpcoming() {
+  const list = document.getElementById('upcoming-list');
+  const rest = cards.slice(navIndex + 1);
+  if (!rest.length) {
+    list.innerHTML =
+      '<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px">這是最後一站！加油！</div>';
+    return;
+  }
+  list.innerHTML = rest.map((ph, i) => {
+    const ct = charType(ph.daysSince, ph.totalAmount);
+    const isDone = today.done.includes(ph.id);
+    return `
+    <div class="upcoming-item${isDone ? ' done' : ''}">
+      <div class="upcoming-num">${navIndex + 2 + i}</div>
+      <div class="upcoming-emoji">${ct.emoji}</div>
+      <div class="upcoming-info">
+        <div class="upcoming-name">${ph.name}</div>
+        <div class="upcoming-sub">${ph.district || ''} · ${ph.daysSince !== null ? ph.daysSince + '天前' : '未拜訪'}</div>
+      </div>
+      ${isDone ? '<span class="upcoming-done-tag">✓ 完成</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── GEOLOCATION ───────────────────────────────────────────────
+function startGeoWatch() {
+  if (!navigator.geolocation) {
+    document.getElementById('gps-text').textContent = '此裝置不支援 GPS';
+    return;
+  }
+  stopGeoWatch();
+  geoWatchId = navigator.geolocation.watchPosition(
+    onGeoUpdate, onGeoError,
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+}
+
+function stopGeoWatch() {
+  if (geoWatchId !== null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+
+async function onGeoUpdate(pos) {
+  if (!navMode || arrivalHandled) return;
+  const { latitude: myLat, longitude: myLng } = pos.coords;
+  const ph = cards[navIndex];
+  if (!ph) return;
+
+  const coords = await getCoords(ph);
+  if (!coords) {
+    document.getElementById('gps-text').textContent = '無法取得目的地座標';
+    return;
+  }
+
+  const dist = haversine(myLat, myLng, coords.lat, coords.lng);
+  const distText = dist < 1000
+    ? `${Math.round(dist)} 公尺`
+    : `${(dist / 1000).toFixed(1)} 公里`;
+
+  document.getElementById('gps-dot').className = 'gps-dot ok';
+  document.getElementById('gps-text').textContent = `距 ${ph.name}：${distText}`;
+
+  if (dist <= 200) triggerArrival();
+}
+
+function onGeoError() {
+  document.getElementById('gps-dot').className = 'gps-dot';
+  document.getElementById('gps-text').textContent = 'GPS 無法定位（可手動點「我到了」）';
+}
+
+function triggerArrival() {
+  if (arrivalHandled) return;
+  arrivalHandled = true;
+  const ph = cards[navIndex];
+  document.getElementById('gps-dot').className = 'gps-dot arrived';
+  document.getElementById('gps-text').textContent = `✅ 已抵達 ${ph.name}！`;
+  if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+  showToast(`📍 已抵達 ${ph.name}！`);
+  setTimeout(() => openBriefForNav(ph.id), 900);
+}
+
+function manualArrival() {
+  if (arrivalHandled) return;
+  triggerArrival();
+}
+
+function openBriefForNav(id) {
+  openBrief(id);
+  // 覆寫打卡按鈕為「進入作業」
+  const btn = document.getElementById('brief-checkin-btn');
+  btn.textContent = '🏪 進入作業';
+  btn.onclick = () => {
+    closeBrief();
+    setTimeout(() => startWorking(id), 320);
+  };
+}
+
+// ── WORKING STATE ─────────────────────────────────────────────
+function startWorking(phId) {
+  workingPhId = phId;
+  workStartTime = new Date();
+  const ph = cards.find(p => p.id === phId);
+  const ct = ph ? charType(ph.daysSince, ph.totalAmount) : { emoji: '🏪' };
+
+  document.getElementById('working-emoji').textContent = ct.emoji;
+  document.getElementById('working-ph-name').textContent = ph?.name || '—';
+  document.getElementById('working-start-time').textContent =
+    '開始時間：' + workStartTime.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('working-timer').textContent = '00:00';
+  document.getElementById('working-overlay').classList.add('open');
+  if (navigator.vibrate) navigator.vibrate(60);
+
+  clearInterval(workTimerInterval);
+  workTimerInterval = setInterval(() => {
+    const sec = Math.floor((new Date() - workStartTime) / 1000);
+    const m = String(Math.floor(sec / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    document.getElementById('working-timer').textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function finishWorking() {
+  clearInterval(workTimerInterval);
+  document.getElementById('working-overlay').classList.remove('open');
+  openRecordModal(workingPhId);
+}
+
+// ── RECORD MODAL ──────────────────────────────────────────────
+function openRecordModal(phId) {
+  const ph = cards.find(p => p.id === phId);
+  document.getElementById('record-ph-name').textContent = ph?.name || '—';
+  document.getElementById('record-purpose').value = '例行拜訪';
+  document.getElementById('record-content').value = '';
+  const btn = document.getElementById('record-submit-btn');
+  btn.disabled = false;
+  btn.textContent = '✅ 送出得分';
+  document.getElementById('record-bg').classList.add('open');
+  document.getElementById('record-sheet').classList.add('open');
+}
+
+function closeRecordModal() {
+  document.getElementById('record-bg').classList.remove('open');
+  document.getElementById('record-sheet').classList.remove('open');
+}
+
+function skipRecord() {
+  closeRecordModal();
+  doCheckin(workingPhId);
+}
+
+async function submitVisitRecord() {
+  const phId = workingPhId;
+  const ph = cards.find(p => p.id === phId);
+  const purpose = document.getElementById('record-purpose').value;
+  const content = document.getElementById('record-content').value.trim();
+  const btn = document.getElementById('record-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '送出中...';
+
+  try {
+    await fetch(WORKER + '/add-visit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'addVisit',
+        pharmacyName: ph?.name || '',
+        pharmacyId: phId || '',
+        date: todayStr(),
+        purpose,
+        content: content || purpose,
+      })
+    });
+    showToast('✅ 拜訪紀錄已儲存！');
+  } catch(e) {
+    showToast('⚠️ 紀錄儲存失敗，但打卡成功');
+  }
+
+  closeRecordModal();
+  doCheckin(phId);
+}
+
+// ── CHECKIN CLOSE: 導航模式往下一站 ──────────────────────────
+function handleCheckinClose() {
+  document.getElementById('ov').classList.remove('open');
+  if (navMode) {
+    navIndex++;
+    updateNavCard();
+    renderUpcoming();
+  } else {
+    render();
   }
 }
 
