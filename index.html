@@ -3105,13 +3105,19 @@ function renderCalMapMarkers() {
   _calMapMarkers = [];
   pharmacies.filter(p => p.lat && p.lng).forEach(p => {
     const id = p.id || p['Customer_ID'] || '';
+    const phArea = p.district || p.area || '';
     const inSel = _calMapSel.has(id);
+    const inArea = _calMapArea === 'all' || phArea === _calMapArea;
     const marker = new google.maps.Marker({
       position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
-      map: _calMap, title: p.name || p['店名'] || '',
+      map: inArea ? _calMap : null,
+      title: p.name || p['店名'] || '',
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
         fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 }
     });
+    marker._phId = id;
+    marker._phArea = phArea;
+    // 單擊：顯示資訊框
     marker.addListener('click', () => {
       const name = p.name || p['店名'] || '';
       const addr = p.address || p['地址'] || '';
@@ -3120,7 +3126,8 @@ function renderCalMapMarkers() {
         <div style="font-family:Inter,sans-serif;padding:4px;min-width:160px">
           <div style="font-size:10px;font-weight:700;color:#3b6ef5;margin-bottom:2px">${id}</div>
           <div style="font-size:14px;font-weight:700;margin-bottom:2px">${name}</div>
-          <div style="font-size:11px;color:#667085;margin-bottom:8px">${addr}</div>
+          <div style="font-size:11px;color:#667085;margin-bottom:6px">${addr}</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px;text-align:center">雙擊標記可快速加入／移除</div>
           <button onclick="toggleCalMapPh('${id}')"
             style="width:100%;padding:7px;border:none;border-radius:6px;
               background:${sel?'#fef3f2':'#3b6ef5'};color:${sel?'#f04438':'#fff'};
@@ -3130,16 +3137,21 @@ function renderCalMapMarkers() {
         </div>`);
       _calMapInfoWin.open(_calMap, marker);
     });
+    // 雙擊：直接切換選取
+    marker.addListener('dblclick', () => {
+      if (_calMapInfoWin) _calMapInfoWin.close();
+      toggleCalMapPh(id);
+    });
     _calMapMarkers.push(marker);
   });
 }
 
 function updateCalMapMarkers() {
-  const valid = pharmacies.filter(p => p.lat && p.lng);
-  _calMapMarkers.forEach((mk, i) => {
-    const p = valid[i]; if (!p) return;
-    const id = p.id || p['Customer_ID'] || '';
+  _calMapMarkers.forEach(mk => {
+    const id = mk._phId;
     const inSel = _calMapSel.has(id);
+    const inArea = _calMapArea === 'all' || mk._phArea === _calMapArea;
+    mk.setMap(inArea ? _calMap : null);
     mk.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
       fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 });
   });
@@ -3166,13 +3178,22 @@ function setCalMapArea(area, el) {
   document.querySelectorAll('.cmap-area-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   renderCalMapGrid();
-  if (area !== 'all' && _calMap) {
+  if (!_calMapInited) return;
+  // 顯示/隱藏各地區標記
+  _calMapMarkers.forEach(mk => {
+    const inArea = area === 'all' || mk._phArea === area;
+    mk.setMap(inArea ? _calMap : null);
+  });
+  if (area !== 'all') {
     const list = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
     if (list.length) {
       const bounds = new google.maps.LatLngBounds();
       list.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
       _calMap.fitBounds(bounds, 60);
     }
+  } else {
+    _calMap.setCenter({ lat: 25.065, lng: 121.658 });
+    _calMap.setZoom(11);
   }
 }
 
