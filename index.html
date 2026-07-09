@@ -2646,6 +2646,7 @@ async function clearDoneTodos() {
 }
 
 // ── 艾森豪矩陣渲染 ──
+// ⚠️ 象限值若新增/刪除，必須同步更新 worker.js 頂部合約區塊與 AI prompt
 const QMETA = {
   ui:           {color:'var(--red)',    label:'❗ 緊急重要'},
   ii:           {color:'#3b6af5',      label:'📋 重要不緊急'},

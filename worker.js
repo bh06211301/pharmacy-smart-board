@@ -26,6 +26,31 @@ const CORS_HEADERS = {
 };
 
 // ============================================================
+// ★ 資料合約（前後端共同依賴，修改前必讀）
+// ============================================================
+//
+// 【待辦事項欄位 — todos-v2 KV 儲存格式】
+//   id, task, quadrant, pharmacyId, pharmacyName,
+//   scheduledDate, done, doneAt,
+//   resolution,          ← 解決方案（前端 saveResolution 寫入此欄位）
+//   aiSuggestions,       ← AI 建議準備事項陣列
+//   relatedTodoIds,      ← 關聯待辦 id 陣列
+//   sourceVisitId, sourceVisitDate,
+//   type,                ← return_receipt | get_receipt | revisit | prepare | follow_up | other
+//   newPhAddress, newPhCity, healthInsurance, source,
+//   createdAt
+//
+// 【有效象限值】前端 QMETA 與此處 AI prompt 必須一致
+//   ui | ii | iii | iv | pool | dad | pending_newph | newph
+//   AI 只建議前五種（dad / pending_newph / newph 由系統自動設定）
+//
+// 【POST /add-visit 期望欄位】
+//   action, visitId, pharmacyName, pharmacyId, date, purpose, content
+//   ↑ index.html 的 submitNewVisit 與 field.html 的打卡送出都必須傳這些欄位
+//
+// ============================================================
+
+// ============================================================
 // 路由
 // ============================================================
 export default {
