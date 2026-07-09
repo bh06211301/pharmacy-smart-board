@@ -551,6 +551,18 @@ let allVisitsCache = [];
       <button class="btn btn-primary btn-sm" onclick="openNewTodoModal()">＋ 新增待辦</button>
     </div>
   </div>
+  <div class="e-pool-section">
+    <div class="e-quadrant e-q-pool" ondragover="eDragOver(event)" ondrop="eDrop(event,'pool')" ondragleave="eDragLeave(event)">
+      <div class="e-q-header">
+        <span class="e-q-icon">📦</span>
+        <div>
+          <div class="e-q-title">待辦池</div>
+          <div class="e-q-sub">新增後先放這裡，再拖曳到下方對應格子</div>
+        </div>
+      </div>
+      <div id="eq-pool"></div>
+    </div>
+  </div>
   <div class="eisenhower-grid" id="eisenhower-grid">
     <div class="e-quadrant e-q-ui" ondragover="eDragOver(event)" ondrop="eDrop(event,'ui')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
@@ -595,18 +607,6 @@ let allVisitsCache = [];
         </div>
       </div>
       <div id="eq-iv"></div>
-    </div>
-  </div>
-  <div class="e-pool-section">
-    <div class="e-quadrant e-q-pool" ondragover="eDragOver(event)" ondrop="eDrop(event,'pool')" ondragleave="eDragLeave(event)">
-      <div class="e-q-header">
-        <span class="e-q-icon">📦</span>
-        <div>
-          <div class="e-q-title">待辦池</div>
-          <div class="e-q-sub">新增後先放這裡，再拖曳到上方對應格子</div>
-        </div>
-      </div>
-      <div id="eq-pool"></div>
     </div>
   </div>
   <div class="e-pool-section">
@@ -2649,7 +2649,7 @@ function renderEisenhower() {
   ['ui','ii','iii','iv','pool','dad','newph'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
-    const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done);
+    const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done && !t.scheduledDate);
     if (!items.length) {
       el.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px 0">（空）</div>';
       return;
@@ -3319,9 +3319,9 @@ async function calOnDrop(ev, ds) {
 
 async function todoUnschedule(id, ds) {
   const item = todosCache.find(t => t.id === id);
-  if (item) item.scheduledDate = null;
-  renderCalTodoPool(); renderDayPanel(ds); renderCalendar();
-  await todoApiUpdate(id, { scheduledDate: null });
+  if (item) { item.scheduledDate = null; item.quadrant = 'pool'; }
+  renderCalTodoPool(); renderDayPanel(ds); renderCalendar(); renderEisenhower();
+  await todoApiUpdate(id, { scheduledDate: null, quadrant: 'pool' });
 }
 
 function exportRoute() {
