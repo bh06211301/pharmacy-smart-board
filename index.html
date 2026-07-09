@@ -2360,6 +2360,7 @@ async function submitNewVisit(ds) {
       action:       'addVisit',
       visitId,
       pharmacyName: phName,
+      pharmacyId:   phId,
       date:         ds,
       purpose:      purpose || '例行拜訪',
       content,
@@ -2517,7 +2518,7 @@ async function analyzePharmacyTasks(pharmacyId, pharmacyName, visits) {
   const btn = document.getElementById('ph-analyze-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 分析中...'; }
   try {
-    const mapped = visits.map(v => ({ ...v, pharmacyId: pharmacyName }));
+    const mapped = visits.map(v => ({ ...v, pharmacyName: v.pharmacyName || pharmacyName }));
     const d = await post('/analyze-tasks', { visits: mapped });
     const newTasks = d.tasks || [];
     if (newTasks.length) {
@@ -2765,7 +2766,7 @@ function renderNewPhCard(t) {
         <div style="font-size:13px;font-weight:700;color:var(--purple);${t.done?'text-decoration:line-through;opacity:.5':''}">🆕 ${name}</div>
         ${city||addr?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📍 ${city?city+' ':''}${addr}</div>`:''}
         ${contact?`<div style="font-size:11px;color:var(--muted);margin-top:1px">👤 ${contact}</div>`:''}
-        ${t.solution?`<div style="font-size:11px;color:var(--text2);margin-top:4px;background:var(--surface2);border-radius:6px;padding:4px 8px">📝 ${t.solution}</div>`:''}
+        ${t.resolution?`<div style="font-size:11px;color:var(--text2);margin-top:4px;background:var(--surface2);border-radius:6px;padding:4px 8px">📝 ${t.resolution}</div>`:''}
         <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${hiBadge}${trackerBadge}${dateBadge}</div>
         <textarea class="e-resolution" placeholder="備註（開發進度、聯絡人等）…"
           style="margin-top:6px"
@@ -3081,7 +3082,7 @@ async function quickAddNewPh() {
     done: false,
     scheduledDate: null,
     aiSuggestions: [],
-    solution: '',
+    resolution: '',
     relatedTodoIds: []
   });
   if (created?.id) {

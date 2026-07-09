@@ -807,9 +807,10 @@ async function handleAiTodoSuggest(request, env) {
 - ii（重要不緊急）：影響業績但有時間規劃，如定期拜訪、提案準備、關係維護
 - iii（緊急不重要）：有時效但不影響業績，如交辦文件、例行回報、轉達訊息
 - iv（不緊急不重要）：可延後或刪除，如資料整理、非必要瑣事
+- pool（待辦池）：優先級不明確、需要再評估，或目前無法判斷的事項
 
 輸出 JSON：
-{"suggestedQuadrant":"ui|ii|iii|iv","suggestions":["準備事項1","準備事項2","準備事項3"]}
+{"suggestedQuadrant":"ui|ii|iii|iv|pool","suggestions":["準備事項1","準備事項2","準備事項3"]}
 
 suggestions 列 2~4 條具體要準備的事，不要編號。只輸出純 JSON。`;
 
