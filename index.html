@@ -622,6 +622,18 @@ let allVisitsCache = [];
     </div>
   </div>
   <div class="e-pool-section">
+    <div class="e-quadrant" style="border-left:3px solid #f59e0b;background:#fffbeb">
+      <div class="e-q-header">
+        <span class="e-q-icon">🔍</span>
+        <div style="flex:1">
+          <div class="e-q-title" style="color:#d97706">待審視藥局</div>
+          <div class="e-q-sub">tracker 自動偵測・確認真的新開後移至下方</div>
+        </div>
+      </div>
+      <div id="eq-pending_newph"></div>
+    </div>
+  </div>
+  <div class="e-pool-section">
     <div class="e-quadrant e-q-newph" ondragover="eDragOver(event)" ondrop="eDrop(event,'newph')" ondragleave="eDragLeave(event)">
       <div class="e-q-header">
         <span class="e-q-icon">🆕</span>
@@ -2634,19 +2646,20 @@ async function clearDoneTodos() {
 
 // ── 艾森豪矩陣渲染 ──
 const QMETA = {
-  ui:    {color:'var(--red)',    label:'❗ 緊急重要'},
-  ii:    {color:'#3b6af5',      label:'📋 重要不緊急'},
-  iii:   {color:'var(--orange)', label:'⚡ 緊急不重要'},
-  iv:    {color:'var(--muted2)', label:'🗑 不緊急不重要'},
-  pool:  {color:'var(--muted)',  label:'📦 待辦池'},
-  dad:   {color:'#d97706',       label:'👴 老爸聯絡事項'},
-  newph: {color:'var(--purple)', label:'🆕 新開藥局'},
+  ui:           {color:'var(--red)',    label:'❗ 緊急重要'},
+  ii:           {color:'#3b6af5',      label:'📋 重要不緊急'},
+  iii:          {color:'var(--orange)', label:'⚡ 緊急不重要'},
+  iv:           {color:'var(--muted2)', label:'🗑 不緊急不重要'},
+  pool:         {color:'var(--muted)',  label:'📦 待辦池'},
+  dad:          {color:'#d97706',       label:'👴 老爸聯絡事項'},
+  pending_newph:{color:'#f59e0b',       label:'🔍 待審視藥局'},
+  newph:        {color:'var(--purple)', label:'🆕 新開藥局'},
 };
 const DAD_PHARMACY_IDS = new Set(['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129']);
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
-  ['ui','ii','iii','iv','pool','dad','newph'].forEach(q => {
+  ['ui','ii','iii','iv','pool','dad','pending_newph','newph'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
     const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done && !t.scheduledDate);
@@ -2763,8 +2776,49 @@ function renderNewPhCard(t) {
   </div>`;
 }
 
+function renderPendingNewPhCard(t) {
+  const name = t.pharmacyName || t.task || '（未命名）';
+  const addr = t.newPhAddress || '';
+  const city = t.newPhCity || '';
+  const hi = t.healthInsurance || '';
+  const hiBadge = hi.includes('尚未健保')
+    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#fef9c3;color:#a16207">❗ 尚未健保</span>`
+    : hi.includes('已有健保')
+      ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#dcfce7;color:#166534">✅ 已有健保</span>`
+      : '';
+  const fullAddr = [city, addr].filter(Boolean).join(' ');
+  const mapsUrl  = `https://www.google.com/maps/search/${encodeURIComponent(fullAddr || name)}`;
+  const googleUrl= `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+  return `<div class="e-todo-card" style="border-left:3px solid #f59e0b;background:#fffbeb;margin-bottom:8px">
+    <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:5px">🔍 ${name}</div>
+    ${fullAddr?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px">📍 ${fullAddr}</div>`:''}
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+      ${hiBadge}
+      <span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#f3e8ff;color:#7c3aed">🤖 系統偵測</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <a href="${mapsUrl}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;flex:1;text-align:center;text-decoration:none">🗺 地圖確認</a>
+      <a href="${googleUrl}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;flex:1;text-align:center;text-decoration:none">🔍 Google 搜尋</a>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-primary btn-sm" style="font-size:11px;flex:1" onclick="confirmPendingNewPh('${t.id}')">✓ 確認為新開藥局</button>
+      <button class="btn btn-danger btn-sm" style="font-size:11px" onclick="todoDelete('${t.id}')">✗ 刪除</button>
+    </div>
+  </div>`;
+}
+
+async function confirmPendingNewPh(id) {
+  const t = todosCache.find(t => t.id === id);
+  if (!t) return;
+  t.quadrant = 'newph';
+  renderEisenhower();
+  await todoApiUpdate(id, { quadrant: 'newph' });
+  toast('✅ 已確認，移至新開藥局');
+}
+
 function renderTodoCard(t) {
   if (t.quadrant === 'newph') return renderNewPhCard(t);
+  if (t.quadrant === 'pending_newph') return renderPendingNewPhCard(t);
   const icon = TYPE_ICON[t.type] || '📌';
   const color = (QMETA[t.quadrant||'pool']||QMETA.pool).color;
   const dateBadge = t.scheduledDate
