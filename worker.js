@@ -48,6 +48,16 @@ const CORS_HEADERS = {
 //   action, visitId, pharmacyName, pharmacyId, date, purpose, content
 //   ↑ index.html 的 submitNewVisit 與 field.html 的打卡送出都必須傳這些欄位
 //
+// 【/calendar-plan — 月曆計畫 KV 持久化】
+//   GET  → { ok, plan: { "2026-07-07": { pharmacies:[{id,name,address}], route:{...} } } }
+//   PUT  → body: { plan: {...} }，回傳 { ok }
+//   KV key: calendar:plan
+//
+// 【/dad-pharmacies — 爸爸客戶清單】
+//   GET  → { ok, ids: ['C116',...] }（首次呼叫自動用 DEFAULT_DAD_IDS 初始化）
+//   POST → body: { id, action: 'add'|'remove' }，回傳 { ok, ids }
+//   KV key: dad:pharmacies
+//
 // ============================================================
 
 // ============================================================
@@ -142,6 +152,16 @@ export default {
 
       if (path === '/add-visit' && request.method === 'POST') {
         return await handleAddVisit(request);
+      }
+
+      // ★ 月曆計畫（KV 持久化）
+      if (path === '/calendar-plan') {
+        return await handleCalendarPlan(request, env);
+      }
+
+      // ★ 爸爸客戶清單（KV 持久化）
+      if (path === '/dad-pharmacies') {
+        return await handleDadPharmacies(request, env);
       }
 
       return json({ error: '找不到這個 endpoint' }, 404);
@@ -601,15 +621,17 @@ async function handleOrdersSummary(env) {
 // 7. AI 推薦今日行程
 // ============================================================
 async function handleRecommendToday(env) {
-  const [pharmaciesRes, visitsRes, ordersRes] = await Promise.all([
+  const [pharmaciesRes, visitsRes, ordersRes, dadRaw] = await Promise.all([
     handleGetPharmacies(null, env).then(r => r.json()),
     handleVisitsSummary(env).then(r => r.json()),
     handleOrdersSummary(env).then(r => r.json()),
+    env.TODOS_KV.get('dad:pharmacies'),
   ]);
 
   const pharmacies  = pharmaciesRes.pharmacies || [];
   const visitMap    = visitsRes.summary || {};
   const orderMap    = ordersRes.summary || {};
+  const dadIds      = new Set(dadRaw ? JSON.parse(dadRaw) : []);
 
   const scored = pharmacies.map(p => {
     const v = visitMap[p.id] || {};
@@ -621,7 +643,7 @@ async function handleRecommendToday(env) {
     const neverOrdered = !o.orderCount;
     const neverVisited = !v.visitCount;
 
-    const isDead = totalAmount > 0 && daysSince > 180 && !v.visitCount;
+    const isDead = totalAmount > 0 && daysSince > 180 && !v.visitCount && !dadIds.has(p.id);
     if (isDead) return null;
 
     let score = 0;
@@ -1034,6 +1056,53 @@ async function handleProductOrders(request, env) {
 
   const hasDate = result.some(r => r.lastDate);
   return json({ ok: true, product, result, hasDate, months, matchedIds: [...matchedIds] });
+}
+
+// ============================================================
+// 16. 月曆計畫（KV 持久化）
+// ============================================================
+const DEFAULT_DAD_IDS = ['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129'];
+
+async function handleCalendarPlan(request, env) {
+  if (request.method === 'GET') {
+    const raw = await env.TODOS_KV.get('calendar:plan');
+    return json({ ok: true, plan: raw ? JSON.parse(raw) : {} });
+  }
+  if (request.method === 'PUT') {
+    const body = await request.json();
+    await env.TODOS_KV.put('calendar:plan', JSON.stringify(body.plan || {}));
+    return json({ ok: true });
+  }
+  return json({ error: '不支援此 method' }, 405);
+}
+
+// ============================================================
+// 17. 爸爸客戶清單（KV 持久化）
+// ============================================================
+async function handleDadPharmacies(request, env) {
+  if (request.method === 'GET') {
+    const raw = await env.TODOS_KV.get('dad:pharmacies');
+    if (!raw) {
+      // 首次呼叫自動初始化
+      await env.TODOS_KV.put('dad:pharmacies', JSON.stringify(DEFAULT_DAD_IDS));
+      return json({ ok: true, ids: DEFAULT_DAD_IDS });
+    }
+    return json({ ok: true, ids: JSON.parse(raw) });
+  }
+  if (request.method === 'POST') {
+    const body = await request.json();
+    const { id, action } = body;
+    if (!id || !action) return json({ error: '缺少 id 或 action' }, 400);
+    const raw = await env.TODOS_KV.get('dad:pharmacies');
+    const ids = new Set(raw ? JSON.parse(raw) : DEFAULT_DAD_IDS);
+    if (action === 'add') ids.add(id);
+    else if (action === 'remove') ids.delete(id);
+    else return json({ error: 'action 必須是 add 或 remove' }, 400);
+    const updated = [...ids];
+    await env.TODOS_KV.put('dad:pharmacies', JSON.stringify(updated));
+    return json({ ok: true, ids: updated });
+  }
+  return json({ error: '不支援此 method' }, 405);
 }
 
 // ============================================================

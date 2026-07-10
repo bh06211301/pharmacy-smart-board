@@ -330,6 +330,9 @@ let allVisitsCache = [];
       <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span>
       <span id="status-txt">連線中</span>
     </div>
+    <a href="tasks-page.html" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap">
+      🗺️ 路線規劃
+    </a>
     <a href="field.html" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:8px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap">
       📍 外勤模式
     </a>
@@ -840,7 +843,7 @@ async function init() {
     if (h.ok) setDot('green', 'Worker 正常');
   } catch(e) { setDot('red', 'Worker 無回應'); }
   renderOfficeDayBtn();
-  await loadCustomerStatuses();
+  await Promise.all([loadCalPlanFromKV(), loadDadPharmacies(), loadCustomerStatuses()]);
   loadPharmacies();
   loadAllVisits();
   loadTodayFromCalendar(true);
@@ -914,6 +917,17 @@ async function confirmUndead() {
   } catch(e) { toast('❌ 解除失敗：' + e.message); }
 }
 
+async function markDadPharmacy(id, name, isMark) {
+  try {
+    const d = await post('/dad-pharmacies', { id, action: isMark ? 'add' : 'remove' });
+    if (d.ok) {
+      DAD_PHARMACY_IDS = new Set(d.ids);
+      renderTable();
+      toast(isMark ? `👴 已將「${name}」標記為爸爸客戶` : `👴 已解除「${name}」的爸爸客戶標記`);
+    }
+  } catch(e) { toast('❌ 操作失敗：' + e.message); }
+}
+
 // ══════════════════════════════
 // 藥局清單
 // ══════════════════════════════
@@ -972,10 +986,11 @@ function renderTable() {
     const area = p.area||p['實體資料夾']||p.district||'';
     const dead = isDead(id);
     const deadNote = customerStatuses[id]?.note || '';
+    const isDadPh = DAD_PHARMACY_IDS.has(id);
 
     html += `<tr class="${dead?'row-dead':''}">
       <td style="font-weight:600;color:${dead?'var(--muted)':'var(--accent)'}">${id}</td>
-      <td style="font-weight:600">${name}${dead?`<span class="dead-badge">🚫 死客戶</span>`:''}
+      <td style="font-weight:600">${name}${dead?`<span class="dead-badge">🚫 死客戶</span>`:''}${isDadPh?`<span class="dead-badge" style="background:#f59e0b">👴 爸爸客戶</span>`:''}
         ${dead&&deadNote?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${deadNote}</div>`:''}
       </td>
       <td>${doc}</td>
@@ -985,6 +1000,10 @@ function renderTable() {
         ${!dead?`
           <button class="ph-row-btn" onclick="quickAddTask('${id}','${name}','${addr}','${doc}')">＋ 任務</button>
           <button class="ph-row-btn" onclick="quickScript('${id}','${name}','${doc}')">✦ 話術</button>
+          ${isDadPh
+            ? `<button class="ph-row-btn" style="background:#fef3c7;color:#92400e;border-color:#f59e0b" onclick="markDadPharmacy('${id}','${name}',false)">👴 解除爸爸</button>`
+            : `<button class="ph-row-btn" style="background:#fef9c3;color:#854d0e;border-color:#eab308" onclick="markDadPharmacy('${id}','${name}',true)">👴 爸爸客戶</button>`
+          }
           <button class="ph-row-btn dead-btn" onclick="openDeadModal('${id}','${name}')">🚫 死客戶</button>
         `:`
           <button class="ph-row-btn undead-btn" onclick="openUndeadModal('${id}','${name}')">♻️ 解除標記</button>
@@ -1933,11 +1952,36 @@ function updateWeekProgress(visits) {
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
 let calSelected = null;
+let calPlanCache = {};
 
-function getCalPlan() {
-  try { return JSON.parse(localStorage.getItem('calendarPlan') || '{}'); } catch { return {}; }
+function getCalPlan() { return calPlanCache; }
+function saveCalPlan(p) {
+  calPlanCache = p;
+  localStorage.setItem('calendarPlan', JSON.stringify(p));
+  fetch(WORKER + '/calendar-plan', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ plan: p }),
+  }).catch(() => {});
 }
-function saveCalPlan(p) { localStorage.setItem('calendarPlan', JSON.stringify(p)); }
+async function loadCalPlanFromKV() {
+  try {
+    const d = await get('/calendar-plan');
+    if (d.ok && Object.keys(d.plan).length > 0) {
+      calPlanCache = d.plan;
+    } else {
+      try { calPlanCache = JSON.parse(localStorage.getItem('calendarPlan') || '{}'); } catch { calPlanCache = {}; }
+    }
+  } catch {
+    try { calPlanCache = JSON.parse(localStorage.getItem('calendarPlan') || '{}'); } catch { calPlanCache = {}; }
+  }
+}
+async function loadDadPharmacies() {
+  try {
+    const d = await get('/dad-pharmacies');
+    if (d.ok) DAD_PHARMACY_IDS = new Set(d.ids);
+  } catch(e) { console.warn('載入爸爸客戶清單失敗', e); }
+}
 function normDs(dateStr) {
   // 把 "2026/6/7" 或 "2026-6-7" 統一轉成零補齊的 "2026-07-07"
   const parts = String(dateStr).replace(/\//g, '-').split('-');
@@ -2657,7 +2701,7 @@ const QMETA = {
   pending_newph:{color:'#f59e0b',       label:'🔍 待審視藥局'},
   newph:        {color:'var(--purple)', label:'🆕 新開藥局'},
 };
-const DAD_PHARMACY_IDS = new Set(['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129']);
+let DAD_PHARMACY_IDS = new Set();
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
