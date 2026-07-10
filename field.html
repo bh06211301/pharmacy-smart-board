@@ -796,11 +796,13 @@ body{
   <label class="record-label">拜訪目的</label>
   <select class="record-select" id="record-purpose">
     <option value="例行拜訪">例行拜訪</option>
-    <option value="新藥拓展">新藥拓展</option>
-    <option value="回收帳款">回收帳款</option>
-    <option value="送貨">送貨</option>
+    <option value="產品介紹">產品介紹</option>
+    <option value="訂單追蹤">訂單追蹤</option>
     <option value="客訴處理">客訴處理</option>
-    <option value="業務開發">業務開發</option>
+    <option value="新客開發">新客開發</option>
+    <option value="送貨">送貨 📦</option>
+    <option value="請款">請款 🧾</option>
+    <option value="收款">收款</option>
     <option value="其他">其他</option>
   </select>
   <label class="record-label">拜訪內容 <span style="color:var(--muted);font-weight:400">（選填）</span></label>
@@ -1819,6 +1821,7 @@ async function submitVisitRecord() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'addVisit',
+        visitId: 'V_' + Date.now(),
         pharmacyName: ph?.name || '',
         pharmacyId: phId || '',
         date: todayStr(),
