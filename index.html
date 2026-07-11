@@ -1334,6 +1334,7 @@ async function runSchedule() {
       return { ...t, isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
     }));
     const locs = enriched.map(t => t.addr || t.name);
+    console.log('[路線] 傳入地址:', locs);
     const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
       headers: {
