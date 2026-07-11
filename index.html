@@ -1333,40 +1333,38 @@ async function runSchedule() {
       } catch {}
       return { ...t, isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
     }));
-    // Load Google Maps SDK if not yet loaded
-    await new Promise(res => {
-      if (window.google?.maps) { res(); return; }
-      const prev = window._onGMapReady;
-      window._onGMapReady = function() { if (prev) prev(); res(); };
-      if (!document.getElementById('gmap-script')) {
-        const s = document.createElement('script'); s.id = 'gmap-script';
-        s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
-        document.head.appendChild(s);
-      }
+    const locs = enriched.map(t => t.addr || t.name);
+    const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GMAPS_KEY,
+        'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex'
+      },
+      body: JSON.stringify({
+        origin: { address: '新北市汐止區湖東街五巷25號' },
+        destination: { address: '台北市內湖區新民街422號' },
+        intermediates: locs.map(a => ({ address: a })),
+        travelMode: 'DRIVE',
+        optimizeWaypointOrder: true
+      })
     });
-    const svc = new google.maps.DirectionsService();
-    const waypoints = enriched.map(t => ({ location: t.addr || t.name, stopover: true }));
-    console.log('[路線計算] origin:', '新北市汐止區湖東街五巷25號');
-    console.log('[路線計算] waypoints:', waypoints.map(w => w.location));
-    console.log('[路線計算] destination:', '台北市內湖區新民街422號');
-    const result = await new Promise((res, rej) => {
-      svc.route({
-        origin: '新北市汐止區湖東街五巷25號',
-        destination: '台北市內湖區新民街422號',
-        waypoints,
-        optimizeWaypoints: true,
-        travelMode: google.maps.TravelMode.DRIVING,
-      }, (r, status) => status === 'OK' ? res(r) : rej(new Error('路線計算失敗：' + status)));
-    });
-    const order = result.routes[0].waypoint_order;
-    const legs = result.routes[0].legs;
+    if (!routeResp.ok) {
+      const errData = await routeResp.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `HTTP ${routeResp.status}`);
+    }
+    const routeData = await routeResp.json();
+    if (!routeData.routes?.length) throw new Error('找不到路線');
+    const route0 = routeData.routes[0];
+    const order = route0.optimizedIntermediateWaypointIndex || locs.map((_, i) => i);
+    const legs = route0.legs;
     const reordered = order.map(i => enriched[i]);
     let totalMeters = 0;
     const arrivalTimes = [];
     let cumMin = 8 * 60 + 30;
     legs.forEach((leg, i) => {
-      totalMeters += leg.distance.value;
-      cumMin += leg.duration.value / 60;
+      totalMeters += leg.distanceMeters;
+      cumMin += parseInt(leg.duration) / 60;
       if (i < reordered.length) { arrivalTimes.push(Math.round(cumMin)); cumMin += 30; }
     });
     const totalKm = totalMeters / 1000;
@@ -1374,9 +1372,9 @@ async function runSchedule() {
     const hwKm = Math.max(0, totalKm * 0.3 - 20);
     const hwCost = Math.round(hwKm * 1.3);
     const homeArrival = arrivalTimes.length
-      ? arrivalTimes[arrivalTimes.length-1] + 30 + Math.round((legs[legs.length-1]?.duration.value||0)/60)
+      ? arrivalTimes[arrivalTimes.length-1] + 30 + Math.round(parseInt(legs[legs.length-1]?.duration||'0')/60)
       : cumMin;
-    const legDetails = legs.map(l => ({ km: Math.round(l.distance.value/100)/10, min: Math.round(l.duration.value/60) }));
+    const legDetails = legs.map(l => ({ km: Math.round(l.distanceMeters/100)/10, min: Math.round(parseInt(l.duration)/60) }));
     const details = { arrivalTimes, homeArrival, totalKm: Math.round(totalKm), fuelCost, hwCost, legDetails };
     window._pendingRoute = reordered;
     window._pendingRouteDetails = details;
