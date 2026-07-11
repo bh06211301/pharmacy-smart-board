@@ -510,7 +510,7 @@ let allVisitsCache = [];
           </div>
           <div id="today-gmap" style="width:100%;height:100%"></div>
         </div>
-        <div id="today-area-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <div id="today-area-tabs" style="display:flex;flex-direction:column;gap:0;margin-bottom:10px"></div>
         <input id="today-map-search" placeholder="搜尋藥局名稱或地址..."
           style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:10px;box-sizing:border-box;outline:none"
           oninput="renderTodayMapGrid()">
@@ -3699,9 +3699,21 @@ function exportRoute() {
 }
 
 // ══════════════════════════════
+// 地圖共用工具
+// ══════════════════════════════
+function getCityFromPh(p) {
+  const addr = p.address || p['地址'] || '';
+  const m = addr.match(/^(台北市|臺北市|新北市|基隆市|桃園市|新竹市|新竹縣)/);
+  if (m) return m[1].replace('臺北市','台北市');
+  return '其他';
+}
+const MAP_PRIORITY_DIST = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
+const MAP_CITY_ORDER = ['台北市','新北市','基隆市','桃園市','新竹市','新竹縣','其他'];
+
+// ══════════════════════════════
 // 今日行程 — 地圖選店
 // ══════════════════════════════
-let _todayMap = null, _todayMapMarkers = [], _todayMapInfoWin = null, _todayMapActiveArea = 'all';
+let _todayMap = null, _todayMapMarkers = [], _todayMapInfoWin = null, _todayMapActiveArea = 'all', _todayMapActiveCity = 'all';
 
 function toggleTodayMap() {
   const wrap = document.getElementById('today-map-wrap');
@@ -3740,53 +3752,92 @@ function initTodayMap() {
 }
 
 function buildTodayAreaTabs() {
-  const areaCounts = {};
+  const cityCounts = {}, cityDistCounts = {};
   pharmacies.forEach(p => {
-    const d = p.district || p.area || '';
-    if (d) areaCounts[d] = (areaCounts[d] || 0) + 1;
+    const city = getCityFromPh(p);
+    const dist = p.district || p.area || '';
+    cityCounts[city] = (cityCounts[city] || 0) + 1;
+    if (!cityDistCounts[city]) cityDistCounts[city] = {};
+    if (dist) cityDistCounts[city][dist] = (cityDistCounts[city][dist] || 0) + 1;
   });
-  const priority = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
-  const sorted = [...priority.filter(a => areaCounts[a]), ...Object.keys(areaCounts).filter(a => !priority.includes(a)).sort()];
   const tabsEl = document.getElementById('today-area-tabs');
   if (!tabsEl) return;
-  tabsEl.innerHTML = `<div class="map-area-tab active" onclick="setTodayArea('all',this)">全部 <span class="map-area-cnt">${pharmacies.length}</span></div>`;
-  sorted.forEach(area => {
-    const tab = document.createElement('div');
-    tab.className = 'map-area-tab';
-    tab.innerHTML = `${area} <span class="map-area-cnt">${areaCounts[area]}</span>`;
-    tab.onclick = () => setTodayArea(area, tab);
-    tabsEl.appendChild(tab);
-  });
+  tabsEl._cityDistCounts = cityDistCounts;
+  tabsEl.innerHTML = `
+    <div id="today-city-row" style="display:flex;gap:6px;flex-wrap:wrap;width:100%">
+      <div class="map-area-tab active" data-level="city" onclick="setTodayCity('all',this)">全部 <span class="map-area-cnt">${pharmacies.length}</span></div>
+      ${MAP_CITY_ORDER.filter(c => cityCounts[c]).map(c =>
+        `<div class="map-area-tab" data-level="city" onclick="setTodayCity('${c}',this)">${c} <span class="map-area-cnt">${cityCounts[c]}</span></div>`
+      ).join('')}
+    </div>
+    <div id="today-dist-row" style="display:none;gap:5px;flex-wrap:wrap;width:100%;margin-top:5px;padding-top:5px;border-top:1px dashed var(--border)"></div>`;
 }
 
-function setTodayArea(area, el) {
-  _todayMapActiveArea = area;
-  document.querySelectorAll('.map-area-tab').forEach(t => t.classList.remove('active'));
+function setTodayCity(city, el) {
+  _todayMapActiveCity = city;
+  _todayMapActiveArea = city;
+  document.querySelectorAll('#today-city-row .map-area-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  const tabsEl = document.getElementById('today-area-tabs');
+  const distRow = document.getElementById('today-dist-row');
+  if (!distRow) { renderTodayMapGrid(); return; }
+  if (city === 'all') {
+    distRow.style.display = 'none';
+    distRow.innerHTML = '';
+  } else {
+    const cityDists = tabsEl._cityDistCounts?.[city] || {};
+    const dists = Object.keys(cityDists);
+    const sorted = [...MAP_PRIORITY_DIST.filter(d => cityDists[d]), ...dists.filter(d => !MAP_PRIORITY_DIST.includes(d)).sort()];
+    const total = Object.values(cityDists).reduce((a,b)=>a+b,0);
+    const short = city.replace('市','').replace('縣','');
+    distRow.innerHTML = `<div class="map-area-tab active" data-level="dist" onclick="setTodayDist('${city}',this)">全${short} <span class="map-area-cnt">${total}</span></div>`
+      + sorted.map(d => `<div class="map-area-tab" data-level="dist" onclick="setTodayDist('${d}',this)">${d} <span class="map-area-cnt">${cityDists[d]}</span></div>`).join('');
+    distRow.style.display = 'flex';
+  }
   renderTodayMapGrid();
-  if (area !== 'all' && _todayMap) {
-    const list = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
-    if (list.length) {
-      const bounds = new google.maps.LatLngBounds();
-      list.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
-      _todayMap.fitBounds(bounds, 80);
+  if (_todayMap) {
+    updateTodayMapMarkers();
+    if (city === 'all') { _todayMap.setCenter({lat:25.065,lng:121.658}); _todayMap.setZoom(11); }
+    else {
+      const list = pharmacies.filter(p => getCityFromPh(p) === city && p.lat && p.lng);
+      if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _todayMap.fitBounds(b,80); }
     }
   }
+}
+
+function setTodayDist(area, el) {
+  _todayMapActiveArea = area;
+  document.querySelectorAll('#today-dist-row .map-area-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderTodayMapGrid();
+  if (!_todayMap) return;
+  updateTodayMapMarkers();
+  const isCity = area === _todayMapActiveCity;
+  const list = isCity
+    ? pharmacies.filter(p => getCityFromPh(p) === area && p.lat && p.lng)
+    : pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+  if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _todayMap.fitBounds(b,80); }
 }
 
 function renderTodayMapMarkers() {
   _todayMapMarkers.forEach(m => m.setMap(null));
   _todayMapMarkers = [];
   pharmacies.filter(p => p.lat && p.lng).forEach(p => {
-    const inTask = tasks.some(t => t.pharmacyId === (p.id||p['Customer_ID']));
+    const pid = p.id||p['Customer_ID'];
+    const phArea = p.district || p.area || '';
+    const phCity = getCityFromPh(p);
+    const inTask = tasks.some(t => t.pharmacyId === pid);
+    const inArea = _todayMapActiveArea === 'all' || phCity === _todayMapActiveArea || phArea === _todayMapActiveArea;
     const marker = new google.maps.Marker({
       position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
-      map: _todayMap, title: p.name||p['店名'],
+      map: inArea ? _todayMap : null, title: p.name||p['店名'],
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: inTask?9:6,
         fillColor: inTask?'#12b76a':'#3b6ef5', fillOpacity:1, strokeColor:'#fff', strokeWeight:1.5 }
     });
+    marker._pid = pid;
+    marker._phArea = phArea;
+    marker._phCity = phCity;
     marker.addListener('click', () => {
-      const pid = p.id||p['Customer_ID'];
       const isIn = tasks.some(t => t.pharmacyId === pid);
       _todayMapInfoWin.setContent(`
         <div style="font-family:Inter,sans-serif;padding:4px;min-width:170px">
@@ -3807,11 +3858,10 @@ function renderTodayMapMarkers() {
 
 function updateTodayMapMarkers() {
   if (!_todayMap) return;
-  const validPh = pharmacies.filter(p => p.lat && p.lng);
-  _todayMapMarkers.forEach((marker, i) => {
-    const p = validPh[i];
-    if (!p) return;
-    const inTask = tasks.some(t => t.pharmacyId === (p.id||p['Customer_ID']));
+  _todayMapMarkers.forEach(marker => {
+    const inTask = tasks.some(t => t.pharmacyId === marker._pid);
+    const inArea = _todayMapActiveArea === 'all' || marker._phCity === _todayMapActiveArea || marker._phArea === _todayMapActiveArea;
+    marker.setMap(inArea ? _todayMap : null);
     marker.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inTask?9:6,
       fillColor: inTask?'#12b76a':'#3b6ef5', fillOpacity:1, strokeColor:'#fff', strokeWeight:1.5 });
   });
@@ -3820,8 +3870,14 @@ function updateTodayMapMarkers() {
 function renderTodayMapGrid() {
   const kw = (document.getElementById('today-map-search')?.value || '').toLowerCase();
   let list = pharmacies;
-  if (_todayMapActiveArea !== 'all') list = list.filter(p => (p.district||p.area||'') === _todayMapActiveArea);
-  if (kw) list = list.filter(p => (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw));
+  if (_todayMapActiveArea !== 'all') list = list.filter(p => {
+    const dist = p.district || p.area || '';
+    return getCityFromPh(p) === _todayMapActiveArea || dist === _todayMapActiveArea;
+  });
+  if (kw) list = list.filter(p => {
+    const dist = (p.district||p.area||'').toLowerCase();
+    return (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw) || dist.includes(kw) || getCityFromPh(p).toLowerCase().includes(kw);
+  });
   const grid = document.getElementById('today-map-grid');
   if (!grid) return;
   if (!list.length) { grid.innerHTML = `<div style="grid-column:1/-1;padding:16px;text-align:center;color:var(--muted);font-size:12px">此地區無藥局</div>`; return; }
@@ -3868,7 +3924,7 @@ function mapTogglePharmacy(id) {
 const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc';
 let _calMap = null, _calMapMarkers = [], _calMapInfoWin = null;
 let _calMapDs = null, _calMapSel = new Set();
-let _calMapArea = 'all', _calMapInited = false;
+let _calMapArea = 'all', _calMapCity = 'all', _calMapInited = false;
 
 function openCalMapModal(ds) {
   _calMapDs = ds;
@@ -3885,6 +3941,7 @@ function openCalMapModal(ds) {
     `${d.getMonth()+1}/${d.getDate()}（${DNAMES[d.getDay()]}）計畫拜訪`;
   document.getElementById('cal-map-search').value = '';
   _calMapArea = 'all';
+  _calMapCity = 'all';
   buildCalMapAreaTabs();
   renderCalMapGrid();
   updateCalMapSelCount();
@@ -3941,8 +3998,9 @@ function renderCalMapMarkers() {
   pharmacies.filter(p => p.lat && p.lng).forEach(p => {
     const id = p.id || p['Customer_ID'] || '';
     const phArea = p.district || p.area || '';
+    const phCity = getCityFromPh(p);
     const inSel = _calMapSel.has(id);
-    const inArea = _calMapArea === 'all' || phArea === _calMapArea;
+    const inArea = _calMapArea === 'all' || phCity === _calMapArea || phArea === _calMapArea;
     const marker = new google.maps.Marker({
       position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
       map: inArea ? _calMap : null,
@@ -3952,6 +4010,7 @@ function renderCalMapMarkers() {
     });
     marker._phId = id;
     marker._phArea = phArea;
+    marker._phCity = phCity;
     // 單擊：顯示資訊框
     marker.addListener('click', () => {
       const name = p.name || p['店名'] || '';
@@ -3985,7 +4044,7 @@ function updateCalMapMarkers() {
   _calMapMarkers.forEach(mk => {
     const id = mk._phId;
     const inSel = _calMapSel.has(id);
-    const inArea = _calMapArea === 'all' || mk._phArea === _calMapArea;
+    const inArea = _calMapArea === 'all' || mk._phCity === _calMapArea || mk._phArea === _calMapArea;
     mk.setMap(inArea ? _calMap : null);
     mk.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
       fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 });
@@ -3993,50 +4052,82 @@ function updateCalMapMarkers() {
 }
 
 function buildCalMapAreaTabs() {
-  const counts = {};
-  pharmacies.forEach(p => { const d = p.district || p.area || ''; if (d) counts[d] = (counts[d]||0) + 1; });
-  const priority = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
-  const sorted = [...priority.filter(a => counts[a]), ...Object.keys(counts).filter(a => !priority.includes(a)).sort()];
-  const el = document.getElementById('cal-map-area-tabs');
-  el.innerHTML = `<div class="cmap-area-tab active" onclick="setCalMapArea('all',this)">全部 ${pharmacies.length}</div>`;
-  sorted.forEach(a => {
-    const t = document.createElement('div');
-    t.className = 'cmap-area-tab';
-    t.textContent = `${a} ${counts[a]}`;
-    t.onclick = () => setCalMapArea(a, t);
-    el.appendChild(t);
+  const cityCounts = {}, cityDistCounts = {};
+  pharmacies.forEach(p => {
+    const city = getCityFromPh(p);
+    const dist = p.district || p.area || '';
+    cityCounts[city] = (cityCounts[city] || 0) + 1;
+    if (!cityDistCounts[city]) cityDistCounts[city] = {};
+    if (dist) cityDistCounts[city][dist] = (cityDistCounts[city][dist] || 0) + 1;
   });
+  const el = document.getElementById('cal-map-area-tabs');
+  el._cityDistCounts = cityDistCounts;
+  el.innerHTML = `
+    <div id="cal-map-city-row" style="display:flex;gap:5px;flex-wrap:wrap">
+      <div class="cmap-area-tab active" data-level="city" onclick="setCalMapCity('all',this)">全部 ${pharmacies.length}</div>
+      ${MAP_CITY_ORDER.filter(c => cityCounts[c]).map(c =>
+        `<div class="cmap-area-tab" data-level="city" onclick="setCalMapCity('${c}',this)">${c} ${cityCounts[c]}</div>`
+      ).join('')}
+    </div>
+    <div id="cal-map-dist-row" style="display:none;gap:4px;flex-wrap:wrap;margin-top:5px;padding-top:6px;border-top:1px dashed var(--border)"></div>`;
 }
 
-function setCalMapArea(area, el) {
+function setCalMapCity(city, el) {
+  _calMapCity = city;
+  _calMapArea = city;
+  document.querySelectorAll('#cal-map-city-row .cmap-area-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const areaEl = document.getElementById('cal-map-area-tabs');
+  const distRow = document.getElementById('cal-map-dist-row');
+  if (!distRow) { renderCalMapGrid(); return; }
+  if (city === 'all') {
+    distRow.style.display = 'none';
+    distRow.innerHTML = '';
+  } else {
+    const cityDists = areaEl._cityDistCounts?.[city] || {};
+    const dists = Object.keys(cityDists);
+    const sorted = [...MAP_PRIORITY_DIST.filter(d => cityDists[d]), ...dists.filter(d => !MAP_PRIORITY_DIST.includes(d)).sort()];
+    const total = Object.values(cityDists).reduce((a,b)=>a+b,0);
+    const short = city.replace('市','').replace('縣','');
+    distRow.innerHTML = `<div class="cmap-area-tab active" data-level="dist" onclick="setCalMapDist('${city}',this)">全${short} ${total}</div>`
+      + sorted.map(d => `<div class="cmap-area-tab" data-level="dist" onclick="setCalMapDist('${d}',this)">${d} ${cityDists[d]}</div>`).join('');
+    distRow.style.display = 'flex';
+  }
+  renderCalMapGrid();
+  if (!_calMapInited) return;
+  updateCalMapMarkers();
+  if (city === 'all') { _calMap.setCenter({lat:25.065,lng:121.658}); _calMap.setZoom(11); }
+  else {
+    const list = pharmacies.filter(p => getCityFromPh(p) === city && p.lat && p.lng);
+    if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _calMap.fitBounds(b,60); }
+  }
+}
+
+function setCalMapDist(area, el) {
   _calMapArea = area;
-  document.querySelectorAll('.cmap-area-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#cal-map-dist-row .cmap-area-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   renderCalMapGrid();
   if (!_calMapInited) return;
-  // 顯示/隱藏各地區標記
-  _calMapMarkers.forEach(mk => {
-    const inArea = area === 'all' || mk._phArea === area;
-    mk.setMap(inArea ? _calMap : null);
-  });
-  if (area !== 'all') {
-    const list = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
-    if (list.length) {
-      const bounds = new google.maps.LatLngBounds();
-      list.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
-      _calMap.fitBounds(bounds, 60);
-    }
-  } else {
-    _calMap.setCenter({ lat: 25.065, lng: 121.658 });
-    _calMap.setZoom(11);
-  }
+  updateCalMapMarkers();
+  const isCity = area === _calMapCity;
+  const list = isCity
+    ? pharmacies.filter(p => getCityFromPh(p) === area && p.lat && p.lng)
+    : pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+  if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _calMap.fitBounds(b,60); }
 }
 
 function renderCalMapGrid() {
   const kw = (document.getElementById('cal-map-search')?.value || '').toLowerCase();
   let list = pharmacies;
-  if (_calMapArea !== 'all') list = list.filter(p => (p.district||p.area||'') === _calMapArea);
-  if (kw) list = list.filter(p => (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.id||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw));
+  if (_calMapArea !== 'all') list = list.filter(p => {
+    const dist = p.district || p.area || '';
+    return getCityFromPh(p) === _calMapArea || dist === _calMapArea;
+  });
+  if (kw) list = list.filter(p => {
+    const dist = (p.district||p.area||'').toLowerCase();
+    return (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.id||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw) || dist.includes(kw) || getCityFromPh(p).toLowerCase().includes(kw);
+  });
   const grid = document.getElementById('cal-map-grid');
   if (!list.length) { grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--muted);font-size:12px">無符合藥局</div>'; return; }
   grid.innerHTML = list.slice(0, 80).map(p => {
@@ -4129,7 +4220,7 @@ init();
     <!-- 搜尋 + 地區 -->
     <div style="padding:10px 14px 6px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:8px">
       <input id="cal-map-search" class="task-input" placeholder="搜尋藥局名稱或地址…" style="width:100%;box-sizing:border-box" oninput="renderCalMapGrid()">
-      <div id="cal-map-area-tabs" style="display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px"></div>
+      <div id="cal-map-area-tabs" style="display:flex;flex-direction:column;gap:0"></div>
     </div>
 
     <!-- 藥局格 -->
