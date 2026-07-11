@@ -1333,8 +1333,19 @@ async function runSchedule() {
       } catch {}
       return { ...t, isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
     }));
-    const locs = enriched.map(t => t.addr || t.name);
-    console.log('[路線] 傳入地址:', locs);
+    const _geocode = async (query) => {
+      const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GMAPS_KEY}`);
+      const d = await r.json();
+      if (d.results?.length) {
+        const { lat, lng } = d.results[0].geometry.location;
+        return { location: { latLng: { latitude: lat, longitude: lng } } };
+      }
+      return { address: query };
+    };
+    const intermediates = await Promise.all(enriched.map(t =>
+      t.addr ? Promise.resolve({ address: t.addr }) : _geocode(t.name + ' 台灣')
+    ));
+    console.log('[路線] intermediates:', intermediates);
     const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
       headers: {
@@ -1345,7 +1356,7 @@ async function runSchedule() {
       body: JSON.stringify({
         origin: { address: '新北市汐止區湖東街五巷25號' },
         destination: { address: '台北市內湖區新民街422號' },
-        intermediates: locs.map(a => ({ address: a })),
+        intermediates,
         travelMode: 'DRIVE',
         optimizeWaypointOrder: true
       })
