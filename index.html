@@ -295,6 +295,16 @@ select.task-input{cursor:pointer}
 .cmap-ph-card.sel{border-color:var(--green);background:var(--green-light)}
 .cmap-area-tab{padding:4px 10px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--white);color:var(--text2);white-space:nowrap;flex-shrink:0;transition:all .15s}
 .cmap-area-tab.active{border-color:var(--accent);background:var(--accent);color:#fff}
+
+/* 地圖地區 Tab */
+.map-area-tab{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--white);color:var(--text2);transition:all .15s;flex-shrink:0}
+.map-area-tab:hover{border-color:var(--accent);color:var(--accent)}
+.map-area-tab.active{border-color:var(--accent);background:var(--accent);color:#fff}
+.map-area-cnt{font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;background:rgba(255,255,255,.25)}
+.map-area-tab:not(.active) .map-area-cnt{background:var(--surface2);color:var(--muted)}
+.today-ph-card{border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;transition:all .15s;background:var(--white);position:relative}
+.today-ph-card:hover{border-color:var(--accent)}
+.today-ph-card.in-task{border-color:var(--accent);background:var(--accent-light)}
 </style>
 </head>
 <body>
@@ -330,9 +340,6 @@ let allVisitsCache = [];
       <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span>
       <span id="status-txt">連線中</span>
     </div>
-    <a href="tasks-page.html" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap">
-      🗺️ 路線規劃
-    </a>
     <a href="field.html" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:8px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap">
       📍 外勤模式
     </a>
@@ -416,10 +423,34 @@ let allVisitsCache = [];
           <option value="deliver">📦 自送</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="addTaskToday()">＋ 加入</button>
-        <button class="btn btn-ai btn-sm" id="today-sched-btn" onclick="runSchedule()">⚡ AI 路線排序</button>
+        <button class="btn btn-ai btn-sm" id="today-sched-btn" onclick="runSchedule()">📍 計算最短路線</button>
         <button class="btn btn-ghost btn-sm" id="today-clear-btn" onclick="clearTodayTasks()" style="display:none">🗑 清除任務</button>
       </div>
       <div id="today-task-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+    </div>
+  </div>
+  <!-- 地圖選店 -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header" style="cursor:pointer;user-select:none" onclick="toggleTodayMap()">
+      <div class="card-title">📍 地圖選店</div>
+      <span id="today-map-toggle-icon" style="color:var(--muted);font-size:12px">▼ 展開</span>
+    </div>
+    <div id="today-map-wrap" style="display:none">
+      <div style="padding:12px 16px 0">
+        <div id="today-gmap-container" style="width:100%;height:360px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border);position:relative;background:#e8f0fe;margin-bottom:12px">
+          <div id="today-map-loading" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#e8f0fe;font-size:13px;color:var(--muted);z-index:10">
+            <span class="spinner" style="width:24px;height:24px;border-width:3px"></span>
+            <div>地圖載入中...</div>
+          </div>
+          <div id="today-gmap" style="width:100%;height:100%"></div>
+        </div>
+        <div id="today-area-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <input id="today-map-search" placeholder="搜尋藥局名稱或地址..."
+          style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:10px;box-sizing:border-box;outline:none"
+          oninput="renderTodayMapGrid()">
+        <div id="today-map-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:280px;overflow-y:auto;padding:2px;margin-bottom:4px"></div>
+      </div>
+      <div style="height:12px"></div>
     </div>
   </div>
   <!-- 待確認路線預覽 -->
@@ -1182,7 +1213,7 @@ function renderTaskChips() {
   const el = document.getElementById('today-task-chips');
   const clearBtn = document.getElementById('today-clear-btn');
   if (!el) return;
-  if (!tasks.length) { el.innerHTML = ''; if (clearBtn) clearBtn.style.display = 'none'; return; }
+  if (!tasks.length) { el.innerHTML = ''; if (clearBtn) clearBtn.style.display = 'none'; updateTodayMapMarkers(); renderTodayMapGrid(); return; }
   if (clearBtn) clearBtn.style.display = '';
   el.innerHTML = tasks.map((t,i) => {
     const typeColor = {visit:'var(--accent)',new:'var(--purple)',dad:'var(--teal)',deliver:'var(--green)'}[t.type]||'var(--accent)';
@@ -1193,6 +1224,8 @@ function renderTaskChips() {
       <span onclick="removeTask(${t.id});renderTaskChips()" style="cursor:pointer;color:${typeColor};font-size:14px;line-height:1">×</span>
     </span>`;
   }).join('');
+  updateTodayMapMarkers();
+  renderTodayMapGrid();
 }
 
 function clearTodayTasks() {
@@ -1282,7 +1315,7 @@ function renderTasks() {
 async function runSchedule() {
   if (!tasks.length) { toast('請先加入任務'); return; }
   const btn = document.getElementById('today-sched-btn') || document.getElementById('schedule-btn');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 規劃中...';
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 計算中...';
   const resultEl = document.getElementById('today-pending') || document.getElementById('schedule-result');
   resultEl.innerHTML = `<div class="ai-result-wrap">
     <div class="loading-line" style="width:55%"></div>
@@ -1294,64 +1327,112 @@ async function runSchedule() {
       try {
         if (t.pharmacyId) {
           const v = await get('/visits/' + t.pharmacyId);
-          return { ...t, lastVisitDays: v.lastVisitDays };
+          return { ...t, lastVisitDays: v.lastVisitDays,
+            isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
         }
       } catch {}
-      return t;
+      return { ...t, isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
     }));
-    const payload = {
-      pharmacies: enriched.map(t => ({
-        id: t.pharmacyId || String(t.id),
-        name: t.name, addr: t.addr,
-        lastVisitDays: t.lastVisitDays || null,
-        isNew: t.type === 'new', isDad: t.type === 'dad', hasDelivery: t.type === 'deliver'
-      })),
-      origin: '新北市汐止區湖東街五巷25號'
-    };
-    const data = await post('/optimize-route', payload);
-    window._pendingRoute = data.route || enriched;
-    renderScheduleResult(data, enriched);
+    // Load Google Maps SDK if not yet loaded
+    await new Promise(res => {
+      if (window.google?.maps) { res(); return; }
+      const prev = window._onGMapReady;
+      window._onGMapReady = function() { if (prev) prev(); res(); };
+      if (!document.getElementById('gmap-script')) {
+        const s = document.createElement('script'); s.id = 'gmap-script';
+        s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
+        document.head.appendChild(s);
+      }
+    });
+    const svc = new google.maps.DirectionsService();
+    const result = await new Promise((res, rej) => {
+      svc.route({
+        origin: '新北市汐止區湖東街五巷25號',
+        destination: '台北市內湖區新民街422號',
+        waypoints: enriched.map(t => ({ location: t.addr || t.name, stopover: true })),
+        optimizeWaypoints: true,
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (r, status) => status === 'OK' ? res(r) : rej(new Error('路線計算失敗：' + status)));
+    });
+    const order = result.routes[0].waypoint_order;
+    const legs = result.routes[0].legs;
+    const reordered = order.map(i => enriched[i]);
+    let totalMeters = 0;
+    const arrivalTimes = [];
+    let cumMin = 8 * 60 + 30;
+    legs.forEach((leg, i) => {
+      totalMeters += leg.distance.value;
+      cumMin += leg.duration.value / 60;
+      if (i < reordered.length) { arrivalTimes.push(Math.round(cumMin)); cumMin += 30; }
+    });
+    const totalKm = totalMeters / 1000;
+    const fuelCost = Math.round(totalKm / 24 * 32);
+    const hwKm = Math.max(0, totalKm * 0.3 - 20);
+    const hwCost = Math.round(hwKm * 1.3);
+    const homeArrival = arrivalTimes.length
+      ? arrivalTimes[arrivalTimes.length-1] + 30 + Math.round((legs[legs.length-1]?.duration.value||0)/60)
+      : cumMin;
+    const legDetails = legs.map(l => ({ km: Math.round(l.distance.value/100)/10, min: Math.round(l.duration.value/60) }));
+    const details = { arrivalTimes, homeArrival, totalKm: Math.round(totalKm), fuelCost, hwCost, legDetails };
+    window._pendingRoute = reordered;
+    window._pendingRouteDetails = details;
+    renderScheduleResult(reordered, details);
   } catch(e) {
-    resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 排程失敗：${e.message}</div>`;
+    resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 路線計算失敗：${e.message}</div>`;
   } finally {
-    btn.disabled = false; btn.innerHTML = '⚡ AI 路線排序';
+    btn.disabled = false; btn.innerHTML = '📍 計算最短路線';
   }
 }
 
-function renderScheduleResult(data, original) {
-  const route = data.route || original;
-  const summary = data.summary || '';
+function renderScheduleResult(route, details) {
   const el = document.getElementById('today-pending') || document.getElementById('schedule-result');
   const typeColor = r => r.isNew?'var(--purple)':r.isDad?'var(--teal)':r.hasDelivery?'var(--green)':r.lastVisitDays>21?'var(--red)':'var(--accent)';
   const typeLabel = r => r.isNew?'🆕 新藥局':r.isDad?'👨‍⚕️ 爸爸客戶':r.hasDelivery?'🚗 自送':r.lastVisitDays>21?'⚠️ 逾期':'🔄 拜訪';
+  const homeWarn = details.homeArrival > 18*60 ? ' ⚠️' : '';
   el.innerHTML = `<div class="ai-result-wrap" style="margin-top:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span class="ai-badge">✦ Gemini 2.5-flash</span>
-      <span style="font-size:14px;font-weight:700">AI 路線建議（共 ${route.length} 站）</span>
+      <span style="background:var(--green-light);color:var(--green);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">📍 Google Maps 最短路線</span>
+      <span style="font-size:14px;font-weight:700">共 ${route.length} 站 · ${details.totalKm} km</span>
     </div>
     <div class="route-day">
-      <div class="route-day-header">今日建議路線 <span style="font-size:11px;font-weight:400;color:var(--muted)">依優先分數排序</span></div>
-      ${route.map((r,i) => `
-      <div class="route-stop">
-        <div class="stop-num" style="background:${typeColor(r)}">${i+1}</div>
-        <div class="stop-info">
-          <div class="stop-name">${r.name||r.id}
-            ${r.lastVisitDays>21?`<span class="overdue-badge">逾期 ${r.lastVisitDays} 天</span>`:''}
-            ${r.isNew?'<span class="new-badge">🆕 新藥局</span>':''}
-            ${r.isDad?'<span class="dad-badge">👨‍⚕️ 爸爸客戶</span>':''}
+      <div class="route-day-header">今日建議路線 <span style="font-size:11px;font-weight:400;color:var(--muted)">依最短路程排序</span></div>
+      ${route.map((r,i) => {
+        const arr = details.arrivalTimes?.[i];
+        const timeStr = arr ? `<span style="font-size:11px;font-weight:700;color:var(--green);margin-left:6px">⏰ ${fmtMin(arr)}</span>` : '';
+        return `<div class="route-stop">
+          <div class="stop-num" style="background:${typeColor(r)}">${i+1}</div>
+          <div class="stop-info">
+            <div class="stop-name">${r.name||r.id}${timeStr}
+              ${r.lastVisitDays>21?`<span class="overdue-badge">逾期 ${r.lastVisitDays} 天</span>`:''}
+              ${r.isNew?'<span class="new-badge">🆕 新藥局</span>':''}
+              ${r.isDad?'<span class="dad-badge">👨‍⚕️ 爸爸</span>':''}
+              ${r.source==='calendar_task'&&r.taskMemo?`<span style="font-size:10px;color:var(--accent);margin-left:4px">📌 ${r.taskMemo}</span>`:''}
+            </div>
+            <div class="stop-detail">${r.addr||''} ${r.lastVisitDays?`· 距上次 ${r.lastVisitDays} 天`:''}</div>
           </div>
-          <div class="stop-detail">${r.addr||''} ${r.lastVisitDays?`· 距上次拜訪 ${r.lastVisitDays} 天`:''}</div>
-        </div>
-        <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${typeColor(r)}22;color:${typeColor(r)};flex-shrink:0">${typeLabel(r)}</span>
-      </div>`).join('')}
+          <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${typeColor(r)}22;color:${typeColor(r)};flex-shrink:0">${typeLabel(r)}</span>
+        </div>`;
+      }).join('')}
     </div>
-    ${summary?`<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-top:10px">
-      <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">✦ AI 說明</div>
-      <div style="font-size:13px;line-height:1.7;color:var(--text2);white-space:pre-wrap">${summary}</div>
-    </div>`:''}
+    <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;margin-top:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💰 今日行車費用估算</div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--text2)">總距離</span><span style="font-weight:600">${details.totalKm} km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--text2)">⛽ 油費</span><span style="font-weight:600">約 $${details.fuelCost}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--text2)">🛣️ 高速公路費</span><span style="font-weight:600">${details.hwCost>0?'約 $'+details.hwCost:'✅ 免費'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:14px;font-weight:700;color:var(--accent)">
+        <span>總費用</span><span>約 $${details.fuelCost+details.hwCost}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">預計到家：${fmtMin(details.homeArrival)}${homeWarn}</div>
+    </div>
     <div style="display:flex;gap:10px;margin-top:14px">
       <button class="btn btn-primary" onclick="confirmRoute()">✓ 確認排入今日行程</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('today-pending').innerHTML='';document.getElementById('schedule-result')&&(document.getElementById('schedule-result').innerHTML='')">清除</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('today-pending').innerHTML=''">清除</button>
     </div>
   </div>`;
 }
@@ -1372,8 +1453,14 @@ function confirmRoute() {
     }
   });
   saveCalPlan(plan);
-  calculateRouteDetails(todayRoute);
-  renderTodayRoute();
+  if (window._pendingRouteDetails) {
+    window._routeDetails = window._pendingRouteDetails;
+    window._pendingRouteDetails = null;
+    renderTodayRoute();
+  } else {
+    calculateRouteDetails(todayRoute);
+    renderTodayRoute();
+  }
   updateTodayStats();
   toast('✅ 已排入今日行程！');
   setTimeout(() => nav(document.querySelectorAll('.nav-tab')[0], 'today'), 800);
@@ -3385,6 +3472,170 @@ function exportRoute() {
   if (!todayRoute.length) { toast('行程尚未排定'); return; }
   const txt = todayRoute.map((r,i)=>`${i+1}. ${r.name}　${r.addr||''}`).join('\n');
   navigator.clipboard.writeText(txt).then(()=>toast('✅ 行程已複製'));
+}
+
+// ══════════════════════════════
+// 今日行程 — 地圖選店
+// ══════════════════════════════
+let _todayMap = null, _todayMapMarkers = [], _todayMapInfoWin = null, _todayMapActiveArea = 'all';
+
+function toggleTodayMap() {
+  const wrap = document.getElementById('today-map-wrap');
+  const icon = document.getElementById('today-map-toggle-icon');
+  if (!wrap || !icon) return;
+  const open = wrap.style.display !== 'none';
+  wrap.style.display = open ? 'none' : '';
+  icon.textContent = open ? '▼ 展開' : '▲ 收起';
+  if (!open && !_todayMap) initTodayMap();
+}
+
+function initTodayMap() {
+  const loadSDK = () => new Promise(res => {
+    if (window.google?.maps) { res(); return; }
+    const prev = window._onGMapReady;
+    window._onGMapReady = function() { if (prev) prev(); res(); };
+    if (!document.getElementById('gmap-script')) {
+      const s = document.createElement('script'); s.id = 'gmap-script';
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
+      document.head.appendChild(s);
+    }
+  });
+  loadSDK().then(() => {
+    const loadingEl = document.getElementById('today-map-loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+    _todayMap = new google.maps.Map(document.getElementById('today-gmap'), {
+      center: { lat: 25.065, lng: 121.658 }, zoom: 11,
+      mapTypeControl: false, streetViewControl: false,
+      styles: [{ featureType:'poi', elementType:'labels', stylers:[{visibility:'off'}] }]
+    });
+    _todayMapInfoWin = new google.maps.InfoWindow();
+    buildTodayAreaTabs();
+    renderTodayMapMarkers();
+    renderTodayMapGrid();
+  });
+}
+
+function buildTodayAreaTabs() {
+  const areaCounts = {};
+  pharmacies.forEach(p => {
+    const d = p.district || p.area || '';
+    if (d) areaCounts[d] = (areaCounts[d] || 0) + 1;
+  });
+  const priority = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
+  const sorted = [...priority.filter(a => areaCounts[a]), ...Object.keys(areaCounts).filter(a => !priority.includes(a)).sort()];
+  const tabsEl = document.getElementById('today-area-tabs');
+  if (!tabsEl) return;
+  tabsEl.innerHTML = `<div class="map-area-tab active" onclick="setTodayArea('all',this)">全部 <span class="map-area-cnt">${pharmacies.length}</span></div>`;
+  sorted.forEach(area => {
+    const tab = document.createElement('div');
+    tab.className = 'map-area-tab';
+    tab.innerHTML = `${area} <span class="map-area-cnt">${areaCounts[area]}</span>`;
+    tab.onclick = () => setTodayArea(area, tab);
+    tabsEl.appendChild(tab);
+  });
+}
+
+function setTodayArea(area, el) {
+  _todayMapActiveArea = area;
+  document.querySelectorAll('.map-area-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderTodayMapGrid();
+  if (area !== 'all' && _todayMap) {
+    const list = pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+    if (list.length) {
+      const bounds = new google.maps.LatLngBounds();
+      list.forEach(p => bounds.extend({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }));
+      _todayMap.fitBounds(bounds, 80);
+    }
+  }
+}
+
+function renderTodayMapMarkers() {
+  _todayMapMarkers.forEach(m => m.setMap(null));
+  _todayMapMarkers = [];
+  pharmacies.filter(p => p.lat && p.lng).forEach(p => {
+    const inTask = tasks.some(t => t.pharmacyId === (p.id||p['Customer_ID']));
+    const marker = new google.maps.Marker({
+      position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
+      map: _todayMap, title: p.name||p['店名'],
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: inTask?9:6,
+        fillColor: inTask?'#12b76a':'#3b6ef5', fillOpacity:1, strokeColor:'#fff', strokeWeight:1.5 }
+    });
+    marker.addListener('click', () => {
+      const pid = p.id||p['Customer_ID'];
+      const isIn = tasks.some(t => t.pharmacyId === pid);
+      _todayMapInfoWin.setContent(`
+        <div style="font-family:Inter,sans-serif;padding:4px;min-width:170px">
+          <div style="font-size:11px;font-weight:700;color:#3b6ef5;margin-bottom:3px">${pid}</div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:2px">${p.name||p['店名']}</div>
+          <div style="font-size:11px;color:#667085;margin-bottom:4px">${p.address||p['地址']||''}</div>
+          <div style="font-size:11px;margin-bottom:8px">👤 ${p.pharmacist||p['Key Man']||'—'}</div>
+          <button onclick="mapTogglePharmacy('${pid}')"
+            style="width:100%;padding:7px;border:none;border-radius:6px;background:${isIn?'#fef3f2':'#3b6ef5'};color:${isIn?'#f04438':'#fff'};font-size:12px;font-weight:600;cursor:pointer">
+            ${isIn?'✕ 從任務移除':'＋ 加入任務'}
+          </button>
+        </div>`);
+      _todayMapInfoWin.open(_todayMap, marker);
+    });
+    _todayMapMarkers.push(marker);
+  });
+}
+
+function updateTodayMapMarkers() {
+  if (!_todayMap) return;
+  const validPh = pharmacies.filter(p => p.lat && p.lng);
+  _todayMapMarkers.forEach((marker, i) => {
+    const p = validPh[i];
+    if (!p) return;
+    const inTask = tasks.some(t => t.pharmacyId === (p.id||p['Customer_ID']));
+    marker.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inTask?9:6,
+      fillColor: inTask?'#12b76a':'#3b6ef5', fillOpacity:1, strokeColor:'#fff', strokeWeight:1.5 });
+  });
+}
+
+function renderTodayMapGrid() {
+  const kw = (document.getElementById('today-map-search')?.value || '').toLowerCase();
+  let list = pharmacies;
+  if (_todayMapActiveArea !== 'all') list = list.filter(p => (p.district||p.area||'') === _todayMapActiveArea);
+  if (kw) list = list.filter(p => (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw));
+  const grid = document.getElementById('today-map-grid');
+  if (!grid) return;
+  if (!list.length) { grid.innerHTML = `<div style="grid-column:1/-1;padding:16px;text-align:center;color:var(--muted);font-size:12px">此地區無藥局</div>`; return; }
+  grid.innerHTML = list.slice(0, 80).map(p => {
+    const pid = p.id||p['Customer_ID'];
+    const inTask = tasks.some(t => t.pharmacyId === pid);
+    const isDadPh = DAD_PHARMACY_IDS?.has(pid) || false;
+    let badge = '';
+    if (isDadPh) badge = `<span style="font-size:9px;background:var(--teal-light);color:var(--teal);border-radius:4px;padding:1px 5px;font-weight:700">👨‍⚕️</span>`;
+    return `<div class="today-ph-card ${inTask?'in-task':''}" onclick="mapTogglePharmacy('${pid}')">
+      ${inTask?`<span style="position:absolute;top:5px;right:5px;width:14px;height:14px;border-radius:50%;background:var(--green);color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;font-weight:700">✓</span>`:''}
+      <div style="font-size:10px;color:var(--accent);font-weight:700;margin-bottom:2px">${pid}</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:2px">${p.name||p['店名']}</div>
+      <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px">${p.address||p['地址']||''}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:10px;color:var(--text2)">👤 ${p.pharmacist||p['Key Man']||'—'}</span>
+        ${badge}
+      </div>
+    </div>`;
+  }).join('');
+  if (list.length > 80) grid.innerHTML += `<div style="grid-column:1/-1;font-size:11px;color:var(--muted);padding:6px;text-align:center">顯示前80筆，共${list.length}筆</div>`;
+}
+
+function mapTogglePharmacy(id) {
+  const p = pharmacies.find(x => (x.id||x['Customer_ID']) === id);
+  if (!p) return;
+  const idx = tasks.findIndex(t => t.pharmacyId === id);
+  if (idx >= 0) {
+    tasks.splice(idx, 1);
+    toast(`已移除：${p.name||p['店名']}`);
+  } else {
+    const type = document.getElementById('today-ph-type')?.value || 'visit';
+    tasks.push({ id: Date.now(), pharmacyId: id, name: p.name||p['店名'], addr: p.address||p['地址']||'', pharmacist: p.pharmacist||p['Key Man']||'', type, note: '', source: 'manual', taskMemo: '' });
+    toast(`✅ 加入：${p.name||p['店名']}`);
+  }
+  renderTaskChips();
+  updateTodayMapMarkers();
+  renderTodayMapGrid();
 }
 
 // ══════════════════════════════
