@@ -233,6 +233,7 @@ select.task-input{cursor:pointer}
 .e-q-pool{border-left:3px solid var(--muted);background:var(--surface2)}
 .e-q-dad{border-left:3px solid #d97706;background:#fffbeb}
 .e-q-newph{border-left:3px solid var(--purple);background:#faf5ff}
+.e-q-invoice{border-left:3px solid #0891b2;background:#f0f9ff}
 .e-q-example{font-size:10px;color:var(--muted2);line-height:1.5;margin-top:3px}
 .e-pool-section{margin-top:14px}
 .e-todo-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white);box-shadow:var(--shadow);cursor:grab;transition:all .15s}
@@ -402,6 +403,16 @@ let allVisitsCache = [];
       <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
     </div>
   </div>
+  <!-- 今日出貨 -->
+  <div class="card" id="today-orders-card" style="margin-bottom:16px;display:none">
+    <div class="card-header" style="padding:10px 16px 0">
+      <div class="card-title" style="font-size:13px;color:#0891b2">📦 今日出貨</div>
+      <span id="today-orders-count" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+    <div class="card-body" style="padding:8px 16px 12px">
+      <div id="today-orders-list"></div>
+    </div>
+  </div>
   <!-- 今日選店 -->
   <div class="card" style="margin-bottom:16px">
     <div class="card-header" style="padding:10px 16px 0">
@@ -416,12 +427,6 @@ let allVisitsCache = [];
             style="height:36px;padding:6px 12px">
           <div class="ph-dropdown" id="today-ph-dd"></div>
         </div>
-        <select class="task-input" id="today-ph-type" style="flex:none;width:140px;height:36px;padding:6px 10px">
-          <option value="visit">🔄 例行拜訪</option>
-          <option value="new">🆕 新藥局</option>
-          <option value="dad">👨‍⚕️ 爸爸客戶</option>
-          <option value="deliver">📦 自送</option>
-        </select>
         <button class="btn btn-primary btn-sm" onclick="addTaskToday()">＋ 加入</button>
         <button class="btn btn-ai btn-sm" id="today-sched-btn" onclick="runSchedule()">📍 計算最短路線</button>
         <button class="btn btn-ghost btn-sm" id="today-clear-btn" onclick="clearTodayTasks()" style="display:none">🗑 清除任務</button>
@@ -702,6 +707,19 @@ let allVisitsCache = [];
     </div>
   </div>
   <div class="e-pool-section">
+    <div class="e-quadrant e-q-invoice">
+      <div class="e-q-header">
+        <span class="e-q-icon">📋</span>
+        <div>
+          <div class="e-q-title" style="color:#0891b2">帳務清單</div>
+          <div class="e-q-sub">月初寄單 · 月底請款 · 從訂單主檔自動帶入</div>
+        </div>
+        <button onclick="loadInvoiceTasks(true)" class="btn btn-ghost btn-sm" style="flex-shrink:0;font-size:11px">🔄 重新載入</button>
+      </div>
+      <div id="eq-invoice"></div>
+    </div>
+  </div>
+  <div class="e-pool-section">
     <div class="e-quadrant" style="border-left:3px solid #f59e0b;background:#fffbeb">
       <div class="e-q-header">
         <span class="e-q-icon">🔍</span>
@@ -925,6 +943,8 @@ async function init() {
   loadAllVisits();
   await loadTodos();
   loadTodayFromCalendar(true);
+  loadTodayOrders();
+  loadInvoiceTasks();
   const _dvDateInit = document.getElementById('new-visit-date');
   if (_dvDateInit) _dvDateInit.value = fmtDs(new Date());
 }
@@ -1198,12 +1218,11 @@ function addTaskToday() {
   if (!name) { toast('請輸入藥局名稱'); return; }
   const id = inp?.dataset.phId || '';
   const addr = inp?.dataset.phAddr || '';
-  const type = document.getElementById('today-ph-type')?.value || 'visit';
   const found = id ? pharmacies.find(p => (p.id||p['Customer_ID']||'') === id) : null;
   if (id && isDead(id)) {
     if (!confirm(`「${name}」已被標記為死客戶，確定要加入？`)) return;
   }
-  tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: found?.pharmacist||found?.['Key Man']||'', type, note: '', source: 'manual', taskMemo: '' });
+  tasks.push({ id: Date.now(), pharmacyId: id, name, addr, pharmacist: found?.pharmacist||found?.['Key Man']||'', source: 'manual', taskMemo: '' });
   renderTaskChips();
   if (inp) { inp.value = ''; inp.dataset.phId = ''; inp.dataset.phAddr = ''; }
   toast(`✅ ${name} 已加入`);
@@ -1216,12 +1235,13 @@ function renderTaskChips() {
   if (!tasks.length) { el.innerHTML = ''; if (clearBtn) clearBtn.style.display = 'none'; updateTodayMapMarkers(); renderTodayMapGrid(); return; }
   if (clearBtn) clearBtn.style.display = '';
   el.innerHTML = tasks.map((t,i) => {
-    const typeColor = {visit:'var(--accent)',new:'var(--purple)',dad:'var(--teal)',deliver:'var(--green)'}[t.type]||'var(--accent)';
-    const isCalTask = t.source === 'calendar_task';
-    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:${typeColor}18;color:${typeColor};font-size:12px;font-weight:600;${isCalTask?`border:1px solid ${typeColor}`:''}"
-      title="${isCalTask && t.taskMemo ? '任務：' + t.taskMemo : t.name}">
-      ${isCalTask ? '📌 ' : ''}${t.name}
-      <span onclick="removeTask(${t.id});renderTaskChips()" style="cursor:pointer;color:${typeColor};font-size:14px;line-height:1">×</span>
+    const srcColor = {calendar_task:'var(--accent)',delivery:'var(--green)',invoice:'#0891b2'}[t.source]||'var(--muted2)';
+    const srcPrefix = {calendar_task:'📌 ',delivery:'📦 ',invoice:'📋 '}[t.source]||'';
+    const hasBorder = t.source === 'calendar_task';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:${srcColor}18;color:${srcColor};font-size:12px;font-weight:600;${hasBorder?`border:1px solid ${srcColor}`:''}"
+      title="${t.taskMemo ? t.taskMemo : t.name}">
+      ${srcPrefix}${t.name}
+      <span onclick="removeTask(${t.id});renderTaskChips()" style="cursor:pointer;color:${srcColor};font-size:14px;line-height:1">×</span>
     </span>`;
   }).join('');
   updateTodayMapMarkers();
@@ -1709,13 +1729,159 @@ async function loadTodayFromCalendar(silent) {
       existing.source = 'calendar_task';
     } else {
       const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === g.pharmacyId);
-      tasks.push({ id: Date.now() + i * 1000, pharmacyId: g.pharmacyId, name: g.pharmacyName, addr: ph ? (ph.address||ph['地址']||'') : '', pharmacist: ph ? (ph.pharmacist||ph['Key Man']||'') : '', type: 'visit', note: '', source: 'calendar_task', taskMemo: g.memos.join('、') });
+      tasks.push({ id: Date.now() + i * 1000, pharmacyId: g.pharmacyId, name: g.pharmacyName, addr: ph ? (ph.address||ph['地址']||'') : '', pharmacist: ph ? (ph.pharmacist||ph['Key Man']||'') : '', source: 'calendar_task', taskMemo: g.memos.join('、') });
       added++;
     }
   });
   renderTaskChips();
   renderTodayRoute();
   if (!silent) toast(`✅ 已載入 ${Object.keys(grouped).length} 家任務店`);
+}
+
+// ══════════════════════════════
+// 今日出貨
+// ══════════════════════════════
+async function loadTodayOrders() {
+  const card = document.getElementById('today-orders-card');
+  const list = document.getElementById('today-orders-list');
+  if (!card || !list) return;
+  try {
+    const d = await get('/today-orders');
+    if (!d.ok || !d.orders || !d.orders.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    document.getElementById('today-orders-count').textContent = `${d.orders.length} 筆訂單`;
+    list.innerHTML = d.orders.map(o => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);last-child:border-none">
+        <div>
+          <span style="font-size:13px;font-weight:600">${o.storeName}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:6px">$${(o.totalAmount||0).toLocaleString()}</span>
+          <span style="font-size:10px;color:var(--muted2);margin-left:4px">訂單 #${o.orderNo}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="font-size:11px"
+          onclick="addDeliveryTask('${o.storeCode}','${o.storeName.replace(/'/g,"\\'")}')">📦 自送加入行程</button>
+      </div>
+    `).join('');
+    document.getElementById('stat-deliver').textContent = d.orders.length;
+  } catch(e) {
+    card.style.display = 'none';
+  }
+}
+
+function addDeliveryTask(storeCode, storeName) {
+  const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === storeCode);
+  const addr = ph?.address || ph?.['地址'] || '';
+  const pharmacist = ph?.pharmacist || ph?.['Key Man'] || '';
+  if (tasks.find(t => t.pharmacyId === storeCode)) { toast(`${storeName} 已在行程中`); return; }
+  tasks.push({ id: Date.now(), pharmacyId: storeCode, name: storeName, addr, pharmacist, source: 'delivery', taskMemo: '自送出貨' });
+  renderTaskChips();
+  toast(`✅ ${storeName} 已加入（自送）`);
+}
+
+// ══════════════════════════════
+// 帳務清單（寄單 + 請款）
+// ══════════════════════════════
+let invoiceCache = { invoicing: [], collection: [], loaded: false };
+
+async function loadInvoiceTasks(force) {
+  const el = document.getElementById('eq-invoice');
+  if (!el) return;
+  if (!invoiceCache.loaded || force) {
+    el.innerHTML = `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">載入中…</div>`;
+    try {
+      const d = await get('/invoice-tasks');
+      if (d.ok) invoiceCache = { invoicing: d.invoicing||[], collection: d.collection||[], loaded: true };
+    } catch(e) {
+      el.innerHTML = `<div style="text-align:center;padding:14px;color:var(--red);font-size:12px">載入失敗</div>`;
+      return;
+    }
+  }
+  renderInvoicePool();
+}
+
+function renderInvoicePool() {
+  const el = document.getElementById('eq-invoice');
+  if (!el) return;
+  const { invoicing, collection } = invoiceCache;
+  if (!invoicing.length && !collection.length) {
+    el.innerHTML = `<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">目前無待處理帳務</div>`;
+    return;
+  }
+  const dom = new Date().getDate();
+  const isMonthStart = dom <= 10;
+  const isMonthEnd   = dom >= 21;
+  let html = '';
+  if (invoicing.length) {
+    html += `<div style="font-size:11px;font-weight:700;color:#0891b2;margin-bottom:6px">
+      📋 待寄單（${invoicing.length} 筆）${isMonthStart ? ' <span style="color:var(--orange)">· ⏰ 月初排程中</span>' : ''}
+    </div>`;
+    html += invoicing.map(o => invoiceItemHtml(o, 'invoicing')).join('');
+  }
+  if (collection.length) {
+    if (invoicing.length) html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+    html += `<div style="font-size:11px;font-weight:700;color:#059669;margin-bottom:6px">
+      💰 待請款（${collection.length} 筆）${isMonthEnd ? ' <span style="color:var(--orange)">· ⏰ 月底排程中</span>' : ''}
+    </div>`;
+    html += collection.map(o => invoiceItemHtml(o, 'collection')).join('');
+  }
+  el.innerHTML = html;
+}
+
+function invoiceItemHtml(o, kind) {
+  const color = kind === 'invoicing' ? '#0891b2' : '#059669';
+  const label = kind === 'invoicing' ? '寄單' : '請款';
+  const icon  = kind === 'invoicing' ? '📋' : '💰';
+  const sn = (o.storeName||'').replace(/'/g,"\\'");
+  const sc = o.storeCode||'';
+  const on = o.orderNo||'';
+  const kd = kind;
+  return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
+    <span style="padding:2px 7px;border-radius:10px;background:${color}15;color:${color};font-size:10px;font-weight:700;white-space:nowrap">${icon} ${label}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.storeName}</div>
+      <div style="color:var(--muted);font-size:10px">訂單 #${o.orderNo} · ${o.orderDate} · $${(o.totalAmount||0).toLocaleString()}</div>
+    </div>
+    <div style="display:flex;gap:4px;flex-shrink:0">
+      <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px"
+        onclick="addInvoiceToRoute('${sc}','${sn}','${label}')">加入行程</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px"
+        onclick="scheduleInvoiceTodo('${sc}','${sn}','${kd}','${on}')">排月曆</button>
+    </div>
+  </div>`;
+}
+
+function addInvoiceToRoute(storeCode, storeName, label) {
+  const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === storeCode);
+  const addr = ph?.address || ph?.['地址'] || '';
+  if (tasks.find(t => t.pharmacyId === storeCode)) { toast(`${storeName} 已在行程中`); return; }
+  tasks.push({ id: Date.now(), pharmacyId: storeCode, name: storeName, addr,
+    pharmacist: ph?.pharmacist||ph?.['Key Man']||'', source: 'invoice', taskMemo: label });
+  renderTaskChips();
+  nav(document.querySelectorAll('.nav-tab')[0], 'today');
+  toast(`✅ ${storeName} 已加入今日行程（${label}）`);
+}
+
+async function scheduleInvoiceTodo(storeCode, storeName, kind, orderNo) {
+  const label = kind === 'invoicing' ? '寄單' : '請款';
+  const dateStr = prompt(`將「${storeName}」${label}排入哪一天？\n（格式：YYYY-MM-DD，例如 2026-08-05）`);
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { if (dateStr !== null) toast('日期格式錯誤，請用 YYYY-MM-DD'); return; }
+  const task = `${label}：${storeName}（訂單 #${orderNo}）`;
+  const newTodo = {
+    task,
+    quadrant: 'invoice',
+    pharmacyId: storeCode,
+    pharmacyName: storeName,
+    scheduledDate: dateStr,
+    type: kind === 'invoicing' ? 'return_receipt' : 'get_receipt',
+  };
+  const res = await todoApiCreate(newTodo);
+  if (res?.todo) {
+    todosCache.push(res.todo);
+    const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === storeCode);
+    _syncTodoPhToCalPlan({ pharmacyId: storeCode, pharmacyName: storeName,
+      address: ph?.address||ph?.['地址']||'' }, dateStr);
+    renderEisenhower(); renderCalTodoPool(); renderCalendar();
+    toast(`✅ 已排入 ${dateStr}`);
+  }
 }
 
 // ══════════════════════════════
@@ -1908,7 +2074,8 @@ function nav(tabEl, pageId) {
     renderCalTodoPool();
     if (!allVisitsCache.length) loadAllVisits();
   }
-  if (pageId === 'today' && !tasks.length) loadTodayFromCalendar(true);
+  if (pageId === 'today') { loadTodayOrders(); if (!tasks.length) loadTodayFromCalendar(true); }
+  if (pageId === 'todo') loadInvoiceTasks();
 }
 
 // ══════════════════════════════
@@ -2766,6 +2933,7 @@ const QMETA = {
   iv:           {color:'var(--muted2)', label:'🗑 不緊急不重要'},
   pool:         {color:'var(--muted)',  label:'📦 待辦池'},
   dad:          {color:'#d97706',       label:'👴 老爸聯絡事項'},
+  invoice:      {color:'#0891b2',       label:'📋 帳務清單'},
   pending_newph:{color:'#f59e0b',       label:'🔍 待審視藥局'},
   newph:        {color:'var(--purple)', label:'🆕 新開藥局'},
 };
@@ -2773,7 +2941,7 @@ let DAD_PHARMACY_IDS = new Set();
 const TYPE_ICON = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
 
 function renderEisenhower() {
-  ['ui','ii','iii','iv','pool','dad','pending_newph','newph'].forEach(q => {
+  ['ui','ii','iii','iv','pool','dad','invoice','pending_newph','newph'].forEach(q => {
     const el = document.getElementById('eq-' + q);
     if (!el) return;
     const items = todosCache.filter(t => (t.quadrant||'pool') === q && !t.done && !t.scheduledDate);
@@ -3183,12 +3351,15 @@ async function quickAddNewPh() {
   const name = (nameEl?.value || '').trim();
   const addr = (addrEl?.value || '').trim();
   if (!name) { toast('請輸入藥局名稱'); nameEl?.focus(); return; }
+  const cityMatch = addr.match(/(台北市|臺北市|新北市|基隆市|桃園市|新竹市|新竹縣)/);
+  const newPhCity = cityMatch ? cityMatch[1].replace('臺北市', '台北市') : '';
   const created = await todoApiCreate({
     task: name,
     quadrant: 'newph',
     pharmacyId: '',
     pharmacyName: name,
     newPhAddress: addr,
+    newPhCity,
     type: 'revisit',
     done: false,
     scheduledDate: null,
