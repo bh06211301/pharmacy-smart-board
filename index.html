@@ -1344,9 +1344,16 @@ async function runSchedule() {
       }
       return { address: query + ' 台灣' };
     };
-    const intermediates = await Promise.all(enriched.map(t =>
-      t.addr ? Promise.resolve({ address: t.addr }) : _geocode(t.name + ' 台灣')
-    ));
+    const intermediates = await Promise.all(enriched.map(t => {
+      // 優先用 pharmacies 陣列的 lat/lng
+      const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === t.pharmacyId);
+      if (ph?.lat && ph?.lng) return Promise.resolve({ location: { latLng: { latitude: ph.lat, longitude: ph.lng } } });
+      // 再用地址
+      const addr = t.addr || ph?.address || ph?.['地址'] || '';
+      if (addr) return Promise.resolve({ address: addr });
+      // 最後用店名 geocode
+      return _geocode(t.name);
+    }));
     console.log('[路線] intermediates:', intermediates);
     const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
