@@ -1345,11 +1345,13 @@ async function runSchedule() {
       }
     });
     const svc = new google.maps.DirectionsService();
+    const waypoints = enriched.map(t => ({ location: t.addr || t.name, stopover: true }));
+    console.log('[路線計算] waypoints:', waypoints.map(w => w.location));
     const result = await new Promise((res, rej) => {
       svc.route({
         origin: '新北市汐止區湖東街五巷25號',
         destination: '台北市內湖區新民街422號',
-        waypoints: enriched.map(t => ({ location: t.addr || t.name, stopover: true })),
+        waypoints,
         optimizeWaypoints: true,
         travelMode: google.maps.TravelMode.DRIVING,
       }, (r, status) => status === 'OK' ? res(r) : rej(new Error('路線計算失敗：' + status)));
