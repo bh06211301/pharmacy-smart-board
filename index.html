@@ -1864,28 +1864,27 @@ function groupedCollectionHtml(items) {
   return groups.map(g => {
     const sn = (g.first.storeName||'').replace(/'/g,"\\'");
     const sc = g.first.storeCode||'';
+    const inPool = todosCache.some(t => t.pharmacyId === sc && t.type === 'get_receipt' && !t.done);
     const rows = g.orders.map(o => {
       const on = o.orderNo||'';
       return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 12px;font-size:11px;color:var(--muted)">
         <span style="color:#059669;font-size:10px">💰</span>
         <span style="flex:1">#${on} · ${o.orderDate} · $${(o.totalAmount||0).toLocaleString()}</span>
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px"
-          onclick="scheduleInvoiceTodo('${sc}','${sn}','collection','${on}')">排月曆</button>
       </div>`;
     }).join('');
-    return `<div draggable="true"
-      ondragstart="invoiceCardDragStart(event,'${sc}','${sn}')"
-      ondragend="invoiceCardDragEnd(event)"
-      style="padding:5px 0;border-bottom:1px solid var(--border);cursor:grab">
+    const poolBtn = inPool
+      ? `<span style="font-size:10px;color:#7c3aed;padding:2px 8px;background:#f3e8ff;border-radius:6px">📦 已在待辦池</span>`
+      : `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#7c3aed"
+          onclick="event.stopPropagation();addInvoiceToPool('${sc}','${sn}')">📦 待辦池</button>`;
+    return `<div style="padding:5px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
         <span style="font-weight:600;font-size:12px">${g.first.storeName}</span>
-        <div style="display:flex;gap:4px">
+        <div style="display:flex;gap:4px;align-items:center">
           <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px"
-            onclick="event.stopPropagation();addInvoiceToRoute('${sc}','${sn}','請款')">加入行程</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#7c3aed"
-            onclick="event.stopPropagation();addInvoiceToPool('${sc}','${sn}')">📦 待辦池</button>
+            onclick="addInvoiceToRoute('${sc}','${sn}','請款')">加入行程</button>
+          ${poolBtn}
           <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#059669"
-            onclick="event.stopPropagation();doneInvoiceStore('${sc}')">✓ 完成</button>
+            onclick="doneInvoiceStore('${sc}')">✓ 完成</button>
         </div>
       </div>
       ${rows}
@@ -1925,7 +1924,7 @@ async function addInvoiceToPool(storeCode, storeName) {
   });
   if (res?.todo) {
     todosCache.push(res.todo);
-    renderEisenhower(); renderCalTodoPool(); updateTodoBadge();
+    renderEisenhower(); renderCalTodoPool(); updateTodoBadge(); renderInvoicePool();
     toast(`✅ 已加入待辦池，切到月曆 tab 即可排入日期`);
   }
 }
