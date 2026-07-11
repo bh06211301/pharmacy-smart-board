@@ -1354,7 +1354,6 @@ async function runSchedule() {
       // 最後用店名 geocode
       return _geocode(t.name);
     }));
-    console.log('[路線] intermediates:', intermediates);
     const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
       headers: {
