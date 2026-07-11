@@ -1882,6 +1882,8 @@ function groupedCollectionHtml(items) {
         <div style="display:flex;gap:4px">
           <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px"
             onclick="event.stopPropagation();addInvoiceToRoute('${sc}','${sn}','請款')">加入行程</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#7c3aed"
+            onclick="event.stopPropagation();addInvoiceToPool('${sc}','${sn}')">📦 待辦池</button>
           <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#059669"
             onclick="event.stopPropagation();doneInvoiceStore('${sc}')">✓ 完成</button>
         </div>
@@ -1899,6 +1901,33 @@ function doneInvoiceStore(sc) {
   if (!done.includes(sc)) { done.push(sc); localStorage.setItem('invoice_collection_done', JSON.stringify(done)); }
   renderInvoicePool();
   toast('✓ 已標記完成');
+}
+
+async function moveDadToPool(id) {
+  const item = todosCache.find(t => t.id === id);
+  if (!item) return;
+  item.quadrant = 'pool';
+  renderEisenhower(); renderCalTodoPool(); updateTodoBadge();
+  toast('✅ 已移到待辦池，切到月曆 tab 可排入日期');
+  await todoApiUpdate(id, { quadrant: 'pool' });
+}
+
+async function addInvoiceToPool(storeCode, storeName) {
+  const dup = todosCache.find(t => t.pharmacyId === storeCode && t.type === 'get_receipt' && !t.done && !t.scheduledDate);
+  if (dup) { toast(`${storeName} 已在待辦池`); return; }
+  const res = await todoApiCreate({
+    task: `請款：${storeName}`,
+    quadrant: 'pool',
+    done: false,
+    pharmacyId: storeCode,
+    pharmacyName: storeName,
+    type: 'get_receipt'
+  });
+  if (res?.todo) {
+    todosCache.push(res.todo);
+    renderEisenhower(); renderCalTodoPool(); updateTodoBadge();
+    toast(`✅ 已加入待辦池，切到月曆 tab 即可排入日期`);
+  }
 }
 
 let _invoiceDragging = null;
@@ -3217,7 +3246,11 @@ function renderTodoCard(t) {
         </div>
         ${sourceLink}
       </div>
-      <button class="del-btn" onclick="todoDelete('${t.id}')">✕</button>
+      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+        ${t.quadrant === 'dad' && !t.done ? `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#7c3aed;white-space:nowrap"
+          onclick="moveDadToPool('${t.id}')">→ 待辦池</button>` : ''}
+        <button class="del-btn" onclick="todoDelete('${t.id}')">✕</button>
+      </div>
     </div>
   </div>`;
 }
