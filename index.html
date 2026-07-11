@@ -1334,13 +1334,15 @@ async function runSchedule() {
       return { ...t, isNew: t.type==='new', isDad: t.type==='dad', hasDelivery: t.type==='deliver' };
     }));
     const _geocode = async (query) => {
-      const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GMAPS_KEY}`);
+      // bounds 偏移至大台北地區（汐止/台北/新北）
+      const bounds = '24.9,121.4|25.2,121.75';
+      const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query + ' 台灣')}&bounds=${bounds}&region=TW&key=${GMAPS_KEY}`);
       const d = await r.json();
       if (d.results?.length) {
         const { lat, lng } = d.results[0].geometry.location;
         return { location: { latLng: { latitude: lat, longitude: lng } } };
       }
-      return { address: query };
+      return { address: query + ' 台灣' };
     };
     const intermediates = await Promise.all(enriched.map(t =>
       t.addr ? Promise.resolve({ address: t.addr }) : _geocode(t.name + ' 台灣')
