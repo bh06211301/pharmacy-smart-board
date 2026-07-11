@@ -1862,19 +1862,19 @@ function groupedCollectionHtml(items) {
     const sc = g.first.storeCode||'';
     const rows = g.orders.map(o => {
       const on = o.orderNo||'';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 8px;border-bottom:1px solid var(--border);font-size:12px">
-        <span style="padding:2px 7px;border-radius:10px;background:#05996915;color:#059669;font-size:10px;font-weight:700;white-space:nowrap">💰 請款</span>
-        <div style="flex:1;min-width:0;color:var(--muted);font-size:11px">#${on} · ${o.orderDate} · $${(o.totalAmount||0).toLocaleString()}</div>
-        <div style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px"
-            onclick="addInvoiceToRoute('${sc}','${sn}','請款')">加入行程</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px"
-            onclick="scheduleInvoiceTodo('${sc}','${sn}','collection','${on}')">排月曆</button>
-        </div>
+      return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 12px;font-size:11px;color:var(--muted)">
+        <span style="color:#059669;font-size:10px">💰</span>
+        <span style="flex:1">#${on} · ${o.orderDate} · $${(o.totalAmount||0).toLocaleString()}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px"
+          onclick="scheduleInvoiceTodo('${sc}','${sn}','collection','${on}')">排月曆</button>
       </div>`;
     }).join('');
-    return `<div style="margin-bottom:4px">
-      <div style="font-weight:600;font-size:12px;padding:6px 0 3px;border-bottom:1px solid var(--border)">${g.first.storeName}</div>
+    return `<div style="padding:5px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+        <span style="font-weight:600;font-size:12px">${g.first.storeName}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px"
+          onclick="addInvoiceToRoute('${sc}','${sn}','請款')">加入行程</button>
+      </div>
       ${rows}
     </div>`;
   }).join('');
