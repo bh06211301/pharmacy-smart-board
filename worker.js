@@ -41,8 +41,17 @@ const CORS_HEADERS = {
 //   createdAt
 //
 // 【有效象限值】前端 QMETA 與此處 AI prompt 必須一致
-//   ui | ii | iii | iv | pool | dad | pending_newph | newph
-//   AI 只建議前五種（dad / pending_newph / newph 由系統自動設定）
+//   ui | ii | iii | iv | pool | dad | pending_newph | newph | invoice
+//   AI 只建議前五種（dad / pending_newph / newph / invoice 由系統自動設定）
+//
+// 【/today-orders — 今日出貨清單（訂單主檔）】
+//   GET  → { ok, date, orders: [{orderNo,storeCode,storeName,totalAmount,status}] }
+//   SHEET_ORDER_MASTER = 1qa5aqeAPZlo8hyNMA6xD4VCk334B3pnhKyLSkBbhcmo
+//
+// 【/invoice-tasks — 帳務清單（寄單/請款）】
+//   GET  → { ok, invoicing:[...], collection:[...] }
+//   invoicing : 紅單實體狀態=寄賣中(資料夾) AND 今月 >= 訂單月+7
+//   collection: 紅單實體狀態=待請款(已寄單)
 //
 // 【POST /add-visit 期望欄位】
 //   action, visitId, pharmacyName, pharmacyId, date, purpose, content
@@ -162,6 +171,16 @@ export default {
       // ★ 爸爸客戶清單（KV 持久化）
       if (path === '/dad-pharmacies') {
         return await handleDadPharmacies(request, env);
+      }
+
+      // ★ 今日出貨清單（訂單主檔）
+      if (path === '/today-orders' && request.method === 'GET') {
+        return await handleTodayOrders(env);
+      }
+
+      // ★ 帳務清單（寄單 + 請款）
+      if (path === '/invoice-tasks' && request.method === 'GET') {
+        return await handleInvoiceTasks(env);
       }
 
       return json({ error: '找不到這個 endpoint' }, 404);
@@ -855,6 +874,7 @@ async function handleAiTodoSuggest(request, env) {
 - iii（緊急不重要）：有時效但不影響業績，如交辦文件、例行回報、轉達訊息
 - iv（不緊急不重要）：可延後或刪除，如資料整理、非必要瑣事
 - pool（待辦池）：優先級不明確、需要再評估，或目前無法判斷的事項
+- invoice（帳務清單）：寄單/請款相關事項，由系統從訂單主檔自動建立，不建議手動歸類
 
 輸出 JSON：
 {"suggestedQuadrant":"ui|ii|iii|iv|pool","suggestions":["準備事項1","準備事項2","準備事項3"]}
@@ -1103,6 +1123,97 @@ async function handleDadPharmacies(request, env) {
     return json({ ok: true, ids: updated });
   }
   return json({ error: '不支援此 method' }, 405);
+}
+
+// ============================================================
+// 工具：解析 gviz 日期格式（"Date(2026,6,11)" 或 "2026/7/9"）
+// ============================================================
+function parseGvizDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (s.startsWith('Date(')) {
+    const parts = s.slice(5, -1).split(',');
+    const y = parseInt(parts[0]);
+    const m = parseInt(parts[1]) + 1;
+    const d = parseInt(parts[2]);
+    return `${y}/${m}/${d}`;
+  }
+  return s;
+}
+
+// 判斷是否已到寄單時機：今月 >= 訂單月+7
+function needsInvoicing(orderDateStr, now) {
+  const parts = orderDateStr.split('/');
+  if (parts.length < 2) return false;
+  const orderYear = parseInt(parts[0]);
+  const orderMonth = parseInt(parts[1]) - 1; // 0-indexed
+  const threshold = new Date(orderYear, orderMonth + 7, 1);
+  return now >= threshold;
+}
+
+// 共用：讀取訂單主檔所有列
+async function fetchOrderMasterRows(env) {
+  const sheetId = env.SHEET_ORDER_MASTER;
+  if (!sheetId) throw new Error('未設定 SHEET_ORDER_MASTER');
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+  const rows = data?.table?.rows || [];
+  const cols = data?.table?.cols || [];
+  const colMap = {};
+  cols.forEach((c, i) => { colMap[c.label] = i; });
+  return { rows, colMap };
+}
+
+// ============================================================
+// 今日出貨清單
+// ============================================================
+async function handleTodayOrders(env) {
+  const { rows, colMap } = await fetchOrderMasterRows(env);
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}/${today.getMonth()+1}/${today.getDate()}`;
+  const orders = [];
+  rows.forEach(row => {
+    const orderDate = parseGvizDate(row.c[colMap['訂單日期']]?.v || '');
+    if (orderDate !== todayStr) return;
+    const storeCode   = String(row.c[colMap['店名']]?.v || '').trim();
+    const storeName   = String(row.c[colMap['店名_中文']]?.v || storeCode).trim();
+    const totalAmount = parseFloat(row.c[colMap['總金額']]?.v || 0);
+    const status      = String(row.c[colMap['紅單實體狀態']]?.v || '').trim();
+    const orderNo     = String(row.c[colMap['訂單編號']]?.v || '').trim();
+    if (!storeCode) return;
+    orders.push({ orderNo, storeCode, storeName, totalAmount, status });
+  });
+  return json({ ok: true, date: todayStr, orders });
+}
+
+// ============================================================
+// 帳務清單（寄單 + 請款）
+// ============================================================
+async function handleInvoiceTasks(env) {
+  const { rows, colMap } = await fetchOrderMasterRows(env);
+  const now = new Date();
+  const invoicing  = [];
+  const collection = [];
+  rows.forEach(row => {
+    const status      = String(row.c[colMap['紅單實體狀態']]?.v || '').trim();
+    const storeCode   = String(row.c[colMap['店名']]?.v || '').trim();
+    const storeName   = String(row.c[colMap['店名_中文']]?.v || storeCode).trim();
+    const totalAmount = parseFloat(row.c[colMap['總金額']]?.v || 0);
+    const orderNo     = String(row.c[colMap['訂單編號']]?.v || '').trim();
+    const orderDate   = parseGvizDate(row.c[colMap['訂單日期']]?.v || '');
+    if (!storeCode) return;
+    if (status === '寄賣中(資料夾)') {
+      if (orderDate && needsInvoicing(orderDate, now)) {
+        invoicing.push({ orderNo, storeCode, storeName, totalAmount, orderDate });
+      }
+    } else if (status === '待請款(已寄單)') {
+      collection.push({ orderNo, storeCode, storeName, totalAmount, orderDate });
+    }
+  });
+  return json({ ok: true, invoicing, collection });
 }
 
 // ============================================================
