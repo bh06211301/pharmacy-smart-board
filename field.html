@@ -610,8 +610,8 @@ body{
   <div id="main-wrap">
     <div class="section-title" id="main-section-title">今日優先拜訪</div>
     <div id="plan-source-badge" style="display:none;margin-bottom:10px;padding:8px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:13px;color:#1d4ed8;font-weight:600">
-      📅 依照今日計畫順序
-      <span style="font-size:11px;font-weight:400;color:#3b82f6;margin-left:6px">（從主頁面月曆匯入）</span>
+      📋 今日任務清單
+      <span id="plan-source-sub" style="font-size:11px;font-weight:400;color:#3b82f6;margin-left:6px">（從待辦清單載入）</span>
     </div>
     <div id="mission-banner" class="mission-banner">
       <div class="trophy">🏆</div>
@@ -1248,6 +1248,7 @@ function renderCard(ph) {
       <div class="cs-item">💰 <strong>${aText}</strong></div>
       ${ph.hasPending ? '<div class="cs-item">📌 <strong>有待追蹤</strong></div>' : ''}
     </div>
+    ${ph.taskMemo ? `<div style="margin:6px 0 2px;padding:6px 10px;background:#f0fdf4;border-left:3px solid #16a34a;border-radius:6px;font-size:12px;color:#166534">📋 ${ph.taskMemo}</div>` : ''}
     ${!isDone ? `
     <button class="checkin-btn" onclick="openBrief('${ph.id}')">
       📍 前往 + AI提醒
@@ -1264,7 +1265,7 @@ function render() {
 
   if (!cards.length) {
     wrap.innerHTML = usingCalendarPlan
-      ? '<div class="loading-wrap">今日計畫尚未排入藥局，請到主頁面月曆新增</div>'
+      ? '<div class="loading-wrap">今日待辦清單尚未排入任何任務，請到主頁面待辦清單排入今日</div>'
       : '<div class="loading-wrap">找不到今日推薦藥局</div>';
     return;
   }
@@ -1383,21 +1384,25 @@ let usingCalendarPlan = false;
 
 async function loadData() {
   try {
-    const [recRes, stRes, visitsRes] = await Promise.all([
+    const [recRes, stRes, visitsRes, todosRes] = await Promise.all([
       fetch(WORKER + '/recommend-today'),
       fetch(WORKER + '/customer-status').catch(() => null),
       fetch(WORKER + '/all-visits').catch(() => null),
+      fetch(WORKER + '/todos-v2').catch(() => null),
     ]);
 
     const recJson    = await recRes.json();
     const stJson     = stRes     ? await stRes.json().catch(() => ({})) : {};
     const visitsJson = visitsRes ? await visitsRes.json().catch(() => []) : [];
+    const todosJson  = todosRes  ? await todosRes.json().catch(() => []) : [];
 
     const statuses  = stJson.statuses || {};
     const allVisits = Array.isArray(visitsJson)
       ? visitsJson
       : (visitsJson.visits || visitsJson.records || []);
     const visitMap  = buildVisitMap(allVisits);
+    const todos     = Array.isArray(todosJson) ? todosJson : (todosJson.todos || []);
+    const today     = todayStr();
 
     // all = 全部藥局（新版worker），fallback 到 recommended（舊版相容）
     const allRecs = recJson.all || recJson.recommended || recJson.recommendations || recJson || [];
@@ -1407,62 +1412,86 @@ async function loadData() {
     const recMap = {};
     allRecs.forEach(p => {
       recMap[p.id]   = p;
-      recMap[p.name] = p;   // 店名也存一份，給 calendarPlan 備用
+      recMap[p.name] = p;
     });
 
-    // ── 優先讀取 index.html 排好的今日計畫 ────────────────────
-    const calendarPlan = JSON.parse(localStorage.getItem('calendarPlan') || '{}');
-    const todayPlan    = calendarPlan[todayStr()];
-    const planPhs      = todayPlan?.pharmacies || [];
+    // helper：把 pharmacyId/name 的基本資料組成 card
+    const buildCard = (id, name, address, memos) => {
+      const rec = recMap[id] || recMap[name] || {};
+      const vs  = visitMap[name] || visitMap[id] || null;
+      let daysSince = rec.daysSince ?? null;
+      if (daysSince === null && vs?.lastVisit?.date) {
+        daysSince = Math.round(
+          (new Date() - new Date(vs.lastVisit.date.replace(/\//g, '-'))) / 86400000
+        );
+      }
+      return {
+        id,
+        name,
+        district:    rec.district || '',
+        daysSince,
+        totalAmount: rec.totalAmount || 0,
+        hasPending:  rec.hasPending || false,
+        neverVisited:daysSince === null && !vs,
+        visitStats:  vs,
+        lat:         rec.lat || rec.latitude || null,
+        lng:         rec.lng || rec.longitude || null,
+        addr:        address || rec.address || rec.addr || '',
+        taskMemo:    memos ? memos.join('、') : undefined,
+      };
+    };
 
-    if (planPhs.length > 0) {
+    // ── 第一優先：今日排定的待辦任務（todos-v2 scheduledDate === today）────
+    const dayTodos = todos.filter(t => !t.done && t.scheduledDate === today && t.pharmacyId);
+
+    if (dayTodos.length > 0) {
       usingCalendarPlan = true;
-      cards = planPhs
-        .filter(p => statuses[p.id] !== 'dead' && statuses[p.name] !== 'dead')
-        .map(p => {
-          // 優先用 id 查，找不到改用藥局名稱（visitMap 是用店名當 key）
-          const rec = recMap[p.id] || recMap[p.name] || {};
-          // visitMap 是用店名當 key（worker /all-visits 的 pharmacyId 欄位是店名）
-          const vs  = visitMap[p.name] || visitMap[p.id] || null;
-          // 從 rec 取 daysSince；若 rec 找不到，從 visitStats 的 lastVisit 計算
-          let daysSince = rec.daysSince ?? null;
-          if (daysSince === null && vs?.lastVisit?.date) {
-            daysSince = Math.round(
-              (new Date() - new Date(vs.lastVisit.date.replace(/\//g, '-'))) / 86400000
-            );
-          }
-          return {
+      const subEl = document.getElementById('plan-source-sub');
+      if (subEl) subEl.textContent = '（從待辦清單載入）';
+      const grouped = {};
+      dayTodos.forEach(t => {
+        if (!grouped[t.pharmacyId]) {
+          grouped[t.pharmacyId] = { id: t.pharmacyId, name: t.pharmacyName || t.pharmacyId, memos: [] };
+        }
+        grouped[t.pharmacyId].memos.push(t.task);
+      });
+      cards = Object.values(grouped)
+        .filter(g => statuses[g.id] !== 'dead' && statuses[g.name] !== 'dead')
+        .map(g => buildCard(g.id, g.name, '', g.memos));
+
+    } else {
+      // ── 第二優先：localStorage calendarPlan（舊版月曆計畫相容）────
+      const calendarPlan = JSON.parse(localStorage.getItem('calendarPlan') || '{}');
+      const planPhs      = calendarPlan[today]?.pharmacies || [];
+
+      if (planPhs.length > 0) {
+        usingCalendarPlan = true;
+        const subEl = document.getElementById('plan-source-sub');
+        if (subEl) subEl.textContent = '（從月曆計畫載入）';
+        cards = planPhs
+          .filter(p => statuses[p.id] !== 'dead' && statuses[p.name] !== 'dead')
+          .map(p => buildCard(p.id, p.name, p.address));
+
+      } else {
+        // ── 最後：AI 推薦清單 ─────────────────────────────────────
+        usingCalendarPlan = false;
+        cards = recs
+          .filter(p => statuses[p.id] !== 'dead')
+          .slice(0, 8)
+          .map(p => ({
             id:          p.id,
             name:        p.name,
-            district:    rec.district || '',
-            daysSince,
-            totalAmount: rec.totalAmount || 0,
-            hasPending:  rec.hasPending || false,
-            neverVisited:daysSince === null && !vs,
-            visitStats:  vs,
-            lat:         rec.lat || rec.latitude || null,
-            lng:         rec.lng || rec.longitude || null,
-            addr:        p.address || rec.address || rec.addr || '',
-          };
-        });
-    } else {
-      usingCalendarPlan = false;
-      cards = recs
-        .filter(p => statuses[p.id] !== 'dead')
-        .slice(0, 8)
-        .map(p => ({
-          id:          p.id,
-          name:        p.name,
-          district:    p.district || '',
-          daysSince:   p.daysSince,
-          totalAmount: p.totalAmount || 0,
-          hasPending:  p.hasPending || false,
-          neverVisited:p.neverVisited || false,
-          visitStats:  visitMap[p.name] || visitMap[p.id] || null,
-          lat:         p.lat || p.latitude || null,
-          lng:         p.lng || p.longitude || null,
-          addr:        p.addr || p.address || '',
-        }));
+            district:    p.district || '',
+            daysSince:   p.daysSince,
+            totalAmount: p.totalAmount || 0,
+            hasPending:  p.hasPending || false,
+            neverVisited:p.neverVisited || false,
+            visitStats:  visitMap[p.name] || visitMap[p.id] || null,
+            lat:         p.lat || p.latitude || null,
+            lng:         p.lng || p.longitude || null,
+            addr:        p.addr || p.address || '',
+          }));
+      }
     }
 
     render();
