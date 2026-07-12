@@ -3285,7 +3285,7 @@ function renderPendingNewPhCard(t) {
       <a href="${googleUrl}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;flex:1;text-align:center;text-decoration:none">🔍 Google 搜尋</a>
     </div>
     <div style="display:flex;gap:6px">
-      <button class="btn btn-primary btn-sm" style="font-size:11px;flex:1" onclick="confirmPendingNewPh('${t.id}')">✓ 確認為新開藥局</button>
+      <button class="btn btn-primary btn-sm" style="font-size:11px;flex:1" onclick="confirmPendingNewPh('${t.id}')">✓ 有效，加入待辦池</button>
       <button class="btn btn-danger btn-sm" style="font-size:11px" onclick="todoDelete('${t.id}')">✗ 刪除</button>
     </div>
   </div>`;
@@ -3294,10 +3294,11 @@ function renderPendingNewPhCard(t) {
 async function confirmPendingNewPh(id) {
   const t = todosCache.find(t => t.id === id);
   if (!t) return;
-  t.quadrant = 'newph';
+  t.quadrant = 'pool';
+  t.source = 'confirmed';
   renderEisenhower();
-  await todoApiUpdate(id, { quadrant: 'newph' });
-  toast('✅ 已確認，移至新開藥局');
+  await todoApiUpdate(id, { quadrant: 'pool', source: 'confirmed' });
+  toast('✅ 已加入待辦池');
 }
 
 function renderTodoCard(t) {
