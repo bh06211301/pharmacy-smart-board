@@ -2635,43 +2635,11 @@ function renderDayPanel(ds) {
   const dateStr  = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${DNAMES[d.getDay()]}）`;
   const dayVisits= allVisitsCache.filter(v => v.date && normDs(v.date) === ds);
 
-  // 計畫拜訪
+  // 居家辦公
   const isOff  = getOfficeDays().includes(ds);
-  const plan   = getCalPlan();
-  const dp     = plan[ds] || { pharmacies: [], route: null };
   const offBtnStyle = isOff
     ? 'background:var(--accent);color:#fff;border-color:var(--accent)'
     : 'background:none;color:var(--muted);border-color:var(--border)';
-  const phHtml = dp.pharmacies.length
-    ? dp.pharmacies.map((ph, i) => `
-        <div class="cal-ph-item" draggable="true"
-          ondragstart="calPhDragStart(event,${i},'${ds}')"
-          ondragover="calPhDragOver(event)"
-          ondragleave="calPhDragLeave(event)"
-          ondrop="calPhDrop(event,${i},'${ds}')">
-          <span style="cursor:grab;color:var(--muted2);font-size:14px;padding-right:4px;user-select:none">⠿</span>
-          <span class="cal-ph-num">${i+1}</span>
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ph.name}</div>
-            ${ph.address ? `<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ph.address}</div>` : ''}
-          </div>
-          <button class="cal-ph-remove" onclick="calRemovePh('${ds}','${ph.id.replace(/'/g,"\\'")}')" title="移除">×</button>
-        </div>`).join('')
-    : `<div style="text-align:center;padding:16px 0;color:var(--muted);font-size:13px">尚未排定藥局</div>`;
-  let routeHtml = '';
-  if (dp.route) {
-    const r  = dp.route;
-    const hh = Math.floor(r.totalMin / 60), mm = r.totalMin % 60;
-    const tStr = hh > 0 ? `${hh} 小時 ${mm} 分` : `${mm} 分鐘`;
-    routeHtml = `
-      <div class="cal-route-box" style="margin-top:12px">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px">🗺️ 路線預估</div>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">
-          <span>⏱ ${tStr}</span><span>📍 約 ${r.totalKm} km</span><span>⛽ 約 $${r.fuelCost + r.hwCost}</span>
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">每家約 25 分 · 城市均速 30km/h · 粗估僅供參考</div>
-      </div>`;
-  }
 
   // actual visits
   let actualHtml = '';
@@ -2746,30 +2714,6 @@ function renderDayPanel(ds) {
       <button onclick="calToggleOfficeCal('${ds}')" style="font-size:12px;padding:5px 12px;border-radius:20px;border:1px solid;cursor:pointer;margin-bottom:16px;${offBtnStyle}">
         🏠 ${isOff ? '居家辦公中（點選取消）' : '標記居家辦公'}
       </button>
-
-      <div class="cal-section-label">📌 計畫拜訪</div>
-      <div id="cal-ph-list">${phHtml}</div>
-
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <div style="position:relative;flex:1">
-          <input id="cal-ph-inp" class="task-input" placeholder="搜尋藥局名稱加入…"
-            oninput="calPhSearch(this.value,'${ds}')" onfocus="calPhSearch(this.value,'${ds}')"
-            style="width:100%;box-sizing:border-box" autocomplete="off">
-          <div id="cal-ph-dd" class="ph-dropdown"></div>
-        </div>
-        <button onclick="openCalMapModal('${ds}')"
-          style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
-          🗺️ 地圖選店
-        </button>
-      </div>
-
-      ${!isOff && dp.pharmacies.length >= 1 ? `
-      <button id="cal-route-btn" onclick="calCalcRoute('${ds}')"
-        style="margin-top:10px;width:100%;padding:9px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer">
-        ✦ AI 排序 + 路線預估
-      </button>` : ''}
-
-      ${routeHtml}
 
       ${actualHtml}
     </div>`;
