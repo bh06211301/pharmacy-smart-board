@@ -3800,6 +3800,13 @@ function getCityFromPh(p) {
 const MAP_PRIORITY_DIST = ['汐止區','板橋區','新莊區','三重區','中和區','永和區','新店區','土城區','蘆洲區','內湖區','南港區','信義區'];
 const MAP_CITY_ORDER = ['台北市','新北市','基隆市','桃園市','新竹市','新竹縣','其他'];
 
+// area='all'→全部; area===parentCity→城市層; 否則→必須 city+district 同時符合（防止跨城市同名區互串）
+function phMatchesAreaFilter(phCity, phArea, area, parentCity) {
+  if (area === 'all') return true;
+  if (area === parentCity) return phCity === parentCity;
+  return phCity === parentCity && phArea === area;
+}
+
 // ══════════════════════════════
 // 今日行程 — 地圖選店
 // ══════════════════════════════
@@ -3902,10 +3909,7 @@ function setTodayDist(area, el) {
   renderTodayMapGrid();
   if (!_todayMap) return;
   updateTodayMapMarkers();
-  const isCity = area === _todayMapActiveCity;
-  const list = isCity
-    ? pharmacies.filter(p => getCityFromPh(p) === area && p.lat && p.lng)
-    : pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+  const list = pharmacies.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', area, _todayMapActiveCity) && p.lat && p.lng);
   if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _todayMap.fitBounds(b,80); }
 }
 
@@ -3917,7 +3921,7 @@ function renderTodayMapMarkers() {
     const phArea = p.district || p.area || '';
     const phCity = getCityFromPh(p);
     const inTask = tasks.some(t => t.pharmacyId === pid);
-    const inArea = _todayMapActiveArea === 'all' || phCity === _todayMapActiveArea || phArea === _todayMapActiveArea;
+    const inArea = phMatchesAreaFilter(phCity, phArea, _todayMapActiveArea, _todayMapActiveCity);
     const marker = new google.maps.Marker({
       position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
       map: inArea ? _todayMap : null, title: p.name||p['店名'],
@@ -3950,7 +3954,7 @@ function updateTodayMapMarkers() {
   if (!_todayMap) return;
   _todayMapMarkers.forEach(marker => {
     const inTask = tasks.some(t => t.pharmacyId === marker._pid);
-    const inArea = _todayMapActiveArea === 'all' || marker._phCity === _todayMapActiveArea || marker._phArea === _todayMapActiveArea;
+    const inArea = phMatchesAreaFilter(marker._phCity, marker._phArea, _todayMapActiveArea, _todayMapActiveCity);
     marker.setMap(inArea ? _todayMap : null);
     marker.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inTask?9:6,
       fillColor: inTask?'#12b76a':'#3b6ef5', fillOpacity:1, strokeColor:'#fff', strokeWeight:1.5 });
@@ -3960,10 +3964,7 @@ function updateTodayMapMarkers() {
 function renderTodayMapGrid() {
   const kw = (document.getElementById('today-map-search')?.value || '').toLowerCase();
   let list = pharmacies;
-  if (_todayMapActiveArea !== 'all') list = list.filter(p => {
-    const dist = p.district || p.area || '';
-    return getCityFromPh(p) === _todayMapActiveArea || dist === _todayMapActiveArea;
-  });
+  if (_todayMapActiveArea !== 'all') list = list.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', _todayMapActiveArea, _todayMapActiveCity));
   if (kw) list = list.filter(p => {
     const dist = (p.district||p.area||'').toLowerCase();
     return (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw) || dist.includes(kw) || getCityFromPh(p).toLowerCase().includes(kw);
@@ -4090,7 +4091,7 @@ function renderCalMapMarkers() {
     const phArea = p.district || p.area || '';
     const phCity = getCityFromPh(p);
     const inSel = _calMapSel.has(id);
-    const inArea = _calMapArea === 'all' || phCity === _calMapArea || phArea === _calMapArea;
+    const inArea = phMatchesAreaFilter(phCity, phArea, _calMapArea, _calMapCity);
     const marker = new google.maps.Marker({
       position: { lat: parseFloat(p.lat), lng: parseFloat(p.lng) },
       map: inArea ? _calMap : null,
@@ -4134,7 +4135,7 @@ function updateCalMapMarkers() {
   _calMapMarkers.forEach(mk => {
     const id = mk._phId;
     const inSel = _calMapSel.has(id);
-    const inArea = _calMapArea === 'all' || mk._phCity === _calMapArea || mk._phArea === _calMapArea;
+    const inArea = phMatchesAreaFilter(mk._phCity, mk._phArea, _calMapArea, _calMapCity);
     mk.setMap(inArea ? _calMap : null);
     mk.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: inSel ? 9 : 6,
       fillColor: inSel ? '#12b76a' : '#3b6ef5', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 });
@@ -4200,20 +4201,14 @@ function setCalMapDist(area, el) {
   renderCalMapGrid();
   if (!_calMapInited) return;
   updateCalMapMarkers();
-  const isCity = area === _calMapCity;
-  const list = isCity
-    ? pharmacies.filter(p => getCityFromPh(p) === area && p.lat && p.lng)
-    : pharmacies.filter(p => (p.district||p.area||'') === area && p.lat && p.lng);
+  const list = pharmacies.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', area, _calMapCity) && p.lat && p.lng);
   if (list.length) { const b = new google.maps.LatLngBounds(); list.forEach(p => b.extend({lat:parseFloat(p.lat),lng:parseFloat(p.lng)})); _calMap.fitBounds(b,60); }
 }
 
 function renderCalMapGrid() {
   const kw = (document.getElementById('cal-map-search')?.value || '').toLowerCase();
   let list = pharmacies;
-  if (_calMapArea !== 'all') list = list.filter(p => {
-    const dist = p.district || p.area || '';
-    return getCityFromPh(p) === _calMapArea || dist === _calMapArea;
-  });
+  if (_calMapArea !== 'all') list = list.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', _calMapArea, _calMapCity));
   if (kw) list = list.filter(p => {
     const dist = (p.district||p.area||'').toLowerCase();
     return (p.name||p['店名']||'').toLowerCase().includes(kw) || (p.id||'').toLowerCase().includes(kw) || (p.address||p['地址']||'').toLowerCase().includes(kw) || dist.includes(kw) || getCityFromPh(p).toLowerCase().includes(kw);
