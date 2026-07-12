@@ -54,8 +54,9 @@ const CORS_HEADERS = {
 //   collection: 紅單實體狀態=待請款(已寄單)
 //
 // 【POST /add-visit 期望欄位】
-//   action, visitId, pharmacyName, pharmacyId, date, purpose, content
+//   action, visitId, pharmacyName, date, purpose, content
 //   ↑ index.html 的 submitNewVisit 與 field.html 的打卡送出都必須傳這些欄位
+//   注意：pharmacyId 前端有傳但 handleAddVisit 不轉送（GAS 拜訪紀錄表無此欄）
 //
 // 【/calendar-plan — 月曆計畫 KV 持久化】
 //   GET  → { ok, plan: { "2026-07-07": { pharmacies:[{id,name,address}], route:{...} } } }
