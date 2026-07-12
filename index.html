@@ -3979,7 +3979,12 @@ function _makeSvgIcon(label, bgColor, size) {
 }
 
 function _addRouteMarker(pos, label, color, size) {
-  const m = new google.maps.Marker({ position: pos, map: _todayMap, icon: _makeSvgIcon(label, color, size), zIndex: 200 });
+  const m = new google.maps.Marker({
+    position: pos, map: _todayMap,
+    icon: _makeSvgIcon(label, color, size),
+    zIndex: 200,
+    clickable: false  // 讓點擊穿透到下方的藥局標記
+  });
   _todayRouteMarkers.push(m);
 }
 
@@ -3994,7 +3999,9 @@ function _drawStepPolylines(steps) {
     _todayMapPolylines.push(poly);
     path.forEach(pt => bounds.extend(pt));
   }
-  if (!bounds.isEmpty()) _todayMap.fitBounds(bounds, 40);
+  // 把所有目前顯示的藥局標記也納入 bounds，避免路線外的店家跑出畫面
+  _todayMapMarkers.forEach(mk => { if (mk.getMap()) bounds.extend(mk.getPosition()); });
+  if (!bounds.isEmpty()) _todayMap.fitBounds(bounds, 60);
 }
 
 async function _geocodeToLatLng(address) {
