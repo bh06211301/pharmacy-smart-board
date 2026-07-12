@@ -1796,7 +1796,7 @@ async function loadInvoiceTasks(force) {
   const el = document.getElementById('eq-invoice');
   if (!el) return;
   if (!invoiceCache.loaded || force) {
-    if (force) localStorage.removeItem('invoice_collection_done');
+    if (force) { localStorage.removeItem('invoice_collection_done'); localStorage.removeItem('invoice_invoicing_done'); }
     el.innerHTML = `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">載入中…</div>`;
     try {
       const d = await get('/invoice-tasks');
@@ -1822,13 +1822,16 @@ function renderInvoicePool() {
   const isMonthEnd   = dom >= 21;
   let html = '';
   if (invoicing.length) {
-    html += `<div style="font-size:11px;font-weight:700;color:#0891b2;margin-bottom:6px">
-      📋 待寄單（${invoicing.length} 筆）${isMonthStart ? ' <span style="color:var(--orange)">· ⏰ 月初排程中</span>' : ''}
+    const invDone = getInvoicingDone();
+    const invStores = new Set(invoicing.map(o => o.storeCode||o.storeName));
+    const invPending = [...invStores].filter(k => !invDone.includes(k)).length;
+    html += `<div style="font-size:11px;font-weight:700;color:#0891b2;margin-bottom:4px">
+      📋 待寄單（${invPending} 家）${isMonthStart ? ' <span style="color:var(--orange)">· ⏰ 月初排程中</span>' : ''}
     </div>`;
-    html += invoicing.map(o => invoiceItemHtml(o, 'invoicing')).join('');
+    html += groupedInvoicingHtml(invoicing);
   }
   if (collection.length) {
-    if (invoicing.length) html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+    if (invoicing.length) html += '<div style="border-top:2px solid var(--border);margin:10px 0 6px"></div>';
     html += `<div style="font-size:11px;font-weight:700;color:#059669;margin-bottom:6px">
       💰 待請款（${collection.length} 筆）${isMonthEnd ? ' <span style="color:var(--orange)">· ⏰ 月底排程中</span>' : ''}
     </div>`;
@@ -1937,6 +1940,91 @@ async function addInvoiceToPool(storeCode, storeName) {
     renderEisenhower(); renderCalTodoPool(); updateTodoBadge(); renderInvoicePool();
     toast(`✅ 已加入待辦池，切到月曆 tab 即可排入日期`);
   }
+}
+
+function getInvoicingDone() {
+  try { return JSON.parse(localStorage.getItem('invoice_invoicing_done')||'[]'); } catch { return []; }
+}
+function doneInvoicingStore(sc) {
+  const done = getInvoicingDone();
+  if (!done.includes(sc)) { done.push(sc); localStorage.setItem('invoice_invoicing_done', JSON.stringify(done)); }
+  renderInvoicePool();
+  toast('✓ 已標記完成');
+}
+
+async function addInvoicingToPool(storeCode, storeName) {
+  const dup = todosCache.find(t => t.pharmacyId === storeCode && t.type === 'return_receipt' && !t.done && !t.scheduledDate);
+  if (dup) { toast(`${storeName} 已在待辦池`); return; }
+  const res = await todoApiCreate({
+    task: `寄單：${storeName}`,
+    quadrant: 'pool',
+    done: false,
+    pharmacyId: storeCode,
+    pharmacyName: storeName,
+    type: 'return_receipt'
+  });
+  if (res?.todo) {
+    todosCache.push(res.todo);
+    renderEisenhower(); renderCalTodoPool(); updateTodoBadge(); renderInvoicePool();
+    toast(`✅ 已加入待辦池，切到月曆 tab 即可排入日期`);
+  }
+}
+
+function groupedInvoicingHtml(items) {
+  const done = getInvoicingDone();
+  const storeMap = {};
+  items.forEach(o => {
+    const key = o.storeCode || o.storeName;
+    if (done.includes(key)) return;
+    if (!storeMap[key]) {
+      const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === o.storeCode || p.name === o.storeName);
+      const city = ph ? getPhCity(ph) : '其他';
+      storeMap[key] = { first: o, orders: [], city };
+    }
+    storeMap[key].orders.push(o);
+  });
+  const groups = Object.values(storeMap);
+  if (!groups.length) return `<div style="color:var(--muted);font-size:11px;padding:6px 0;text-align:center">全部已處理 ✓</div>`;
+
+  const cityOrder = ['台北市','新北市','基隆市','桃園市','新竹市','新竹縣','其他'];
+  const byCity = {};
+  groups.forEach(g => {
+    if (!byCity[g.city]) byCity[g.city] = [];
+    byCity[g.city].push(g);
+  });
+
+  let html = '';
+  cityOrder.forEach(city => {
+    if (!byCity[city]?.length) return;
+    html += `<div style="font-size:10px;font-weight:700;color:var(--muted2);padding:5px 0 2px;border-top:1px solid var(--border);letter-spacing:0.3px">📍 ${city} · ${byCity[city].length} 家</div>`;
+    html += byCity[city].map(g => {
+      const sn = (g.first.storeName||'').replace(/'/g,"\\'");
+      const sc = g.first.storeCode||'';
+      const inPool = todosCache.some(t => t.pharmacyId === sc && t.type === 'return_receipt' && !t.done);
+      const rows = g.orders.map(o => `<div style="display:flex;align-items:center;gap:6px;padding:2px 0 2px 12px;font-size:11px;color:var(--muted)">
+          <span style="color:#0891b2;font-size:10px">📋</span>
+          <span style="flex:1">#${o.orderNo||''} · ${o.orderDate} · $${(o.totalAmount||0).toLocaleString()}</span>
+        </div>`).join('');
+      const poolBtn = inPool
+        ? `<span style="font-size:10px;color:#7c3aed;padding:2px 8px;background:#f3e8ff;border-radius:6px">📦 已在待辦池</span>`
+        : `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#7c3aed"
+            onclick="event.stopPropagation();addInvoicingToPool('${sc}','${sn}')">📦 待辦池</button>`;
+      return `<div style="padding:5px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+          <span style="font-weight:600;font-size:12px">${g.first.storeName}</span>
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px"
+              onclick="addInvoiceToRoute('${sc}','${sn}','寄單')">加入行程</button>
+            ${poolBtn}
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px;color:#059669"
+              onclick="doneInvoicingStore('${sc}')">✓ 完成</button>
+          </div>
+        </div>
+        ${rows}
+      </div>`;
+    }).join('');
+  });
+  return html;
 }
 
 let _invoiceDragging = null;
