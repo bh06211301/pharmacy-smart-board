@@ -1791,6 +1791,7 @@ function addDeliveryTask(storeCode, storeName) {
 // 帳務清單（寄單 + 請款）
 // ══════════════════════════════
 let invoiceCache = { invoicing: [], collection: [], loaded: false };
+let _invoiceCollapsed = { invoicing: false, collection: false };
 
 async function loadInvoiceTasks(force) {
   const el = document.getElementById('eq-invoice');
@@ -1825,17 +1826,23 @@ function renderInvoicePool() {
     const invDone = getInvoicingDone();
     const invStores = new Set(invoicing.map(o => o.storeCode||o.storeName));
     const invPending = [...invStores].filter(k => !invDone.includes(k)).length;
-    html += `<div style="font-size:11px;font-weight:700;color:#0891b2;margin-bottom:4px">
-      📋 待寄單（${invPending} 家）${isMonthStart ? ' <span style="color:var(--orange)">· ⏰ 月初排程中</span>' : ''}
+    const invOpen = !_invoiceCollapsed.invoicing;
+    html += `<div style="display:flex;align-items:center;cursor:pointer;user-select:none;padding:2px 0 4px" onclick="toggleInvoiceSection('invoicing')">
+      <span style="font-size:11px;font-weight:700;color:#0891b2">📋 待寄單（${invPending} 家）${isMonthStart ? ' <span style="color:var(--orange)">· ⏰ 月初</span>' : ''}</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted);transition:transform .15s;display:inline-block;transform:rotate(${invOpen?0:-90}deg)">▼</span>
     </div>`;
-    html += groupedInvoicingHtml(invoicing);
+    if (invOpen) html += `<div>${groupedInvoicingHtml(invoicing)}</div>`;
   }
   if (collection.length) {
     if (invoicing.length) html += '<div style="border-top:2px solid var(--border);margin:10px 0 6px"></div>';
-    html += `<div style="font-size:11px;font-weight:700;color:#059669;margin-bottom:6px">
-      💰 待請款（${collection.length} 筆）${isMonthEnd ? ' <span style="color:var(--orange)">· ⏰ 月底排程中</span>' : ''}
+    const colOpen = !_invoiceCollapsed.collection;
+    const colDone = getInvoiceDone();
+    const colPending = [...new Set(collection.map(o => o.storeCode||o.storeName))].filter(k => !colDone.includes(k)).length;
+    html += `<div style="display:flex;align-items:center;cursor:pointer;user-select:none;padding:2px 0 4px" onclick="toggleInvoiceSection('collection')">
+      <span style="font-size:11px;font-weight:700;color:#059669">💰 待請款（${colPending} 家）${isMonthEnd ? ' <span style="color:var(--orange)">· ⏰ 月底</span>' : ''}</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted);transition:transform .15s;display:inline-block;transform:rotate(${colOpen?0:-90}deg)">▼</span>
     </div>`;
-    html += groupedCollectionHtml(collection);
+    if (colOpen) html += `<div>${groupedCollectionHtml(collection)}</div>`;
   }
   el.innerHTML = html;
 }
@@ -1903,6 +1910,11 @@ function groupedCollectionHtml(items) {
       ${rows}
     </div>`;
   }).join('');
+}
+
+function toggleInvoiceSection(type) {
+  _invoiceCollapsed[type] = !_invoiceCollapsed[type];
+  renderInvoicePool();
 }
 
 function getInvoiceDone() {
