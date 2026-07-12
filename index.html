@@ -511,9 +511,15 @@ let allVisitsCache = [];
           <div id="today-gmap" style="width:100%;height:100%"></div>
         </div>
         <div id="today-area-tabs" style="display:flex;flex-direction:column;gap:0;margin-bottom:10px"></div>
-        <input id="today-map-search" placeholder="搜尋藥局名稱或地址..."
-          style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:10px;box-sizing:border-box;outline:none"
-          oninput="renderTodayMapGrid()">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+          <input id="today-map-search" placeholder="搜尋藥局名稱或地址..."
+            style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;box-sizing:border-box;outline:none"
+            oninput="renderTodayMapGrid()">
+          <button id="today-route-preview-btn" onclick="previewTodayMapRoute()"
+            style="white-space:nowrap;padding:8px 12px;border:1.5px solid var(--accent);border-radius:8px;background:var(--white);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer">
+            🛣️ 預覽路線
+          </button>
+        </div>
         <div id="today-map-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:280px;overflow-y:auto;padding:2px;margin-bottom:4px"></div>
       </div>
       <div style="height:12px"></div>
@@ -1379,7 +1385,7 @@ async function runSchedule() {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GMAPS_KEY,
-        'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex'
+        'X-Goog-FieldMask': 'routes.polyline,routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex'
       },
       body: JSON.stringify({
         origin: { address: '新北市汐止區湖東街五巷25號' },
@@ -1419,6 +1425,10 @@ async function runSchedule() {
     window._pendingRoute = reordered;
     window._pendingRouteDetails = details;
     renderScheduleResult(reordered, details);
+    const encoded = route0.polyline?.encodedPolyline;
+    if (encoded && _todayMap && document.getElementById('today-map-wrap')?.style.display !== 'none') {
+      drawRoutePolyline(encoded, _todayMap, false);
+    }
   } catch(e) {
     resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 路線計算失敗：${e.message}</div>`;
   } finally {
@@ -3807,10 +3817,41 @@ function phMatchesAreaFilter(phCity, phArea, area, parentCity) {
   return phCity === parentCity && phArea === area;
 }
 
+function decodePolyline(encoded) {
+  const pts = []; let idx = 0, lat = 0, lng = 0;
+  while (idx < encoded.length) {
+    let b, shift = 0, result = 0;
+    do { b = encoded.charCodeAt(idx++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : result >> 1;
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(idx++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : result >> 1;
+    pts.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return pts;
+}
+
+async function geocodeWaypoint(query) {
+  const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query + ' 台灣')}&bounds=24.9,121.4|25.2,121.75&region=TW&key=${GMAPS_KEY}`);
+  const d = await r.json();
+  if (d.results?.length) { const { lat, lng } = d.results[0].geometry.location; return { location: { latLng: { latitude: lat, longitude: lng } } }; }
+  return { address: query + ' 台灣' };
+}
+
+function drawRoutePolyline(encoded, map, isCalMap) {
+  if (isCalMap) { if (_calMapPolyline) { _calMapPolyline.setMap(null); _calMapPolyline = null; } }
+  else         { if (_todayMapPolyline) { _todayMapPolyline.setMap(null); _todayMapPolyline = null; } }
+  const path = decodePolyline(encoded);
+  const poly = new google.maps.Polyline({ path, geodesic: true, strokeColor: '#3b6ef5', strokeOpacity: 0.85, strokeWeight: 5, map });
+  if (isCalMap) _calMapPolyline = poly; else _todayMapPolyline = poly;
+  const b = new google.maps.LatLngBounds(); path.forEach(pt => b.extend(pt)); map.fitBounds(b, 40);
+}
+
 // ══════════════════════════════
 // 今日行程 — 地圖選店
 // ══════════════════════════════
 let _todayMap = null, _todayMapMarkers = [], _todayMapInfoWin = null, _todayMapActiveArea = 'all', _todayMapActiveCity = 'all';
+let _todayMapPolyline = null;
 
 function toggleTodayMap() {
   const wrap = document.getElementById('today-map-wrap');
@@ -4009,11 +4050,38 @@ function mapTogglePharmacy(id) {
   renderTodayMapGrid();
 }
 
+async function previewTodayMapRoute() {
+  if (!tasks.length) { toast('請先加入任務'); return; }
+  if (!_todayMap) { toast('請先展開地圖'); return; }
+  const btn = document.getElementById('today-route-preview-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 計算中...'; }
+  try {
+    const intermediates = await Promise.all(tasks.map(t => {
+      const ph = pharmacies.find(p => (p.id||p['Customer_ID']||'') === t.pharmacyId);
+      if (ph?.lat && ph?.lng) return Promise.resolve({ location: { latLng: { latitude: parseFloat(ph.lat), longitude: parseFloat(ph.lng) } } });
+      const addr = t.addr || ph?.address || ph?.['地址'] || '';
+      if (addr) return Promise.resolve({ address: addr });
+      return geocodeWaypoint(t.name);
+    }));
+    const resp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GMAPS_KEY, 'X-Goog-FieldMask': 'routes.polyline' },
+      body: JSON.stringify({ origin: { address: '新北市汐止區湖東街五巷25號' }, destination: { address: '台北市內湖區新民街422號' }, intermediates, travelMode: 'DRIVE', optimizeWaypointOrder: true })
+    });
+    const data = await resp.json();
+    const encoded = data.routes?.[0]?.polyline?.encodedPolyline;
+    if (!encoded) throw new Error('路線資料缺失');
+    drawRoutePolyline(encoded, _todayMap, false);
+  } catch(e) { toast('路線預覽失敗：' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🛣️ 預覽路線'; } }
+}
+
 // ══════════════════════════════
 // 月曆地圖選店
 // ══════════════════════════════
 const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc';
 let _calMap = null, _calMapMarkers = [], _calMapInfoWin = null;
+let _calMapPolyline = null;
 let _calMapDs = null, _calMapSel = new Set();
 let _calMapArea = 'all', _calMapCity = 'all', _calMapInited = false;
 
@@ -4051,6 +4119,7 @@ function openCalMapModal(ds) {
 function closeCalMapModal() {
   document.getElementById('cal-map-modal').classList.remove('open');
   if (_calMapInfoWin) _calMapInfoWin.close();
+  if (_calMapPolyline) { _calMapPolyline.setMap(null); _calMapPolyline = null; }
 }
 
 function loadGoogleMapsScript() {
@@ -4263,6 +4332,32 @@ function confirmCalMapSel() {
   toast(`✅ 已選入 ${newList.length} 家至計畫拜訪`);
 }
 
+async function previewCalMapRoute() {
+  if (_calMapSel.size === 0) { toast('請先選擇藥局'); return; }
+  if (!_calMapInited) { toast('地圖尚未載入'); return; }
+  const btn = document.getElementById('cal-map-preview-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 計算中...'; }
+  try {
+    const selPhs = [..._calMapSel].map(id => pharmacies.find(p => (p.id||p['Customer_ID']) === id)).filter(Boolean);
+    const intermediates = await Promise.all(selPhs.map(ph => {
+      if (ph.lat && ph.lng) return Promise.resolve({ location: { latLng: { latitude: parseFloat(ph.lat), longitude: parseFloat(ph.lng) } } });
+      const addr = ph.address || ph['地址'] || '';
+      if (addr) return Promise.resolve({ address: addr });
+      return geocodeWaypoint(ph.name || ph['店名'] || '');
+    }));
+    const resp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GMAPS_KEY, 'X-Goog-FieldMask': 'routes.polyline' },
+      body: JSON.stringify({ origin: { address: '新北市汐止區湖東街五巷25號' }, destination: { address: '台北市內湖區新民街422號' }, intermediates, travelMode: 'DRIVE', optimizeWaypointOrder: true })
+    });
+    const data = await resp.json();
+    const encoded = data.routes?.[0]?.polyline?.encodedPolyline;
+    if (!encoded) throw new Error('路線資料缺失');
+    drawRoutePolyline(encoded, _calMap, true);
+  } catch(e) { toast('路線預覽失敗：' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🛣️ 路線預覽'; } }
+}
+
 function openMaps() {
   if (!todayRoute.length) { toast('請先排定行程'); return; }
   const q = todayRoute.map(r=>encodeURIComponent(r.addr||r.name)).join('/');
@@ -4288,6 +4383,7 @@ init();
       </div>
       <div style="display:flex;align-items:center;gap:8px">
         <span id="cal-map-sel-count" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--accent-light);color:var(--accent)">0 家已選</span>
+        <button id="cal-map-preview-btn" class="btn btn-ghost btn-sm" onclick="previewCalMapRoute()">🛣️ 路線預覽</button>
         <button class="btn btn-primary btn-sm" onclick="confirmCalMapSel()">✓ 加入計畫</button>
         <button onclick="closeCalMapModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted2);line-height:1;padding:0 4px">×</button>
       </div>
