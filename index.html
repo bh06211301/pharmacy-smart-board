@@ -395,7 +395,10 @@ let allVisitsCache = [];
 <div class="page active" id="page-today">
   <div class="page-header">
     <div>
-      <div class="page-title" id="today-title">今日行程</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="page-title" id="today-title">今日行程</div>
+        <input type="date" id="today-date-picker" style="height:30px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--card);cursor:pointer" onchange="onTodayDateChange(this.value)">
+      </div>
       <div class="page-sub" id="today-sub">搜尋藥局加入後按「⚡ AI 路線排序」</div>
     </div>
     <div class="btn-group">
@@ -934,11 +937,32 @@ async function post(path, body) {
 // ══════════════════════════════
 // 初始化
 // ══════════════════════════════
-async function init() {
-  const d = new Date();
+let _todayDate = '';
+
+function updateTodayTitle(ds) {
+  const d = ds ? new Date(ds + 'T00:00:00') : new Date();
   const days = ['日','一','二','三','四','五','六'];
+  const today = fmtDs(new Date());
+  const label = ds === today ? '今日' : '行程';
   document.getElementById('today-title').textContent =
-    `今日行程 — ${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）`;
+    `${label} — ${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）`;
+}
+
+async function onTodayDateChange(ds) {
+  _todayDate = ds;
+  updateTodayTitle(ds);
+  const today = fmtDs(new Date());
+  const ordersCard = document.getElementById('today-orders-card');
+  if (ordersCard) ordersCard.style.display = 'none';
+  if (ds === today) loadTodayOrders();
+  await loadTodayFromCalendar(true);
+}
+
+async function init() {
+  _todayDate = fmtDs(new Date());
+  const picker = document.getElementById('today-date-picker');
+  if (picker) picker.value = _todayDate;
+  updateTodayTitle(_todayDate);
   try {
     const h = await get('/health');
     if (h.ok) setDot('green', 'Worker 正常');
@@ -1719,7 +1743,7 @@ function updateTodayStats() {
 // 從月曆匯入今日計畫
 // ══════════════════════════════
 async function loadTodayFromCalendar(silent) {
-  const today = fmtDs(new Date());
+  const today = _todayDate || fmtDs(new Date());
   if (!todosCache.length) await loadTodos();
   const dayTodos = todosCache.filter(a => !a.done && a.scheduledDate === today && a.pharmacyId);
   if (!dayTodos.length) {
@@ -2295,7 +2319,11 @@ function nav(tabEl, pageId) {
     renderCalTodoPool();
     if (!allVisitsCache.length) loadAllVisits();
   }
-  if (pageId === 'today') { loadTodayOrders(); if (!tasks.length) loadTodayFromCalendar(true); }
+  if (pageId === 'today') {
+    const _isToday = _todayDate === fmtDs(new Date());
+    if (_isToday) loadTodayOrders(); else { const c = document.getElementById('today-orders-card'); if (c) c.style.display='none'; }
+    if (!tasks.length) loadTodayFromCalendar(true);
+  }
   if (pageId === 'todo') loadInvoiceTasks();
 }
 
