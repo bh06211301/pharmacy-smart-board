@@ -851,7 +851,8 @@ let streak = null;
 
 // ── DATE ──────────────────────────────────────────────────────
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function yesterdayStr() {
   const d = new Date(); d.setDate(d.getDate() - 1);
@@ -1443,56 +1444,51 @@ async function loadData() {
       };
     };
 
-    // ── 第一優先：今日排定的待辦任務（todos-v2 scheduledDate === today）────
-    const dayTodos = todos.filter(t => !t.done && t.scheduledDate === today && t.pharmacyId);
+    // ── 合併兩個來源：todos-v2（待辦任務）+ KV 月曆計畫（地圖選店）────
+    const dayTodos   = todos.filter(t => !t.done && t.scheduledDate === today && t.pharmacyId);
+    const calPlanPhs = calPlanJson.plan?.[today]?.pharmacies || [];
 
-    if (dayTodos.length > 0) {
+    // 以 pharmacyId 為主鍵合併，todos 備註優先
+    const grouped = {};
+    dayTodos.forEach(t => {
+      if (!grouped[t.pharmacyId]) grouped[t.pharmacyId] = { id: t.pharmacyId, name: t.pharmacyName || t.pharmacyId, addr: '', memos: [] };
+      grouped[t.pharmacyId].memos.push(t.task);
+    });
+    calPlanPhs.forEach(p => {
+      if (p.id && !grouped[p.id]) grouped[p.id] = { id: p.id, name: p.name, addr: p.address || '', memos: [] };
+    });
+
+    if (Object.keys(grouped).length > 0) {
       usingCalendarPlan = true;
       const subEl = document.getElementById('plan-source-sub');
-      if (subEl) subEl.textContent = '（從待辦清單載入）';
-      const grouped = {};
-      dayTodos.forEach(t => {
-        if (!grouped[t.pharmacyId]) {
-          grouped[t.pharmacyId] = { id: t.pharmacyId, name: t.pharmacyName || t.pharmacyId, memos: [] };
-        }
-        grouped[t.pharmacyId].memos.push(t.task);
-      });
+      if (subEl) {
+        const src = dayTodos.length > 0 && calPlanPhs.length > 0 ? '（待辦清單＋月曆計畫）'
+          : dayTodos.length > 0 ? '（從待辦清單載入）' : '（從月曆計畫載入）';
+        subEl.textContent = src;
+      }
       cards = Object.values(grouped)
         .filter(g => statuses[g.id] !== 'dead' && statuses[g.name] !== 'dead')
-        .map(g => buildCard(g.id, g.name, '', g.memos));
+        .map(g => buildCard(g.id, g.name, g.addr, g.memos.length > 0 ? g.memos : null));
 
     } else {
-      // ── 第二優先：KV 月曆計畫（跨裝置同步，電腦地圖選店結果可同步到手機）────
-      const planPhs = calPlanJson.plan?.[today]?.pharmacies || [];
-
-      if (planPhs.length > 0) {
-        usingCalendarPlan = true;
-        const subEl = document.getElementById('plan-source-sub');
-        if (subEl) subEl.textContent = '（從月曆計畫載入）';
-        cards = planPhs
-          .filter(p => statuses[p.id] !== 'dead' && statuses[p.name] !== 'dead')
-          .map(p => buildCard(p.id, p.name, p.address));
-
-      } else {
-        // ── 最後：AI 推薦清單 ─────────────────────────────────────
-        usingCalendarPlan = false;
-        cards = recs
-          .filter(p => statuses[p.id] !== 'dead')
-          .slice(0, 8)
-          .map(p => ({
-            id:          p.id,
-            name:        p.name,
-            district:    p.district || '',
-            daysSince:   p.daysSince,
-            totalAmount: p.totalAmount || 0,
-            hasPending:  p.hasPending || false,
-            neverVisited:p.neverVisited || false,
-            visitStats:  visitMap[p.name] || visitMap[p.id] || null,
-            lat:         p.lat || p.latitude || null,
-            lng:         p.lng || p.longitude || null,
-            addr:        p.addr || p.address || '',
-          }));
-      }
+      // ── 最後：AI 推薦清單 ─────────────────────────────────────
+      usingCalendarPlan = false;
+      cards = recs
+        .filter(p => statuses[p.id] !== 'dead')
+        .slice(0, 8)
+        .map(p => ({
+          id:          p.id,
+          name:        p.name,
+          district:    p.district || '',
+          daysSince:   p.daysSince,
+          totalAmount: p.totalAmount || 0,
+          hasPending:  p.hasPending || false,
+          neverVisited:p.neverVisited || false,
+          visitStats:  visitMap[p.name] || visitMap[p.id] || null,
+          lat:         p.lat || p.latitude || null,
+          lng:         p.lng || p.longitude || null,
+          addr:        p.addr || p.address || '',
+        }));
     }
 
     // ── 套用路線順序（若 confirmRoute 有存入排序）────────────────
