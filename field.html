@@ -1077,28 +1077,14 @@ async function openBrief(id) {
   document.getElementById('brief-nav-link').href =
     `https://www.google.com/maps/dir/?api=1&destination=${navDest}&travelmode=driving`;
 
-  // Route preview map (Google Maps Embed)
-  const lastStop = getLastStop();
-  const fromLabel = lastStop ? lastStop.name : '汐止出發地';
-  let originQ;
-  if (lastStop) {
-    if (lastStop.lat && lastStop.lng) {
-      originQ = `${lastStop.lat},${lastStop.lng}`;
-    } else {
-      originQ = encodeURIComponent(
-        lastStop.addr || (lastStop.name + (lastStop.district ? ' ' + lastStop.district : '') + ' 台灣')
-      );
-    }
-  } else {
-    originQ = encodeURIComponent(ORIGIN);
-  }
+  // Route preview map (Google Maps Embed) — 起點固定用 My+Location（目前位置），避免點地圖開啟 Maps 時起點錯誤
   const destQ = (ph.lat && ph.lng)
     ? `${ph.lat},${ph.lng}`
     : encodeURIComponent(ph.name + ' ' + (ph.district || '') + ' 台灣');
-  document.getElementById('brief-from-label').textContent = fromLabel;
+  document.getElementById('brief-from-label').textContent = '目前位置';
   document.getElementById('brief-to-label').textContent   = ph.name;
   document.getElementById('brief-map-frame').src =
-    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=${originQ}&destination=${destQ}&mode=driving&language=zh-TW`;
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=My+Location&destination=${destQ}&mode=driving&language=zh-TW`;
   document.getElementById('brief-route-wrap').style.display = '';
 
   document.getElementById('brief-ai-wrap').innerHTML =
@@ -1596,21 +1582,7 @@ async function updateNavCard() {
   document.getElementById('nav-dest-idx').textContent =
     `${navIndex + 1} / ${cards.length} 站`;
 
-  // 路線地圖（起點 = 上一站，沒有就用出發地）
-  const lastStop = getLastStop();
-  let originQ;
-  if (lastStop) {
-    if (lastStop.lat && lastStop.lng) {
-      originQ = `${lastStop.lat},${lastStop.lng}`;
-    } else {
-      originQ = encodeURIComponent(
-        (lastStop.addr || (lastStop.name + (lastStop.district ? ' ' + lastStop.district : '') + ' 台灣'))
-      );
-    }
-  } else {
-    originQ = encodeURIComponent(ORIGIN);
-  }
-
+  // 路線地圖（起點固定用 My+Location，避免點地圖開啟 Maps 時起點錯誤）
   const coords = await getCoords(ph);
   let destQ;
   if (coords) {
@@ -1622,7 +1594,7 @@ async function updateNavCard() {
   }
 
   document.getElementById('nav-dest-map').src =
-    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=${originQ}&destination=${destQ}&mode=driving&language=zh-TW`;
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=My+Location&destination=${destQ}&mode=driving&language=zh-TW`;
 
   document.getElementById('nav-open-maps').href =
     `https://www.google.com/maps/dir/?api=1&destination=${destQ}&travelmode=driving`;
