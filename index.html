@@ -357,6 +357,7 @@ let allVisitsCache = [];
     </div>
     <div class="btn-group">
       <button class="btn btn-ghost btn-sm" onclick="loadTodayFromCalendar()">📋 載入今日任務</button>
+      <button class="btn btn-ghost btn-sm" id="sync-field-btn" onclick="syncToField()" style="color:var(--green);border-color:var(--green)">📤 同步外勤</button>
       <button class="btn btn-primary btn-sm" onclick="openMaps()">🗺️ Google Maps 導航</button>
     </div>
   </div>
@@ -1705,6 +1706,27 @@ function updateTodayStats() {
   document.getElementById('stat-new').textContent = todayRoute.filter(r=>r.isNew||r.isDad).length||'—';
   document.getElementById('today-sub').textContent =
     `共 ${todayRoute.length} 站 · ${todayRoute.filter(r=>r.lastVisitDays>21).length} 家逾期 · ${todayRoute.filter(r=>r.isNew).length} 家新藥局`;
+}
+
+async function syncToField() {
+  const today = _todayDate || fmtDs(new Date());
+  // 優先用已排序的 todayRoute，沒有則用 tasks
+  const source = todayRoute.length > 0 ? todayRoute : tasks;
+  if (!source.length) { toast('今日尚無行程可同步，請先選店'); return; }
+  const btn = document.getElementById('sync-field-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中…'; }
+  const plan = getCalPlan();
+  if (!plan[today]) plan[today] = { pharmacies: [], route: null };
+  const phList = source.map(r => ({
+    id: r.pharmacyId || r.id,
+    name: r.name,
+    address: r.addr || ''
+  })).filter(p => p.id);
+  plan[today].pharmacies = phList;
+  plan[today].route = { orderedPharmacies: phList.map(p => p.id) };
+  saveCalPlan(plan);
+  if (btn) { btn.disabled = false; btn.textContent = '✅ 已同步'; setTimeout(() => { btn.textContent = '📤 同步外勤'; }, 2000); }
+  toast(`✅ 已同步 ${phList.length} 家至外勤模式`);
 }
 
 // ══════════════════════════════
