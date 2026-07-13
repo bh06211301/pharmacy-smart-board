@@ -4232,27 +4232,50 @@ function renderTodayMapGrid() {
   if (list.length > 80) grid.innerHTML += `<div style="grid-column:1/-1;font-size:11px;color:var(--muted);padding:6px;text-align:center">顯示前80筆，共${list.length}筆</div>`;
 }
 
-function saveTodayTasksToCalPlan() {
+async function saveTodayTasksToCalPlan() {
   const btn = document.querySelector('[onclick="saveTodayTasksToCalPlan()"]');
   const phs = tasks.filter(t => t.pharmacyId);
   if (!phs.length) {
     toast('⚠️ 行程中無藥局，請先在地圖或搜尋欄加入藥局');
     return;
   }
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 存入中…'; }
   const ds = _todayDate || fmtDs(new Date());
+
+  // 寫 calPlanCache（路線順序保留 + field.html 使用）
   const plan = getCalPlan();
   if (!plan[ds]) plan[ds] = { pharmacies: [], route: null };
   plan[ds].pharmacies = phs.map(t => ({ id: t.pharmacyId, name: t.name||'', address: t.addr||'' }));
   plan[ds].route = null;
   saveCalPlan(plan);
-  renderCalendar();
-  if (btn) {
-    const orig = btn.innerHTML;
-    btn.innerHTML = '✅ 已存入！';
-    btn.disabled = true;
-    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+
+  // 為沒有當日 KV todo 的藥局補建 scheduledDate todo（日曆格子「N家」badge 依此顯示）
+  let created = 0;
+  for (const t of phs) {
+    const exists = todosCache.find(a => !a.done && a.scheduledDate === ds && a.pharmacyId === t.pharmacyId);
+    if (!exists) {
+      try {
+        const res = await todoApiCreate({
+          task: t.taskMemo || '拜訪計畫',
+          quadrant: 'pool',
+          pharmacyId: t.pharmacyId,
+          pharmacyName: t.name || '',
+          scheduledDate: ds,
+          source: 'confirmed',
+          type: 'revisit',
+        });
+        if (res?.todo) { todosCache.push(res.todo); created++; }
+      } catch(e) {}
+    }
   }
-  toast(`✅ 已將 ${phs.length} 家存入 ${ds} 日曆計畫`);
+
+  renderCalendar();
+  renderCalTodoPool();
+  if (btn) {
+    btn.innerHTML = '✅ 已存入！';
+    setTimeout(() => { btn.innerHTML = '📅 存入日曆'; btn.disabled = false; }, 2000);
+  }
+  toast(`✅ 已將 ${phs.length} 家存入 ${ds} 日曆（新建 ${created} 筆計畫）`);
 }
 
 function mapTogglePharmacy(id) {
