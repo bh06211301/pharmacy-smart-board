@@ -1384,17 +1384,19 @@ let usingCalendarPlan = false;
 
 async function loadData() {
   try {
-    const [recRes, stRes, visitsRes, todosRes] = await Promise.all([
+    const [recRes, stRes, visitsRes, todosRes, calPlanRes] = await Promise.all([
       fetch(WORKER + '/recommend-today'),
       fetch(WORKER + '/customer-status').catch(() => null),
       fetch(WORKER + '/all-visits').catch(() => null),
       fetch(WORKER + '/todos-v2').catch(() => null),
+      fetch(WORKER + '/calendar-plan').catch(() => null),
     ]);
 
     const recJson    = await recRes.json();
     const stJson     = stRes     ? await stRes.json().catch(() => ({})) : {};
     const visitsJson = visitsRes ? await visitsRes.json().catch(() => []) : [];
     const todosJson  = todosRes  ? await todosRes.json().catch(() => []) : [];
+    const calPlanJson = calPlanRes ? await calPlanRes.json().catch(() => ({})) : {};
 
     const statuses  = stJson.statuses || {};
     const allVisits = Array.isArray(visitsJson)
@@ -1492,6 +1494,18 @@ async function loadData() {
             addr:        p.addr || p.address || '',
           }));
       }
+    }
+
+    // ── 套用路線順序（若 confirmRoute 有存入排序）────────────────
+    const orderedIds = (calPlanJson.plan?.[today]?.route?.orderedPharmacies) || [];
+    if (orderedIds.length > 0) {
+      const ordered = [];
+      orderedIds.forEach(id => {
+        const c = cards.find(c => c.id === id);
+        if (c) ordered.push(c);
+      });
+      cards.forEach(c => { if (!orderedIds.includes(c.id)) ordered.push(c); });
+      cards = ordered;
     }
 
     render();

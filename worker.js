@@ -875,7 +875,6 @@ async function handleAiTodoSuggest(request, env) {
 - iii（緊急不重要）：有時效但不影響業績，如交辦文件、例行回報、轉達訊息
 - iv（不緊急不重要）：可延後或刪除，如資料整理、非必要瑣事
 - pool（待辦池）：優先級不明確、需要再評估，或目前無法判斷的事項
-- invoice（帳務清單）：寄單/請款相關事項，由系統從訂單主檔自動建立，不建議手動歸類
 
 輸出 JSON：
 {"suggestedQuadrant":"ui|ii|iii|iv|pool","suggestions":["準備事項1","準備事項2","準備事項3"]}

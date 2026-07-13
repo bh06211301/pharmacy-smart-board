@@ -544,15 +544,15 @@ let allVisitsCache = [];
             style="width:100%;box-sizing:border-box">
           <select id="new-visit-purpose" class="task-input" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--white)">
             <option value="">拜訪目的（選填）</option>
-            <option>例行拜訪</option>
-            <option>產品介紹</option>
-            <option>訂單追蹤</option>
-            <option>客訴處理</option>
-            <option>新客開發</option>
+            <option value="例行拜訪">例行拜訪</option>
+            <option value="產品介紹">產品介紹</option>
+            <option value="訂單追蹤">訂單追蹤</option>
+            <option value="客訴處理">客訴處理</option>
+            <option value="新客開發">新客開發</option>
             <option value="送貨">送貨 📦</option>
             <option value="請款">請款 🧾</option>
-            <option>收款</option>
-            <option>其他</option>
+            <option value="收款">收款</option>
+            <option value="其他">其他</option>
           </select>
           <textarea id="new-visit-content" rows="4"
             placeholder="輸入拜訪內容（原始文字，直接存入不經 AI 修改）…"
@@ -1488,6 +1488,7 @@ function confirmRoute() {
       plan[today].pharmacies.push({ id: r.id, name: r.name, address: r.addr || '' });
     }
   });
+  plan[today].route = { orderedPharmacies: todayRoute.map(r => r.id).filter(Boolean) };
   saveCalPlan(plan);
   if (window._pendingRouteDetails) {
     window._routeDetails = window._pendingRouteDetails;
