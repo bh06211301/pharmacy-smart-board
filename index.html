@@ -1597,6 +1597,13 @@ function routeDrop(e, toIdx) {
   todayRoute.forEach((r, i) => r.seq = i + 1);
   _routeDragFrom = null;
   window._routeDetails = null;
+  // 拖曳重排後同步儲存新順序到 KV，讓外勤模式保持一致
+  const _rdToday = fmtDs(new Date());
+  const _rdPlan = getCalPlan();
+  if (_rdPlan[_rdToday]) {
+    _rdPlan[_rdToday].route = { orderedPharmacies: todayRoute.map(r => r.pharmacyId || r.id).filter(Boolean) };
+    saveCalPlan(_rdPlan);
+  }
   renderTodayRoute();
   calculateRouteDetails(todayRoute);
   toast('↕️ 順序已更新，重新計算路線中…');
@@ -3417,7 +3424,7 @@ async function eDrop(ev, quadrant) {
   item.quadrant = quadrant;
   renderEisenhower();
   await todoApiUpdate(id, { quadrant });
-  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', iv:'不緊急不重要', pool:'待辦池', dad:'老爸聯絡事項', newph:'新開藥局'};
+  const labels = {ui:'緊急重要', ii:'重要不緊急', iii:'緊急不重要', iv:'不緊急不重要', pool:'待辦池', dad:'老爸聯絡事項', newph:'新開藥局', invoice:'帳務清單', pending_newph:'待審視藥局'};
   toast(`✅ 已移至「${labels[quadrant]||quadrant}」`);
 }
 

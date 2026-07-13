@@ -1462,9 +1462,8 @@ async function loadData() {
         .map(g => buildCard(g.id, g.name, '', g.memos));
 
     } else {
-      // ── 第二優先：localStorage calendarPlan（舊版月曆計畫相容）────
-      const calendarPlan = JSON.parse(localStorage.getItem('calendarPlan') || '{}');
-      const planPhs      = calendarPlan[today]?.pharmacies || [];
+      // ── 第二優先：KV 月曆計畫（跨裝置同步，電腦地圖選店結果可同步到手機）────
+      const planPhs = calPlanJson.plan?.[today]?.pharmacies || [];
 
       if (planPhs.length > 0) {
         usingCalendarPlan = true;
