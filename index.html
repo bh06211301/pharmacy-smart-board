@@ -1484,11 +1484,12 @@ function confirmRoute() {
   const plan = getCalPlan();
   if (!plan[today]) plan[today] = { pharmacies: [], route: null };
   todayRoute.forEach(r => {
-    if (r.id && !plan[today].pharmacies.find(p => p.id === r.id)) {
-      plan[today].pharmacies.push({ id: r.id, name: r.name, address: r.addr || '' });
+    const phId = r.pharmacyId || r.id;
+    if (phId && !plan[today].pharmacies.find(p => p.id === phId)) {
+      plan[today].pharmacies.push({ id: phId, name: r.name, address: r.addr || '' });
     }
   });
-  plan[today].route = { orderedPharmacies: todayRoute.map(r => r.id).filter(Boolean) };
+  plan[today].route = { orderedPharmacies: todayRoute.map(r => r.pharmacyId || r.id).filter(Boolean) };
   saveCalPlan(plan);
   if (window._pendingRouteDetails) {
     window._routeDetails = window._pendingRouteDetails;
@@ -1715,8 +1716,20 @@ async function loadTodayFromCalendar(silent) {
     if (!grouped[t.pharmacyId]) grouped[t.pharmacyId] = { pharmacyId: t.pharmacyId, pharmacyName: t.pharmacyName || t.pharmacyId, memos: [] };
     grouped[t.pharmacyId].memos.push(t.task);
   });
+
+  // 按已儲存的路線順序排列
+  const orderedIds = getCalPlan()[today]?.route?.orderedPharmacies || [];
+  let groupedList;
+  if (orderedIds.length > 0) {
+    groupedList = [];
+    orderedIds.forEach(id => { if (grouped[id]) groupedList.push(grouped[id]); });
+    Object.values(grouped).forEach(g => { if (!orderedIds.includes(g.pharmacyId)) groupedList.push(g); });
+  } else {
+    groupedList = Object.values(grouped);
+  }
+
   let added = 0;
-  Object.values(grouped).forEach((g, i) => {
+  groupedList.forEach((g, i) => {
     const existing = tasks.find(t => t.pharmacyId === g.pharmacyId);
     if (existing) {
       existing.taskMemo = g.memos.join('、');
@@ -1727,6 +1740,22 @@ async function loadTodayFromCalendar(silent) {
       added++;
     }
   });
+
+  // todayRoute 為空時（頁面重整後），按路線順序自動重建
+  if (!todayRoute.length && orderedIds.length > 0) {
+    orderedIds.forEach(id => {
+      const t = tasks.find(t => t.pharmacyId === id);
+      if (t && !todayRoute.find(r => r.pharmacyId === id)) {
+        todayRoute.push({ id: t.id, pharmacyId: t.pharmacyId, name: t.name, addr: t.addr, pharmacist: t.pharmacist || '', seq: todayRoute.length + 1, taskMemo: t.taskMemo, source: t.source || 'calendar_task', lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false });
+      }
+    });
+    tasks.forEach(t => {
+      if (!orderedIds.includes(t.pharmacyId) && !todayRoute.find(r => r.pharmacyId === t.pharmacyId)) {
+        todayRoute.push({ id: t.id, pharmacyId: t.pharmacyId, name: t.name, addr: t.addr, pharmacist: t.pharmacist || '', seq: todayRoute.length + 1, taskMemo: t.taskMemo, source: t.source || 'calendar_task', lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false });
+      }
+    });
+  }
+
   renderTaskChips();
   renderTodayRoute();
   if (!silent) toast(`✅ 已載入 ${Object.keys(grouped).length} 家任務店`);
@@ -3834,8 +3863,8 @@ function _syncTodoPhToCalPlan(item, ds) {
     saveCalPlan(plan);
     // 若拖到今日，同步更新記憶體中的 todayRoute
     const today = fmtDs(new Date());
-    if (ds === today && !todayRoute.find(r => (r.id||'') === item.pharmacyId)) {
-      todayRoute.push({ id: item.pharmacyId, name, addr: address, seq: todayRoute.length + 1, lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false });
+    if (ds === today && !todayRoute.find(r => (r.pharmacyId||r.id||'') === item.pharmacyId)) {
+      todayRoute.push({ id: item.pharmacyId, pharmacyId: item.pharmacyId, name, addr: address, seq: todayRoute.length + 1, lastVisitDays: null, isNew: false, isDad: false, hasDelivery: false });
     }
   }
 }
