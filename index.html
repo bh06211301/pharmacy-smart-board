@@ -4233,15 +4233,26 @@ function renderTodayMapGrid() {
 }
 
 function saveTodayTasksToCalPlan() {
+  const btn = document.querySelector('[onclick="saveTodayTasksToCalPlan()"]');
   const phs = tasks.filter(t => t.pharmacyId);
-  if (!phs.length) { toast('行程中無藥局可存入'); return; }
+  if (!phs.length) {
+    toast('⚠️ 行程中無藥局，請先在地圖或搜尋欄加入藥局');
+    return;
+  }
   const ds = _todayDate || fmtDs(new Date());
   const plan = getCalPlan();
   if (!plan[ds]) plan[ds] = { pharmacies: [], route: null };
   plan[ds].pharmacies = phs.map(t => ({ id: t.pharmacyId, name: t.name||'', address: t.addr||'' }));
   plan[ds].route = null;
   saveCalPlan(plan);
-  toast(`✅ 已將 ${phs.length} 家存入 ${ds} 日曆`);
+  renderCalendar();
+  if (btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '✅ 已存入！';
+    btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+  }
+  toast(`✅ 已將 ${phs.length} 家存入 ${ds} 日曆計畫`);
 }
 
 function mapTogglePharmacy(id) {
