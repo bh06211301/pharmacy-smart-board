@@ -416,6 +416,10 @@ let allVisitsCache = [];
             style="white-space:nowrap;padding:8px 12px;border:1.5px solid var(--accent);border-radius:8px;background:var(--white);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer">
             🛣️ 預覽路線
           </button>
+          <button onclick="saveTodayTasksToCalPlan()"
+            style="white-space:nowrap;padding:8px 12px;border:1.5px solid var(--green);border-radius:8px;background:var(--white);color:var(--green);font-size:12px;font-weight:600;cursor:pointer">
+            📅 存入日曆
+          </button>
         </div>
         <div id="today-map-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:280px;overflow-y:auto;padding:2px;margin-bottom:4px"></div>
       </div>
@@ -4226,6 +4230,18 @@ function renderTodayMapGrid() {
     </div>`;
   }).join('');
   if (list.length > 80) grid.innerHTML += `<div style="grid-column:1/-1;font-size:11px;color:var(--muted);padding:6px;text-align:center">顯示前80筆，共${list.length}筆</div>`;
+}
+
+function saveTodayTasksToCalPlan() {
+  const phs = tasks.filter(t => t.pharmacyId);
+  if (!phs.length) { toast('行程中無藥局可存入'); return; }
+  const ds = _todayDate || fmtDs(new Date());
+  const plan = getCalPlan();
+  if (!plan[ds]) plan[ds] = { pharmacies: [], route: null };
+  plan[ds].pharmacies = phs.map(t => ({ id: t.pharmacyId, name: t.name||'', address: t.addr||'' }));
+  plan[ds].route = null;
+  saveCalPlan(plan);
+  toast(`✅ 已將 ${phs.length} 家存入 ${ds} 日曆`);
 }
 
 function mapTogglePharmacy(id) {
