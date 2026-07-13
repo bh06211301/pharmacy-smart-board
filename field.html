@@ -1864,7 +1864,7 @@ async function submitVisitRecord() {
         pharmacyId: phId || '',
         date: todayStr(),
         purpose,
-        content: content || purpose,
+        content: content,
       })
     });
     showToast('✅ 拜訪紀錄已儲存！');

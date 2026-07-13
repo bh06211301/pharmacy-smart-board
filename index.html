@@ -2614,7 +2614,6 @@ function renderCalendar() {
     const dow    = new Date(calYear, calMonth, d).getDay(); // 0=Sun,6=Sat
     const isWE   = dow === 0 || dow === 6;
     const isOff  = offDays.includes(ds);
-    const dp     = plan[ds];
     const vc     = visitMap[ds] || 0;
     const cls    = ['cal-cell',
       ds === todayDs    ? 'is-today'    : '',
@@ -2726,7 +2725,7 @@ function renderDayPanel(ds) {
       ${(()=>{
         const dayTodos = todosCache.filter(a => a.scheduledDate === ds);
         const tiMap = { return_receipt:'📋', get_receipt:'📥', revisit:'📅', prepare:'🎒', follow_up:'🔔', other:'📌' };
-        const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)', dad:'#d97706' };
+        const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)', dad:'#d97706', invoice:'#0891b2', newph:'var(--purple)', pending_newph:'#f59e0b' };
         return `
       <div style="margin-top:16px">
         <div class="cal-section-label">📌 今日待辦（${dayTodos.length} 項）</div>
@@ -3850,7 +3849,7 @@ function renderCalTodoPool() {
     el.innerHTML = `<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">✅ 所有待辦已排入日程</div>`;
     return;
   }
-  const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)' };
+  const qColor = { ui:'var(--red)', ii:'#3b6af5', iii:'var(--orange)', pool:'var(--muted)', dad:'#d97706', invoice:'#0891b2', newph:'var(--purple)', pending_newph:'#f59e0b' };
   el.innerHTML = `
     <div style="font-size:11px;font-weight:700;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">
       📌 未排定待辦（拖曳到日期格排入行程）
@@ -3930,6 +3929,7 @@ async function calOnDrop(ev, ds) {
     return;
   }
   item.scheduledDate = ds;
+  calSelected = ds;
   _syncTodoPhToCalPlan(item, ds);
   renderCalTodoPool(); renderDayPanel(ds); renderCalendar();
   toast(`✅ 已排入 ${ds}`);
@@ -3938,9 +3938,11 @@ async function calOnDrop(ev, ds) {
 
 async function todoUnschedule(id, ds) {
   const item = todosCache.find(t => t.id === id);
-  if (item) { item.scheduledDate = null; item.quadrant = 'pool'; }
+  const userQuadrants = ['ui','ii','iii','iv'];
+  const restoreQ = (item && userQuadrants.includes(item.quadrant)) ? item.quadrant : 'pool';
+  if (item) { item.scheduledDate = null; item.quadrant = restoreQ; }
   renderCalTodoPool(); renderDayPanel(ds); renderCalendar(); renderEisenhower();
-  await todoApiUpdate(id, { scheduledDate: null, quadrant: 'pool' });
+  await todoApiUpdate(id, { scheduledDate: null, quadrant: restoreQ });
 }
 
 function exportRoute() {
