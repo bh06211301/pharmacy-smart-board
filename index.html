@@ -4205,7 +4205,10 @@ function updateTodayMapMarkers() {
 
 function renderTodayMapGrid() {
   const kw = (document.getElementById('today-map-search')?.value || '').toLowerCase();
-  let list = pharmacies;
+  let list = pharmacies.filter(p => {
+    const pid = p.id||p['Customer_ID']||'';
+    return customerStatuses[pid] !== 'dead' && customerStatuses[p.name||p['店名']||''] !== 'dead';
+  });
   if (_todayMapActiveArea !== 'all') list = list.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', _todayMapActiveArea, _todayMapActiveCity));
   if (kw) list = list.filter(p => {
     const dist = (p.district||p.area||'').toLowerCase();
