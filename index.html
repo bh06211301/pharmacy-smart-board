@@ -971,7 +971,10 @@ function updateDeadBadge() {
 }
 
 function isDead(id) {
-  return customerStatuses[id]?.status === 'dead';
+  const s = customerStatuses[id];
+  if (!s) return false;
+  if (typeof s === 'string') return s === 'dead';
+  return s.status === 'dead';
 }
 
 // 開啟標記 Modal
