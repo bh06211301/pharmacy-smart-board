@@ -1037,6 +1037,8 @@ async function loadPharmacies(force = false) {
     pharmacies = d.pharmacies || d.data || [];
     buildCityFilter();
     renderTable();
+    renderTodayMapGrid();
+    buildTodayAreaTabs();
     document.getElementById('ph-sub').textContent = `共 ${pharmacies.length} 家 — Sheets 即時資料`;
     if (force) toast(`✅ 已重新載入 ${pharmacies.length} 家藥局`);
   } catch(e) {
@@ -4207,7 +4209,7 @@ function renderTodayMapGrid() {
   const kw = (document.getElementById('today-map-search')?.value || '').toLowerCase();
   let list = pharmacies.filter(p => {
     const pid = p.id||p['Customer_ID']||'';
-    return customerStatuses[pid]?.status !== 'dead' && customerStatuses[p.name||p['店名']||'']?.status !== 'dead';
+    return !pid || !isDead(pid);
   });
   if (_todayMapActiveArea !== 'all') list = list.filter(p => phMatchesAreaFilter(getCityFromPh(p), p.district||p.area||'', _todayMapActiveArea, _todayMapActiveCity));
   if (kw) list = list.filter(p => {
