@@ -4164,7 +4164,7 @@ function setTodayDist(area, el) {
 function renderTodayMapMarkers() {
   _todayMapMarkers.forEach(m => m.setMap(null));
   _todayMapMarkers = [];
-  pharmacies.filter(p => p.lat && p.lng).forEach(p => {
+  pharmacies.filter(p => p.lat && p.lng && !isDead(p.id||p['Customer_ID'])).forEach(p => {
     const pid = p.id||p['Customer_ID'];
     const phArea = p.district || p.area || '';
     const phCity = getCityFromPh(p);
