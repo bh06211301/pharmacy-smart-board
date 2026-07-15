@@ -961,6 +961,7 @@ async function loadCustomerStatuses() {
     const d = await get('/customer-status');
     customerStatuses = d.statuses || {};
     updateDeadBadge();
+    renderTodayMapGrid();
   } catch(e) { console.warn('載入客戶狀態失敗', e); }
 }
 
