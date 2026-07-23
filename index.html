@@ -2264,12 +2264,17 @@ async function loadVisits() {
       </div>
     </div>
     <div id="ph-task-suggest"></div>`;
-    visits.forEach(v => {
+    visits.forEach((v, i) => {
+      const rawId = `visit-raw-${i}`;
       html += `<div class="visit-card">
         <div class="visit-date">${v.date||''} ${v.purpose?'· '+v.purpose:''}</div>
         <div class="visit-summary">${v.summary||v.content||'（無摘要）'}</div>
         ${v.actionItems?`<div style="font-size:12px;color:var(--orange);margin-top:6px">📌 待辦：${v.actionItems}</div>`:''}
         ${v.tags?`<div class="visit-tags">${v.tags.split(',').map(t=>`<span class="visit-tag">${t.trim()}</span>`).join('')}</div>`:''}
+        ${v.rawTranscript?`<div style="margin-top:6px">
+          <span style="font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline" onclick="document.getElementById('${rawId}').style.display=document.getElementById('${rawId}').style.display==='none'?'block':'none'">🗣 查看原始逐字稿</span>
+          <div id="${rawId}" style="display:none;font-size:12px;color:var(--text2);white-space:pre-wrap;margin-top:4px;padding:8px;background:var(--bg2);border-radius:6px">${v.rawTranscript}</div>
+        </div>`:''}
       </div>`;
     });
     resultEl.innerHTML = html;
@@ -2695,11 +2700,12 @@ function renderDayPanel(ds) {
         ${dayVisits.map(v => {
           const ph      = pharmacies.find(p => (p.id||p['Customer_ID']||'') === v.pharmacyId);
           const phName  = ph ? (ph.name||ph['店名']||v.pharmacyId) : v.pharmacyId;
-          const raw     = v.content    || '';
+          const raw     = v.rawTranscript || v.content || '';
+          const fullNote= v.rawTranscript ? (v.content || '') : '';
           const aiSum   = v.summary    || '';
           const ai      = v.actionItems|| '';
           const pp      = v.painPoints || '';
-          const hasAny  = raw || aiSum || ai || pp;
+          const hasAny  = raw || fullNote || aiSum || ai || pp;
           return `
           <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:${hasAny?'8px':'0'}">
@@ -2707,9 +2713,13 @@ function renderDayPanel(ds) {
               <b style="font-size:13px">${phName}</b>
               ${v.purpose ? `<span style="color:var(--muted);font-size:11px;margin-left:4px">${v.purpose}</span>` : ''}
             </div>
-            ${raw   ? `<div style="margin-bottom:${aiSum||pp||ai?'7px':'0'}">
-                         <span style="font-size:10px;font-weight:700;color:var(--muted2);letter-spacing:.4px">原始紀錄</span>
+            ${raw   ? `<div style="margin-bottom:${fullNote||aiSum||pp||ai?'7px':'0'}">
+                         <span style="font-size:10px;font-weight:700;color:var(--muted2);letter-spacing:.4px">🗣 原始紀錄</span>
                          <div style="font-size:12px;color:var(--text);line-height:1.6;margin-top:3px;white-space:pre-wrap">${raw}</div>
+                       </div>` : ''}
+            ${fullNote ? `<div style="margin-bottom:${aiSum||pp||ai?'7px':'0'}">
+                         <span style="font-size:10px;font-weight:700;color:var(--muted2);letter-spacing:.4px">完整紀錄</span>
+                         <div style="font-size:12px;color:var(--text);line-height:1.6;margin-top:3px;white-space:pre-wrap">${fullNote}</div>
                        </div>` : ''}
             ${aiSum ? `<div style="margin-bottom:${pp||ai?'7px':'0'}">
                          <span style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.4px">AI 摘要</span>
