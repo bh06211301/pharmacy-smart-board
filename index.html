@@ -3168,22 +3168,39 @@ function updateTodoBadge() {
   if (el) el.textContent = count || '—';
 }
 
+// worker.js 的 /todos-v2 是「整包讀取 KV → 修改 → 整包寫回」，沒有鎖。
+// 若前端並發送出多個寫入請求，後送出的 PUT 會用舊資料覆蓋掉先前的變更（例如快速連點刪除時，
+// 前一筆刪除會被後一筆的寫回動作覆蓋而「復活」）。這裡把所有寫入請求排成佇列、逐一送出來避免。
+let _todoApiQueue = Promise.resolve();
+function _queueTodoApi(fn) {
+  const result = _todoApiQueue.then(fn, fn);
+  _todoApiQueue = result.catch(() => {});
+  return result;
+}
+
 async function todoApiCreate(data) {
-  const res = await fetch(WORKER + '/todos-v2', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  return _queueTodoApi(async () => {
+    const res = await fetch(WORKER + '/todos-v2', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    return res.json();
   });
-  return res.json();
 }
 
 async function todoApiUpdate(id, data) {
-  const res = await fetch(WORKER + '/todos-v2', {
-    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id, ...data})
+  return _queueTodoApi(async () => {
+    const res = await fetch(WORKER + '/todos-v2', {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id, ...data})
+    });
+    return res.json();
   });
-  return res.json();
 }
 
 async function todoApiDelete(id) {
-  return fetch(WORKER + '/todos-v2?id=' + encodeURIComponent(id), {method:'DELETE'}).then(r=>r.json());
+  return _queueTodoApi(async () => {
+    const res = await fetch(WORKER + '/todos-v2?id=' + encodeURIComponent(id), {method:'DELETE'});
+    return res.json();
+  });
 }
 
 async function toggleTodo(id) {
