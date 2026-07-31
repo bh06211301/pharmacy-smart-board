@@ -848,6 +848,23 @@ const ORIGIN       = '新北市汐止區湖東街五巷25號';
 let cards = [];
 let today = null;
 let streak = null;
+let DAD_PHARMACY_IDS = new Set();
+
+// ── 待辦 API（寫入請求排隊，避免快速連續操作互相覆蓋）──────────
+let _todoApiQueue = Promise.resolve();
+function _queueTodoApi(fn) {
+  const result = _todoApiQueue.then(fn, fn);
+  _todoApiQueue = result.catch(() => {});
+  return result;
+}
+async function todoApiCreate(data) {
+  return _queueTodoApi(async () => {
+    const res = await fetch(WORKER + '/todos-v2', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    return res.json();
+  });
+}
 
 // ── DATE ──────────────────────────────────────────────────────
 function todayStr() {
@@ -1371,12 +1388,13 @@ let usingCalendarPlan = false;
 
 async function loadData() {
   try {
-    const [recRes, stRes, visitsRes, todosRes, calPlanRes] = await Promise.all([
+    const [recRes, stRes, visitsRes, todosRes, calPlanRes, dadRes] = await Promise.all([
       fetch(WORKER + '/recommend-today'),
       fetch(WORKER + '/customer-status').catch(() => null),
       fetch(WORKER + '/all-visits').catch(() => null),
       fetch(WORKER + '/todos-v2').catch(() => null),
       fetch(WORKER + '/calendar-plan').catch(() => null),
+      fetch(WORKER + '/dad-pharmacies').catch(() => null),
     ]);
 
     const recJson    = await recRes.json();
@@ -1384,6 +1402,8 @@ async function loadData() {
     const visitsJson = visitsRes ? await visitsRes.json().catch(() => []) : [];
     const todosJson  = todosRes  ? await todosRes.json().catch(() => []) : [];
     const calPlanJson = calPlanRes ? await calPlanRes.json().catch(() => ({})) : {};
+    const dadJson    = dadRes    ? await dadRes.json().catch(() => ({})) : {};
+    if (dadJson.ok) DAD_PHARMACY_IDS = new Set(dadJson.ids);
 
     const statuses  = stJson.statuses || {};
     const allVisits = Array.isArray(visitsJson)
@@ -1819,9 +1839,12 @@ function skipRecord() { askSkipRecord(); } // 舊呼叫保留相容
 async function submitVisitRecord() {
   const phId = workingPhId;
   const ph = cards.find(p => p.id === phId);
+  const phName = ph?.name || '';
   const purpose = document.getElementById('record-purpose').value;
   const content = document.getElementById('record-content').value.trim();
   const btn = document.getElementById('record-submit-btn');
+  const visitId = 'V_' + Date.now();
+  const ds = todayStr();
   btn.disabled = true;
   btn.textContent = '送出中...';
 
@@ -1831,15 +1854,31 @@ async function submitVisitRecord() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'addVisit',
-        visitId: 'V_' + Date.now(),
-        pharmacyName: ph?.name || '',
+        visitId,
+        pharmacyName: phName,
         pharmacyId: phId || '',
-        date: todayStr(),
+        date: ds,
         purpose,
         content: content,
       })
     });
     showToast('✅ 拜訪紀錄已儲存！');
+
+    // ── 自動建立老爸聯絡事項（與 index.html 的 submitNewVisit 邏輯保持一致）──
+    const isDelivery = purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content);
+    const isPayment  = purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content);
+    const isRedSlip  = isDelivery || isPayment || /紅單|交貨/.test(content);
+    const isDad      = phId && DAD_PHARMACY_IDS.has(phId);
+
+    if (isDad && isDelivery) {
+      await todoApiCreate({ task: `【${phName}】還帳單給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
+    if (isDad && isPayment) {
+      await todoApiCreate({ task: `【${phName}】交資料袋給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
+    if (isRedSlip) {
+      await todoApiCreate({ task: `【${phName}】把紅單放回抽屜（等整理日整理）`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
   } catch(e) {
     showToast('⚠️ 紀錄儲存失敗，但打卡成功');
   }

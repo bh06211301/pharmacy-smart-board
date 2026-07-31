@@ -472,6 +472,7 @@ async function handleAllVisits(env) {
         actionItems: cleanField(get('Action Items')),
         painPoints:  cleanField(get('Pain Points')),
         tags:        cleanField(get('Tags')),
+        nextFollow:  parseGvizDate(get('下次追蹤日')),
         rawTranscript: cleanField(get('原始逐字稿')),
       };
     })

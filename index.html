@@ -2270,6 +2270,7 @@ async function loadVisits() {
         <div class="visit-date">${v.date||''} ${v.purpose?'· '+v.purpose:''}</div>
         <div class="visit-summary">${v.summary||v.content||'（無摘要）'}</div>
         ${v.actionItems?`<div style="font-size:12px;color:var(--orange);margin-top:6px">📌 待辦：${v.actionItems}</div>`:''}
+        ${v.nextFollow?`<div style="font-size:12px;color:#0284c7;margin-top:6px">📅 下次追蹤：${v.nextFollow}</div>`:''}
         ${v.tags?`<div class="visit-tags">${v.tags.split(',').map(t=>`<span class="visit-tag">${t.trim()}</span>`).join('')}</div>`:''}
         ${v.rawTranscript?`<div style="margin-top:6px">
           <span style="font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline" onclick="document.getElementById('${rawId}').style.display=document.getElementById('${rawId}').style.display==='none'?'block':'none'">🗣 查看原始逐字稿</span>
@@ -2705,7 +2706,8 @@ function renderDayPanel(ds) {
           const aiSum   = v.summary    || '';
           const ai      = v.actionItems|| '';
           const pp      = v.painPoints || '';
-          const hasAny  = raw || fullNote || aiSum || ai || pp;
+          const nf      = v.nextFollow || '';
+          const hasAny  = raw || fullNote || aiSum || ai || pp || nf;
           return `
           <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:${hasAny?'8px':'0'}">
@@ -2725,11 +2727,12 @@ function renderDayPanel(ds) {
                          <span style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.4px">AI 摘要</span>
                          <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-top:3px">${aiSum}</div>
                        </div>` : ''}
-            ${pp    ? `<div style="margin-bottom:${ai?'7px':'0'}">
+            ${pp    ? `<div style="margin-bottom:${ai||nf?'7px':'0'}">
                          <span style="font-size:10px;font-weight:700;color:var(--teal);letter-spacing:.4px">🔍 Pain Points</span>
                          <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-top:3px">${pp}</div>
                        </div>` : ''}
-            ${ai    ? `<div style="font-size:11px;color:var(--orange);background:var(--orange-light);border-radius:4px;padding:4px 7px">📌 ${ai}</div>` : ''}
+            ${ai    ? `<div style="margin-bottom:${nf?'7px':'0'};font-size:11px;color:var(--orange);background:var(--orange-light);border-radius:4px;padding:4px 7px">📌 ${ai}</div>` : ''}
+            ${nf    ? `<div style="font-size:11px;color:#0284c7;background:#e0f2fe;border-radius:4px;padding:4px 7px">📅 下次追蹤：${nf}</div>` : ''}
           </div>`;
         }).join('')}
       </div>`;
@@ -3325,16 +3328,30 @@ function toggleDoneSection() {
   }
 }
 
+async function cycleHealthInsurance(id) {
+  const item = todosCache.find(t => t.id === id);
+  if (!item) return;
+  const order = ['', '尚未健保', '已有健保'];
+  const next = order[(order.indexOf(item.healthInsurance || '') + 1) % order.length];
+  item.healthInsurance = next;
+  renderEisenhower();
+  await todoApiUpdate(id, { healthInsurance: next });
+}
+
 function renderNewPhCard(t) {
   const name = t.pharmacyName || t.task || '（未命名）';
   const addr = t.newPhAddress || '';
   const city = t.newPhCity || '';
   const hi = t.healthInsurance || '';
-  const hiBadge = hi.includes('尚未健保')
-    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#fef9c3;color:#a16207">❗ 尚未健保</span>`
-    : hi.includes('已有健保')
-      ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#dcfce7;color:#166534">✅ 已有健保</span>`
-      : '';
+  const hiBadge = `<span onclick="event.stopPropagation();cycleHealthInsurance('${t.id}')" title="點擊切換健保狀態" style="cursor:pointer;padding:1px 6px;border-radius:8px;font-size:10px;${
+      hi.includes('尚未健保') ? 'background:#fef9c3;color:#a16207' :
+      hi.includes('已有健保') ? 'background:#dcfce7;color:#166534' :
+      'background:var(--surface2);color:var(--muted)'
+    }">${
+      hi.includes('尚未健保') ? '❗ 尚未健保' :
+      hi.includes('已有健保') ? '✅ 已有健保' :
+      '❓ 健保未知'
+    }</span>`;
   const trackerBadge = t.source === 'tracker'
     ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#f3e8ff;color:#7c3aed">🤖 系統偵測</span>` : '';
   const dateBadge = t.scheduledDate
@@ -3364,11 +3381,15 @@ function renderPendingNewPhCard(t) {
   const addr = t.newPhAddress || '';
   const city = t.newPhCity || '';
   const hi = t.healthInsurance || '';
-  const hiBadge = hi.includes('尚未健保')
-    ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#fef9c3;color:#a16207">❗ 尚未健保</span>`
-    : hi.includes('已有健保')
-      ? `<span style="padding:1px 6px;border-radius:8px;font-size:10px;background:#dcfce7;color:#166534">✅ 已有健保</span>`
-      : '';
+  const hiBadge = `<span onclick="event.stopPropagation();cycleHealthInsurance('${t.id}')" title="點擊切換健保狀態" style="cursor:pointer;padding:1px 6px;border-radius:8px;font-size:10px;${
+      hi.includes('尚未健保') ? 'background:#fef9c3;color:#a16207' :
+      hi.includes('已有健保') ? 'background:#dcfce7;color:#166534' :
+      'background:var(--surface2);color:var(--muted)'
+    }">${
+      hi.includes('尚未健保') ? '❗ 尚未健保' :
+      hi.includes('已有健保') ? '✅ 已有健保' :
+      '❓ 健保未知'
+    }</span>`;
   const fullAddr = [city, addr].filter(Boolean).join(' ');
   const mapsUrl  = `https://www.google.com/maps/search/${encodeURIComponent(fullAddr || name)}`;
   const googleUrl= `https://www.google.com/search?q=${encodeURIComponent(name)}`;
