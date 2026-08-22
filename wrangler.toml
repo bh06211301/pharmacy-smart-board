@@ -7,9 +7,15 @@ account_id = "f9c6f3f26e64a3df873681836b9fdbf3"
 binding = "TODOS_KV"
 id = "85f8b8c8077a42048b8113fd05df020e"
 
+[[r2_buckets]]
+binding = "PRODUCT_PHOTOS"
+bucket_name = "pharmacy-product-photos"
+
 [vars]
 SHEET_PHARMACY = "1qJ62K5Hd2bKP9DdQTjwJOOy0njNICMSPiayW7YJZdNM"
 SHEET_VISIT    = "10rofUuKtji4tKGyUv6cvbsiTEq1ynRP0zJxohc3l68U"
 SHEET_PRODUCT  = "1tyJYRWVPl7F5kprBylR_WbbIVayIWQEUxdQ-2sCL-cM"
 SHEET_ORDER        = "13HB7e9mzL0H6Nhfyl-AKhjO8M_GElnqPldTk-u-0ni8"
 SHEET_ORDER_MASTER = "1qa5aqeAPZlo8hyNMA6xD4VCk334B3pnhKyLSkBbhcmo"
+SHEET_INVENTORY    = "1MpGBRGjd5geqU5K3Qh1SVp-RqrBXlasuYQWb2PfSw6w"
+SHEET_RETURN       = "1k78DwiqyfoumGy6Fo0r0NuVFO-COoii1UhwTNAH0tW8"

@@ -184,6 +184,22 @@ export default {
         return await handleInvoiceTasks(env);
       }
 
+      // ★ 盤點候選產品清單
+      if (path === '/inventory-candidates' && request.method === 'GET') {
+        return await handleInventoryCandidates(request, env);
+      }
+
+      // ★ 盤點批次寫入
+      if (path === '/inventory-submit' && request.method === 'POST') {
+        return await handleInventorySubmit(request, env);
+      }
+
+      // ★ 產品照片（R2）
+      if (path.startsWith('/product-photo/') && request.method === 'GET') {
+        const key = decodeURIComponent(path.replace('/product-photo/', ''));
+        return await handleProductPhoto(key, env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -1217,6 +1233,161 @@ async function handleInvoiceTasks(env) {
     }
   });
   return json({ ok: true, invoicing, collection });
+}
+
+// ============================================================
+// 18. 盤點候選產品清單
+// ============================================================
+async function fetchGvizSheet(sheetId, sheetName) {
+  const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+  const url = sheetName ? `${base}&sheet=${encodeURIComponent(sheetName)}` : base;
+  const res = await fetch(url);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+  const cols = data?.table?.cols || [];
+  const rows = data?.table?.rows || [];
+  const colMap = {};
+  cols.forEach((c, i) => { colMap[c.label] = i; });
+  return { rows, colMap };
+}
+
+function gvizGet(row, colMap, label) {
+  const i = colMap[label];
+  if (i === undefined || !row.c[i]) return '';
+  return row.c[i].v ?? '';
+}
+
+async function handleInventoryCandidates(request, env) {
+  const reqUrl = new URL(request.url);
+  const pharmacy = reqUrl.searchParams.get('pharmacy') || '';
+  const session  = reqUrl.searchParams.get('session') || '';
+  if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
+
+  const [orderData, returnData, productData] = await Promise.all([
+    fetchGvizSheet(env.SHEET_ORDER, null),
+    fetchGvizSheet(env.SHEET_RETURN, null),
+    fetchGvizSheet(env.SHEET_PRODUCT, null),
+  ]);
+
+  // 產品主檔：產品編號2 → 名稱/分類/包裝
+  const productMap = {};
+  productData.rows.forEach(row => {
+    const pid2 = String(gvizGet(row, productData.colMap, '產品編號2') || '').trim();
+    if (!pid2) return;
+    productMap[pid2] = {
+      name:     String(gvizGet(row, productData.colMap, '產品名稱') || ''),
+      category: String(gvizGet(row, productData.colMap, '小分類名稱') || ''),
+      pack:     String(gvizGet(row, productData.colMap, '包裝') || ''),
+    };
+  });
+
+  // 停售產品（全域排除，退貨原因=停售）
+  const discontinued = new Set();
+  returnData.rows.forEach(row => {
+    const reason = gvizGet(row, returnData.colMap, '退貨原因');
+    if (reason !== '停售') return;
+    const pid = String(gvizGet(row, returnData.colMap, '產品ID') || '').trim();
+    if (pid) discontinued.add(pid);
+  });
+
+  // 這家藥局買過的產品
+  const bought = {}; // pid -> { totalQty }
+  orderData.rows.forEach(row => {
+    const store = String(gvizGet(row, orderData.colMap, '店名_備份') || '').trim();
+    if (store !== pharmacy) return;
+    const pid = String(gvizGet(row, orderData.colMap, '產品ID') || '').trim();
+    if (!pid) return;
+    const qty = parseFloat(gvizGet(row, orderData.colMap, '數量')) || 0;
+    if (!bought[pid]) bought[pid] = { totalQty: 0 };
+    bought[pid].totalQty += qty;
+  });
+
+  // 排除這個場次已經記錄的（帶 session 時才查，查不到就略過不影響主邏輯）
+  const alreadyRecorded = new Set();
+  if (session && env.SHEET_INVENTORY) {
+    try {
+      const detailData = await fetchGvizSheet(env.SHEET_INVENTORY, '盤點明細');
+      detailData.rows.forEach(row => {
+        const rowSession = String(gvizGet(row, detailData.colMap, '盤點編號') || '').trim();
+        if (rowSession !== session) return;
+        const pid = String(gvizGet(row, detailData.colMap, '產品ID') || '').trim();
+        if (pid) alreadyRecorded.add(pid);
+      });
+    } catch (e) {
+      console.error('讀取盤點明細失敗（不影響候選清單主邏輯）:', e);
+    }
+  }
+
+  const candidates = Object.keys(bought)
+    .filter(pid => !discontinued.has(pid) && !alreadyRecorded.has(pid))
+    .map(pid => {
+      const p = productMap[pid] || {};
+      return {
+        productId:       pid,
+        productName:     p.name || pid,
+        category:        p.category || '',
+        pack:            p.pack || '',
+        totalQtyOrdered: bought[pid].totalQty,
+        photoUrl:        `/product-photo/${encodeURIComponent(pid)}.jpg`,
+      };
+    })
+    .sort((a, b) => (a.category + a.productName).localeCompare(b.category + b.productName, 'zh-Hant'));
+
+  return json({ ok: true, pharmacy, count: candidates.length, candidates });
+}
+
+// ============================================================
+// 19. 盤點批次寫入（代理到 GAS，寫入盤點主檔 + 盤點明細）
+// ============================================================
+async function handleInventorySubmit(request, env) {
+  const body = await request.json();
+  const { pharmacyId, items, visitDate, visitId } = body;
+  if (!pharmacyId || !Array.isArray(items) || !items.length) {
+    return json({ error: '缺少 pharmacyId 或 items' }, 400);
+  }
+
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const sessionId = `INV-${dateStr}-${Math.random().toString(16).slice(2, 10)}`;
+
+  const gasPayload = {
+    action:         'inventorySubmit',
+    sessionId,
+    visitId:        visitId || '',
+    customerId:     pharmacyId,
+    inventoryDate:  visitDate || `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`,
+    items: items.map(it => ({
+      productId:   it.productId || '',
+      productName: it.productName || '',
+      qty:         it.qty,
+      note:        it.note || '',
+      expiry:      it.expiry || '',
+    })),
+  };
+
+  const res = await fetch(GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(gasPayload),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (!data.success) return json({ error: data.error || 'GAS 寫入失敗' }, 500);
+  return json({ ok: true, sessionId, itemCount: data.itemCount });
+}
+
+// ============================================================
+// 20. 產品照片（從 Cloudflare R2 讀取）
+// ============================================================
+async function handleProductPhoto(key, env) {
+  if (!env.PRODUCT_PHOTOS) return json({ error: 'R2 binding 未設定' }, 500);
+  const obj = await env.PRODUCT_PHOTOS.get(key);
+  if (!obj) return new Response('Not Found', { status: 404, headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' } });
+  const headers = new Headers(CORS_HEADERS);
+  headers.set('Content-Type', obj.httpMetadata?.contentType || 'image/jpeg');
+  headers.set('Cache-Control', 'public, max-age=2592000');
+  return new Response(obj.body, { headers });
 }
 
 // ============================================================

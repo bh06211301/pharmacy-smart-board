@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>盤點登記 📦</title>
+<style>
+:root {
+  --bg:#f0f2f8;--white:#fff;--border:#e4e7f0;
+  --accent:#3b6ef5;--green:#10b981;--orange:#f97316;
+  --red:#ef4444;--yellow:#f59e0b;
+  --text:#101828;--muted:#6b7280;
+  --radius:16px;
+  --shadow:0 2px 12px rgba(16,24,40,.1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:-apple-system,'SF Pro Display','Inter',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;max-width:480px;margin:0 auto;
+}
+
+/* ── HEADER ── */
+.header{
+  background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);
+  padding:16px 20px 18px;position:sticky;top:0;z-index:100;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+}
+.header-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.header-title{color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.header-sub{color:rgba(255,255,255,.6);font-size:12px;margin-top:4px}
+.header-back{
+  background:rgba(255,255,255,.15);color:#fff;border:none;
+  padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+
+/* ── CONTENT ── */
+.content{padding:16px;padding-bottom:110px}
+
+/* ── PHARMACY PICKER ── */
+.search-box{
+  background:var(--white);border-radius:12px;border:1px solid var(--border);
+  padding:12px 14px;margin-bottom:14px;box-shadow:var(--shadow);
+}
+.search-box input{
+  width:100%;border:none;outline:none;font-size:15px;color:var(--text);
+  font-family:inherit;background:transparent;
+}
+.ph-list{display:flex;flex-direction:column;gap:8px}
+.ph-item{
+  background:var(--white);border-radius:12px;padding:13px 16px;
+  box-shadow:var(--shadow);cursor:pointer;transition:transform .1s;
+  display:flex;flex-direction:column;gap:2px;
+}
+.ph-item:active{transform:scale(.98)}
+.ph-item .name{font-size:15px;font-weight:700;color:var(--text)}
+.ph-item .addr{font-size:12px;color:var(--muted)}
+.empty-hint{text-align:center;color:var(--muted);font-size:13px;padding:40px 20px}
+
+/* ── CANDIDATE LIST ── */
+.selected-ph-bar{
+  background:var(--white);border-radius:12px;padding:12px 16px;margin-bottom:14px;
+  box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.selected-ph-bar .name{font-size:15px;font-weight:700}
+.selected-ph-bar .switch-btn{
+  background:var(--bg);border:none;color:var(--accent);font-weight:700;
+  font-size:12px;padding:6px 12px;border-radius:16px;cursor:pointer;white-space:nowrap;
+}
+
+.cand-card{
+  background:var(--white);border-radius:var(--radius);padding:14px;
+  margin-bottom:10px;box-shadow:var(--shadow);
+}
+.cand-top{display:flex;gap:12px}
+.cand-photo{
+  width:64px;height:64px;border-radius:10px;flex-shrink:0;
+  background:var(--bg);display:flex;align-items:center;justify-content:center;
+  overflow:hidden;font-size:26px;
+}
+.cand-photo img{width:100%;height:100%;object-fit:contain}
+.cand-meta{flex:1;min-width:0}
+.cand-name{font-size:14px;font-weight:700;color:var(--text);line-height:1.35}
+.cand-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.cand-sub2{font-size:11px;color:var(--muted);margin-top:2px}
+
+.qty-row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.qty-btn{
+  width:34px;height:34px;border-radius:9px;border:1px solid var(--border);
+  background:var(--bg);font-size:18px;font-weight:700;color:var(--text);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+.qty-btn:active{transform:scale(.92)}
+.qty-input{
+  width:56px;height:34px;text-align:center;border:1px solid var(--border);
+  border-radius:9px;font-size:15px;font-weight:700;color:var(--text);
+  font-family:inherit;
+}
+.qty-label{font-size:11px;color:var(--muted);margin-left:2px}
+.more-toggle{
+  margin-left:auto;background:none;border:none;color:var(--accent);
+  font-size:12px;font-weight:700;cursor:pointer;padding:6px 4px;
+}
+
+.extra-row{display:none;margin-top:10px;gap:8px;flex-direction:column}
+.extra-row.show{display:flex}
+.chip-row{display:flex;gap:6px;flex-wrap:wrap}
+.chip{
+  font-size:11px;font-weight:600;padding:5px 10px;border-radius:12px;
+  border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer;
+}
+.chip.active{background:var(--orange);border-color:var(--orange);color:#fff}
+.extra-input{
+  width:100%;border:1px solid var(--border);border-radius:9px;
+  padding:8px 10px;font-size:13px;font-family:inherit;color:var(--text);
+}
+.extra-input-row{display:flex;gap:8px}
+.extra-input-row > *{flex:1}
+
+.cand-card.touched{position:relative}
+.cand-card.touched::after{
+  content:'✓';position:absolute;top:10px;right:12px;
+  width:20px;height:20px;border-radius:50%;
+  background:var(--green);color:#fff;font-size:12px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* ── SUBMIT BAR ── */
+.submit-bar{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:480px;background:var(--white);
+  border-top:1px solid var(--border);padding:12px 16px;
+  box-shadow:0 -4px 16px rgba(16,24,40,.08);z-index:200;
+}
+.submit-btn{
+  width:100%;padding:15px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.submit-btn:disabled{opacity:.4;cursor:not-allowed}
+.submit-btn:active:not(:disabled){transform:scale(.98)}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(16px);
+  background:var(--text);color:#fff;padding:10px 20px;border-radius:20px;
+  font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.3);
+  z-index:900;white-space:nowrap;opacity:0;transition:all .3s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.loading{text-align:center;color:var(--muted);font-size:13px;padding:40px 20px}
+.view{display:none}
+.view.active{display:block}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="header-title">📦 盤點登記</div>
+      <div class="header-sub" id="header-sub">選擇要盤點的藥局</div>
+    </div>
+    <button class="header-back" id="btn-switch-ph" style="display:none" onclick="backToPicker()">換藥局</button>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- View A：選擇藥局 -->
+  <div class="view active" id="view-picker">
+    <div class="search-box">
+      <input id="ph-search" placeholder="輸入藥局名稱或代號搜尋…" autocomplete="off" oninput="renderPharmacyList()">
+    </div>
+    <div class="ph-list" id="ph-list"></div>
+  </div>
+
+  <!-- View B：候選清單 -->
+  <div class="view" id="view-candidates">
+    <div class="selected-ph-bar">
+      <div class="name" id="cand-ph-name"></div>
+      <button class="switch-btn" onclick="backToPicker()">換藥局</button>
+    </div>
+    <div id="cand-list"></div>
+  </div>
+
+</div>
+
+<div class="submit-bar" id="submit-bar" style="display:none">
+  <button class="submit-btn" id="submit-btn" onclick="submitInventory()" disabled>
+    送出盤點（<span id="submit-count">0</span> 項）
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+
+let allPharmacies = [];
+let currentPharmacy = null;
+let currentSession = null;
+let candidates = [];
+// touched[productId] = { qty, note, expiry }
+let touched = {};
+
+// ── TOAST ──
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+// ── INIT ──
+async function init() {
+  document.getElementById('ph-list').innerHTML = '<div class="loading">載入藥局清單中…</div>';
+  try {
+    const res = await fetch(WORKER + '/pharmacies');
+    const data = await res.json();
+    allPharmacies = data.pharmacies || [];
+  } catch (e) {
+    allPharmacies = [];
+  }
+  renderPharmacyList();
+}
+
+function renderPharmacyList() {
+  const kw = document.getElementById('ph-search').value.trim().toLowerCase();
+  const list = document.getElementById('ph-list');
+  let filtered = allPharmacies;
+  if (kw) {
+    filtered = allPharmacies.filter(p =>
+      (p.name && p.name.toLowerCase().includes(kw)) ||
+      (p.id && p.id.toLowerCase().includes(kw))
+    );
+  }
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty-hint">找不到符合的藥局</div>';
+    return;
+  }
+  list.innerHTML = filtered.slice(0, 60).map(p => `
+    <div class="ph-item" onclick="selectPharmacy('${p.id}')">
+      <div class="name">${escapeHtml(p.name)}（${escapeHtml(p.id)}）</div>
+      <div class="addr">${escapeHtml(p.address || '')}</div>
+    </div>
+  `).join('');
+}
+
+function genSessionId() {
+  const now = new Date();
+  const d = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+  const rand = Math.random().toString(16).slice(2, 10);
+  return `INV-${d}-${rand}`;
+}
+
+async function selectPharmacy(id) {
+  currentPharmacy = allPharmacies.find(p => p.id === id);
+  if (!currentPharmacy) return;
+  currentSession = genSessionId();
+  touched = {};
+
+  document.getElementById('view-picker').classList.remove('active');
+  document.getElementById('view-candidates').classList.add('active');
+  document.getElementById('btn-switch-ph').style.display = '';
+  document.getElementById('header-sub').textContent = currentPharmacy.name;
+  document.getElementById('cand-ph-name').textContent = `${currentPharmacy.name}（${currentPharmacy.id}）`;
+  document.getElementById('submit-bar').style.display = '';
+
+  await loadCandidates();
+}
+
+function backToPicker() {
+  document.getElementById('view-candidates').classList.remove('active');
+  document.getElementById('view-picker').classList.add('active');
+  document.getElementById('btn-switch-ph').style.display = 'none';
+  document.getElementById('header-sub').textContent = '選擇要盤點的藥局';
+  document.getElementById('submit-bar').style.display = 'none';
+  currentPharmacy = null;
+  currentSession = null;
+  candidates = [];
+  touched = {};
+}
+
+async function loadCandidates() {
+  const list = document.getElementById('cand-list');
+  list.innerHTML = '<div class="loading">載入候選產品中…</div>';
+  try {
+    const url = `${WORKER}/inventory-candidates?pharmacy=${encodeURIComponent(currentPharmacy.id)}&session=${encodeURIComponent(currentSession)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    candidates = data.candidates || [];
+  } catch (e) {
+    candidates = [];
+  }
+  renderCandidates();
+}
+
+function renderCandidates() {
+  const list = document.getElementById('cand-list');
+  if (!candidates.length) {
+    list.innerHTML = '<div class="empty-hint">這家藥局目前沒有候選產品<br>（可能尚無進貨紀錄，或已全部盤點完成）</div>';
+    updateSubmitBar();
+    return;
+  }
+  list.innerHTML = candidates.map(c => candCardHtml(c)).join('');
+  updateSubmitBar();
+}
+
+function candCardHtml(c) {
+  const t = touched[c.productId] || {};
+  const photoSrc = WORKER + c.photoUrl;
+  return `
+    <div class="cand-card" id="card-${c.productId}">
+      <div class="cand-top">
+        <div class="cand-photo" id="photo-${c.productId}">💊</div>
+        <div class="cand-meta">
+          <div class="cand-name">${escapeHtml(c.productName)}</div>
+          <div class="cand-sub">${escapeHtml(c.category || '')}${c.pack ? '・' + escapeHtml(c.pack) : ''}</div>
+          <div class="cand-sub2">曾進貨 ${c.totalQtyOrdered || 0} 件</div>
+        </div>
+      </div>
+      <div class="qty-row">
+        <button class="qty-btn" onclick="stepQty('${c.productId}', -1)">－</button>
+        <input class="qty-input" type="number" min="0" inputmode="numeric"
+          id="qty-${c.productId}" value="${t.qty !== undefined ? t.qty : ''}"
+          placeholder="0" onchange="onQtyChange('${c.productId}', this.value)">
+        <span class="qty-label">個</span>
+        <button class="qty-btn" onclick="stepQty('${c.productId}', 1)">＋</button>
+        <button class="more-toggle" onclick="toggleExtra('${c.productId}')">備註/效期</button>
+      </div>
+      <div class="extra-row" id="extra-${c.productId}">
+        <div class="chip-row">
+          <div class="chip" onclick="quickNote('${c.productId}', '缺貨')">缺貨</div>
+          <div class="chip" onclick="quickNote('${c.productId}', '效期將近')">效期將近</div>
+          <div class="chip" onclick="quickNote('${c.productId}', '包裝損壞')">包裝損壞</div>
+        </div>
+        <div class="extra-input-row">
+          <input class="extra-input" type="text" placeholder="備註"
+            id="note-${c.productId}" value="${escapeHtml(t.note || '')}"
+            onchange="onNoteChange('${c.productId}', this.value)">
+          <input class="extra-input" type="date"
+            id="expiry-${c.productId}" value="${t.expiry || ''}"
+            onchange="onExpiryChange('${c.productId}', this.value)">
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// 圖片載入失敗時換成 emoji 佔位（先嘗試載入，成功才換成 <img>）
+function tryLoadPhotos() {
+  candidates.forEach(c => {
+    const holder = document.getElementById(`photo-${c.productId}`);
+    if (!holder) return;
+    const img = new Image();
+    img.onload = () => { holder.innerHTML = ''; holder.appendChild(img); };
+    img.onerror = () => { /* 保留 emoji 佔位 */ };
+    img.src = WORKER + c.photoUrl;
+  });
+}
+
+function ensureTouched(pid) {
+  if (!touched[pid]) touched[pid] = {};
+  return touched[pid];
+}
+
+function stepQty(pid, delta) {
+  const input = document.getElementById(`qty-${pid}`);
+  let v = parseInt(input.value || '0', 10) || 0;
+  v = Math.max(0, v + delta);
+  input.value = v;
+  onQtyChange(pid, v);
+}
+
+function onQtyChange(pid, val) {
+  const t = ensureTouched(pid);
+  if (val === '' || val === null) {
+    delete t.qty;
+  } else {
+    t.qty = Math.max(0, parseInt(val, 10) || 0);
+  }
+  syncTouchState(pid);
+  updateSubmitBar();
+}
+
+function onNoteChange(pid, val) {
+  const t = ensureTouched(pid);
+  t.note = val;
+  syncTouchState(pid);
+  updateSubmitBar();
+}
+
+function onExpiryChange(pid, val) {
+  const t = ensureTouched(pid);
+  t.expiry = val;
+  syncTouchState(pid);
+  updateSubmitBar();
+}
+
+function quickNote(pid, label) {
+  const t = ensureTouched(pid);
+  t.note = (t.note === label) ? '' : label;
+  document.getElementById(`note-${pid}`).value = t.note;
+  syncTouchState(pid);
+  updateSubmitBar();
+  renderChipActive(pid);
+}
+
+function renderChipActive(pid) {
+  const t = touched[pid] || {};
+  const card = document.getElementById(`card-${pid}`);
+  if (!card) return;
+  card.querySelectorAll('.chip').forEach(chip => {
+    chip.classList.toggle('active', chip.textContent === t.note);
+  });
+}
+
+function syncTouchState(pid) {
+  const t = touched[pid] || {};
+  const isTouched = t.qty !== undefined || (t.note && t.note.trim()) || t.expiry;
+  if (!isTouched) delete touched[pid];
+  const card = document.getElementById(`card-${pid}`);
+  if (card) card.classList.toggle('touched', isTouched);
+}
+
+function toggleExtra(pid) {
+  document.getElementById(`extra-${pid}`).classList.toggle('show');
+}
+
+function updateSubmitBar() {
+  const count = Object.keys(touched).length;
+  document.getElementById('submit-count').textContent = count;
+  document.getElementById('submit-btn').disabled = count === 0;
+}
+
+async function submitInventory() {
+  const items = Object.keys(touched).map(pid => {
+    const c = candidates.find(x => x.productId === pid) || {};
+    const t = touched[pid];
+    return {
+      productId: pid,
+      productName: c.productName || pid,
+      qty: t.qty !== undefined ? t.qty : 0,
+      note: t.note || '',
+      expiry: t.expiry || '',
+    };
+  });
+  if (!items.length) return;
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = '送出中…';
+
+  const now = new Date();
+  const visitDate = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()}`;
+
+  try {
+    const res = await fetch(WORKER + '/inventory-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pharmacyId: currentPharmacy.id,
+        visitDate,
+        items,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '送出失敗');
+
+    showToast(`✅ 已送出 ${data.itemCount} 項盤點紀錄`);
+    touched = {};
+    await loadCandidates(); // 重新載入，已記錄的品項會被排除
+  } catch (e) {
+    showToast('❌ 送出失敗：' + e.message);
+  } finally {
+    updateSubmitBar();
+    document.getElementById('submit-btn').innerHTML = '送出盤點（<span id="submit-count">' + Object.keys(touched).length + '</span> 項）';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+// candidates 渲染完後才嘗試載入照片（避免佔用初次渲染時間）
+const _origRenderCandidates = renderCandidates;
+renderCandidates = function() {
+  _origRenderCandidates();
+  tryLoadPhotos();
+};
+
+init();
+</script>
+</body>
+</html>
