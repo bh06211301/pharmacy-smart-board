@@ -47,6 +47,23 @@ body{
   width:100%;border:none;outline:none;font-size:15px;color:var(--text);
   font-family:inherit;background:transparent;
 }
+.locate-btn{
+  width:100%;padding:13px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--green),#059669);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  margin-bottom:12px;
+}
+.locate-btn:active{transform:scale(.98)}
+.locate-btn:disabled{opacity:.6;cursor:not-allowed}
+.locate-status{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:12px;color:var(--muted);margin:-2px 2px 14px;
+}
+.locate-status .clear-btn{
+  color:var(--accent);font-weight:700;cursor:pointer;
+  background:none;border:none;font-size:12px;padding:4px;
+}
 .ph-list{display:flex;flex-direction:column;gap:8px}
 .ph-item{
   background:var(--white);border-radius:12px;padding:13px 16px;
@@ -56,6 +73,7 @@ body{
 .ph-item:active{transform:scale(.98)}
 .ph-item .name{font-size:15px;font-weight:700;color:var(--text)}
 .ph-item .addr{font-size:12px;color:var(--muted)}
+.ph-item .dist{font-size:11.5px;color:var(--green);font-weight:700;margin-top:1px}
 .empty-hint{text-align:center;color:var(--muted);font-size:13px;padding:40px 20px}
 
 /* ── CANDIDATE LIST ── */
@@ -175,6 +193,11 @@ body{
     <div class="search-box">
       <input id="ph-search" placeholder="輸入藥局名稱或代號搜尋…" autocomplete="off" oninput="renderPharmacyList()">
     </div>
+    <button class="locate-btn" id="btn-locate" onclick="locateNearby()">📍 定位最近藥局</button>
+    <div class="locate-status" id="locate-status" style="display:none">
+      <span id="locate-status-text">📍 已定位，依距離排序</span>
+      <button class="clear-btn" onclick="clearLocate()">✕ 取消定位</button>
+    </div>
     <div class="ph-list" id="ph-list"></div>
   </div>
 
@@ -244,12 +267,80 @@ function renderPharmacyList() {
     list.innerHTML = '<div class="empty-hint">找不到符合的藥局</div>';
     return;
   }
-  list.innerHTML = filtered.slice(0, 60).map(p => `
+
+  let withDist = filtered.map(p => {
+    const dist = (userLoc && p.lat && p.lng)
+      ? distanceMeters(userLoc.lat, userLoc.lng, p.lat, p.lng)
+      : null;
+    return { ...p, dist };
+  });
+
+  if (userLoc) {
+    withDist.sort((a, b) => {
+      if (a.dist === null && b.dist === null) return 0;
+      if (a.dist === null) return 1;
+      if (b.dist === null) return -1;
+      return a.dist - b.dist;
+    });
+  }
+
+  list.innerHTML = withDist.slice(0, 60).map(p => `
     <div class="ph-item" onclick="selectPharmacy('${p.id}')">
       <div class="name">${escapeHtml(p.name)}（${escapeHtml(p.id)}）</div>
       <div class="addr">${escapeHtml(p.address || '')}</div>
+      ${p.dist !== null ? `<div class="dist">📍 距離約 ${formatDistance(p.dist)}</div>` : ''}
     </div>
   `).join('');
+}
+
+// ── 定位最近藥局 ──
+let userLoc = null;
+
+function locateNearby() {
+  if (!navigator.geolocation) {
+    showToast('❌ 此瀏覽器不支援定位功能');
+    return;
+  }
+  const btn = document.getElementById('btn-locate');
+  btn.disabled = true;
+  btn.textContent = '📍 定位中…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      btn.disabled = false;
+      btn.textContent = '📍 定位最近藥局';
+      document.getElementById('locate-status').style.display = 'flex';
+      renderPharmacyList();
+      showToast('📍 已依距離排序');
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.textContent = '📍 定位最近藥局';
+      const msgMap = { 1: '你拒絕了定位權限，請到瀏覽器設定開啟', 2: '無法取得目前位置', 3: '定位逾時，請再試一次' };
+      showToast('❌ ' + (msgMap[err.code] || '定位失敗'));
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+  );
+}
+
+function clearLocate() {
+  userLoc = null;
+  document.getElementById('locate-status').style.display = 'none';
+  renderPharmacyList();
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(1) + ' km';
 }
 
 function genSessionId() {
