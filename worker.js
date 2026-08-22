@@ -1264,9 +1264,10 @@ async function handleInventoryCandidates(request, env) {
   const session  = reqUrl.searchParams.get('session') || '';
   if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
 
-  const [orderData, returnData, productData] = await Promise.all([
+  const [orderData, returnData, returnOrderData, productData] = await Promise.all([
     fetchGvizSheet(env.SHEET_ORDER, null),
     fetchGvizSheet(env.SHEET_RETURN, null),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null),
     fetchGvizSheet(env.SHEET_PRODUCT, null),
   ]);
 
@@ -1282,11 +1283,21 @@ async function handleInventoryCandidates(request, env) {
     };
   });
 
-  // 停售產品（全域排除，退貨原因=停售）
+  // 退貨單號 → 店名（Customer_ID），用來把退貨明細對應到特定藥局
+  const returnOrderStoreMap = {};
+  returnOrderData.rows.forEach(row => {
+    const no    = String(gvizGet(row, returnOrderData.colMap, '退貨單號') || '').trim();
+    const store = String(gvizGet(row, returnOrderData.colMap, '店名') || '').trim();
+    if (no && store) returnOrderStoreMap[no] = store;
+  });
+
+  // 停售產品（單店排除：退貨原因=停售，且該筆退貨單對應到目前這家藥局）
   const discontinued = new Set();
   returnData.rows.forEach(row => {
     const reason = gvizGet(row, returnData.colMap, '退貨原因');
     if (reason !== '停售') return;
+    const returnNo = String(gvizGet(row, returnData.colMap, '退貨單號') || '').trim();
+    if (returnOrderStoreMap[returnNo] !== pharmacy) return;
     const pid = String(gvizGet(row, returnData.colMap, '產品ID') || '').trim();
     if (pid) discontinued.add(pid);
   });
