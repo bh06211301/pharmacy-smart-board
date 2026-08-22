@@ -129,6 +129,7 @@ body{
   border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer;
 }
 .chip.active{background:var(--orange);border-color:var(--orange);color:#fff}
+.chip.chip-danger.active{background:var(--red);border-color:var(--red);color:#fff}
 .extra-input{
   width:100%;border:1px solid var(--border);border-radius:9px;
   padding:8px 10px;font-size:13px;font-family:inherit;color:var(--text);
@@ -427,9 +428,10 @@ function candCardHtml(c) {
       </div>
       <div class="extra-row" id="extra-${c.productId}">
         <div class="chip-row">
-          <div class="chip" onclick="quickNote('${c.productId}', '缺貨')">缺貨</div>
-          <div class="chip" onclick="quickNote('${c.productId}', '效期將近')">效期將近</div>
-          <div class="chip" onclick="quickNote('${c.productId}', '包裝損壞')">包裝損壞</div>
+          <div class="chip" data-label="缺貨" onclick="quickNote('${c.productId}', '缺貨')">缺貨</div>
+          <div class="chip" data-label="效期將近" onclick="quickNote('${c.productId}', '效期將近')">效期將近</div>
+          <div class="chip" data-label="包裝損壞" onclick="quickNote('${c.productId}', '包裝損壞')">包裝損壞</div>
+          <div class="chip chip-danger" data-label="停售" onclick="quickNote('${c.productId}', '停售')">🚫 停售（此店）</div>
         </div>
         <div class="extra-input-row">
           <input class="extra-input" type="text" placeholder="備註"
@@ -508,7 +510,7 @@ function renderChipActive(pid) {
   const card = document.getElementById(`card-${pid}`);
   if (!card) return;
   card.querySelectorAll('.chip').forEach(chip => {
-    chip.classList.toggle('active', chip.textContent === t.note);
+    chip.classList.toggle('active', chip.dataset.label === t.note);
   });
 }
 
