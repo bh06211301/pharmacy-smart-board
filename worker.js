@@ -200,6 +200,11 @@ export default {
         return await handleProductPhoto(key, env);
       }
 
+      // ★ 藥局資訊總覽（出貨明細 + 退貨紀錄 + 盤點歷史）
+      if (path === '/pharmacy-profile' && request.method === 'GET') {
+        return await handlePharmacyProfile(request, env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -1399,6 +1404,124 @@ async function handleProductPhoto(key, env) {
   headers.set('Content-Type', obj.httpMetadata?.contentType || 'image/jpeg');
   headers.set('Cache-Control', 'public, max-age=2592000');
   return new Response(obj.body, { headers });
+}
+
+// ============================================================
+// 21. 藥局資訊總覽（出貨明細 + 退貨紀錄 + 盤點歷史，依 pharmacy 彙整）
+// ============================================================
+function extractOrderDateFromNo(orderNo) {
+  const s = String(orderNo || '').replace(/\D/g, '');
+  if (s.length >= 6) {
+    const yy = parseInt(s.slice(0, 2), 10);
+    const mm = parseInt(s.slice(2, 4), 10);
+    const dd = parseInt(s.slice(4, 6), 10);
+    if (yy >= 10 && yy <= 99 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${2000 + yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+    }
+  }
+  const m = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+}
+
+async function handlePharmacyProfile(request, env) {
+  const reqUrl = new URL(request.url);
+  const pharmacy = reqUrl.searchParams.get('pharmacy') || '';
+  if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
+
+  const [orderData, productData, returnDetailData, returnOrderData, invMasterData, invDetailData] = await Promise.all([
+    fetchGvizSheet(env.SHEET_ORDER, null),
+    fetchGvizSheet(env.SHEET_PRODUCT, null),
+    fetchGvizSheet(env.SHEET_RETURN, null),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null),
+    fetchGvizSheet(env.SHEET_INVENTORY, '盤點主檔'),
+    fetchGvizSheet(env.SHEET_INVENTORY, '盤點明細'),
+  ]);
+
+  const productNameMap = {};
+  productData.rows.forEach(row => {
+    const pid = String(gvizGet(row, productData.colMap, '產品編號2') || '').trim();
+    if (pid) productNameMap[pid] = String(gvizGet(row, productData.colMap, '產品名稱') || '');
+  });
+
+  // ── 出貨/訂單明細 ──
+  const orders = [];
+  orderData.rows.forEach(row => {
+    const store = String(gvizGet(row, orderData.colMap, '店名_備份') || '').trim();
+    if (store !== pharmacy) return;
+    const orderNo = gvizGet(row, orderData.colMap, '訂單編號');
+    const pid = String(gvizGet(row, orderData.colMap, '產品ID') || '').trim();
+    orders.push({
+      orderNo:     String(orderNo || ''),
+      date:        extractOrderDateFromNo(orderNo),
+      productId:   pid,
+      productName: productNameMap[pid] || pid,
+      qty:         parseFloat(gvizGet(row, orderData.colMap, '數量')) || 0,
+      unitPrice:   parseFloat(gvizGet(row, orderData.colMap, '單價')) || 0,
+      subtotal:    parseFloat(gvizGet(row, orderData.colMap, '小計')) || 0,
+    });
+  });
+  orders.sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
+
+  // ── 退貨紀錄（退貨單=主檔，退貨明細=明細，透過退貨單號 join，只取這家店的） ──
+  const myReturnOrders = {};
+  returnOrderData.rows.forEach(row => {
+    const store = String(gvizGet(row, returnOrderData.colMap, '店名') || '').trim();
+    if (store !== pharmacy) return;
+    const no = String(gvizGet(row, returnOrderData.colMap, '退貨單號') || '').trim();
+    if (!no) return;
+    myReturnOrders[no] = {
+      returnNo: no,
+      date:     parseGvizDate(gvizGet(row, returnOrderData.colMap, '退貨日期')),
+      amount:   parseFloat(gvizGet(row, returnOrderData.colMap, '退貨金額')) || 0,
+      status:   String(gvizGet(row, returnOrderData.colMap, '退貨單實體狀態') || ''),
+      items:    [],
+    };
+  });
+  returnDetailData.rows.forEach(row => {
+    const no = String(gvizGet(row, returnDetailData.colMap, '退貨單號') || '').trim();
+    const master = myReturnOrders[no];
+    if (!master) return;
+    const pid = String(gvizGet(row, returnDetailData.colMap, '產品ID') || '').trim();
+    master.items.push({
+      productId:   pid,
+      productName: productNameMap[pid] || pid,
+      qty:         parseFloat(gvizGet(row, returnDetailData.colMap, '數量')) || 0,
+      unitPrice:   parseFloat(gvizGet(row, returnDetailData.colMap, '退貨單價')) || 0,
+      subtotal:    parseFloat(gvizGet(row, returnDetailData.colMap, '小計')) || 0,
+      reason:      String(gvizGet(row, returnDetailData.colMap, '退貨原因') || ''),
+      note:        String(gvizGet(row, returnDetailData.colMap, '退貨備註') || ''),
+    });
+  });
+  const returns = Object.values(myReturnOrders).sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
+
+  // ── 盤點歷史（盤點主檔=場次，盤點明細=品項，透過盤點編號 join，只取這家店的） ──
+  const mySessions = {};
+  invMasterData.rows.forEach(row => {
+    const cust = String(gvizGet(row, invMasterData.colMap, 'Customer_ID') || '').trim();
+    if (cust !== pharmacy) return;
+    const sid = String(gvizGet(row, invMasterData.colMap, '盤點編號') || '').trim();
+    if (!sid) return;
+    mySessions[sid] = {
+      sessionId: sid,
+      date:      parseGvizDate(gvizGet(row, invMasterData.colMap, '盤點日期')),
+      items:     [],
+    };
+  });
+  invDetailData.rows.forEach(row => {
+    const sid = String(gvizGet(row, invDetailData.colMap, '盤點編號') || '').trim();
+    const master = mySessions[sid];
+    if (!master) return;
+    master.items.push({
+      productId:   String(gvizGet(row, invDetailData.colMap, '產品ID') || ''),
+      productName: String(gvizGet(row, invDetailData.colMap, '產品名稱') || ''),
+      qty:         gvizGet(row, invDetailData.colMap, '產品數量'),
+      note:        String(gvizGet(row, invDetailData.colMap, '盤點備註') || ''),
+      expiry:      String(gvizGet(row, invDetailData.colMap, '產品效期') || ''),
+    });
+  });
+  const inventory = Object.values(mySessions).sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
+
+  return json({ ok: true, pharmacy, orders, returns, inventory });
 }
 
 // ============================================================

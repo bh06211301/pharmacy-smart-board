@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>藥局資訊總覽 🏪</title>
+<style>
+:root {
+  --bg:#f0f2f8;--white:#fff;--border:#e4e7f0;
+  --accent:#3b6ef5;--green:#10b981;--orange:#f97316;
+  --red:#ef4444;--yellow:#f59e0b;
+  --text:#101828;--muted:#6b7280;
+  --radius:16px;
+  --shadow:0 2px 12px rgba(16,24,40,.1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+body{
+  font-family:-apple-system,'SF Pro Display','Inter',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;max-width:480px;margin:0 auto;
+}
+
+/* ── HEADER ── */
+.header{
+  background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);
+  padding:16px 20px 18px;position:sticky;top:0;z-index:100;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+}
+.header-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.header-title{color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.header-sub{color:rgba(255,255,255,.6);font-size:12px;margin-top:4px}
+.header-back{
+  background:rgba(255,255,255,.15);color:#fff;border:none;
+  padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+
+/* ── CONTENT ── */
+.content{padding:16px;padding-bottom:40px}
+
+/* ── PHARMACY PICKER（跟 inventory.html 同一套） ── */
+.search-box{
+  background:var(--white);border-radius:12px;border:1px solid var(--border);
+  padding:12px 14px;margin-bottom:14px;box-shadow:var(--shadow);
+}
+.search-box input{
+  width:100%;border:none;outline:none;font-size:15px;color:var(--text);
+  font-family:inherit;background:transparent;
+}
+.locate-btn{
+  width:100%;padding:13px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--green),#059669);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  margin-bottom:12px;
+}
+.locate-btn:active{transform:scale(.98)}
+.locate-btn:disabled{opacity:.6;cursor:not-allowed}
+.locate-status{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:12px;color:var(--muted);margin:-2px 2px 14px;
+}
+.locate-status .clear-btn{
+  color:var(--accent);font-weight:700;cursor:pointer;
+  background:none;border:none;font-size:12px;padding:4px;
+}
+.ph-list{display:flex;flex-direction:column;gap:8px}
+.ph-item{
+  background:var(--white);border-radius:12px;padding:13px 16px;
+  box-shadow:var(--shadow);cursor:pointer;transition:transform .1s;
+  display:flex;flex-direction:column;gap:2px;
+}
+.ph-item:active{transform:scale(.98)}
+.ph-item .name{font-size:14px;font-weight:700;color:var(--text)}
+.ph-item .addr{font-size:12px;color:var(--muted)}
+.ph-item .dist{font-size:11px;color:var(--green);font-weight:700;margin-top:1px}
+.empty-hint{text-align:center;color:var(--muted);font-size:12px;padding:40px 20px}
+
+/* ── PROFILE VIEW ── */
+.info-card{
+  background:var(--white);border-radius:var(--radius);padding:16px;
+  margin-bottom:14px;box-shadow:var(--shadow);
+}
+.info-name{font-size:20px;font-weight:800;color:var(--text)}
+.info-id{font-size:11px;color:var(--muted);margin-top:2px}
+.info-grid{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.info-row{display:flex;gap:8px;font-size:12px}
+.info-row .label{color:var(--muted);flex-shrink:0;width:52px}
+.info-row .val{color:var(--text)}
+
+.tab-row{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px}
+.tab-btn{
+  flex-shrink:0;padding:9px 14px;border-radius:20px;border:1px solid var(--border);
+  background:var(--white);color:var(--muted);font-size:12px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+.tab-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.panel{display:none}
+.panel.active{display:block}
+
+.rec-card{
+  background:var(--white);border-radius:var(--radius);padding:14px;
+  margin-bottom:10px;box-shadow:var(--shadow);
+}
+.rec-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.rec-date{font-size:14px;font-weight:700;color:var(--text)}
+.rec-tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:10px;background:var(--bg);color:var(--muted)}
+.rec-tag.danger{background:#fef2f2;color:var(--red)}
+.rec-sub{font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.5}
+.item-line{
+  display:flex;justify-content:space-between;gap:8px;
+  font-size:12px;color:var(--text);padding:5px 0;
+  border-top:1px solid var(--bg);
+}
+.item-line:first-child{border-top:none}
+.item-line .iname{flex:1;min-width:0}
+.item-line .iname.reason-停售{color:var(--red);font-weight:700}
+.item-line .iqty{color:var(--muted);white-space:nowrap}
+.rec-total{
+  display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;
+  border-top:1px solid var(--border);font-size:14px;font-weight:700;
+}
+.note-badge{
+  display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;
+  border-radius:8px;background:var(--bg);color:var(--muted);margin-left:6px;
+}
+.note-badge.danger{background:#fef2f2;color:var(--red)}
+
+.loading{text-align:center;color:var(--muted);font-size:12px;padding:40px 20px}
+.view{display:none}
+.view.active{display:block}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="header-title">🏪 藥局資訊總覽</div>
+      <div class="header-sub" id="header-sub">選擇要查詢的藥局</div>
+    </div>
+    <button class="header-back" id="btn-switch-ph" style="display:none" onclick="backToPicker()">換藥局</button>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- View A：選擇藥局 -->
+  <div class="view active" id="view-picker">
+    <div class="search-box">
+      <input id="ph-search" placeholder="輸入藥局名稱或代號搜尋…" autocomplete="off" oninput="renderPharmacyList()">
+    </div>
+    <button class="locate-btn" id="btn-locate" onclick="locateNearby()">📍 定位最近藥局</button>
+    <div class="locate-status" id="locate-status" style="display:none">
+      <span id="locate-status-text">📍 已定位，依距離排序</span>
+      <button class="clear-btn" onclick="clearLocate()">✕ 取消定位</button>
+    </div>
+    <div class="ph-list" id="ph-list"></div>
+  </div>
+
+  <!-- View B：資訊總覽 -->
+  <div class="view" id="view-profile">
+    <div class="info-card" id="info-card"></div>
+
+    <div class="tab-row">
+      <button class="tab-btn active" data-tab="visits" onclick="switchTab('visits')">拜訪紀錄</button>
+      <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">出貨明細</button>
+      <button class="tab-btn" data-tab="returns" onclick="switchTab('returns')">退貨紀錄</button>
+      <button class="tab-btn" data-tab="inventory" onclick="switchTab('inventory')">盤點歷史</button>
+    </div>
+
+    <div class="panel active" id="panel-visits"></div>
+    <div class="panel" id="panel-orders"></div>
+    <div class="panel" id="panel-returns"></div>
+    <div class="panel" id="panel-inventory"></div>
+  </div>
+
+</div>
+
+<script>
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+
+let allPharmacies = [];
+let currentPharmacy = null;
+
+// ── INIT ──
+async function init() {
+  document.getElementById('ph-list').innerHTML = '<div class="loading">載入藥局清單中…</div>';
+  try {
+    const res = await fetch(WORKER + '/pharmacies');
+    const data = await res.json();
+    allPharmacies = data.pharmacies || [];
+  } catch (e) {
+    allPharmacies = [];
+  }
+  renderPharmacyList();
+}
+
+function renderPharmacyList() {
+  const kw = document.getElementById('ph-search').value.trim().toLowerCase();
+  const list = document.getElementById('ph-list');
+  let filtered = allPharmacies;
+  if (kw) {
+    filtered = allPharmacies.filter(p =>
+      (p.name && p.name.toLowerCase().includes(kw)) ||
+      (p.id && p.id.toLowerCase().includes(kw))
+    );
+  }
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty-hint">找不到符合的藥局</div>';
+    return;
+  }
+
+  let withDist = filtered.map(p => {
+    const dist = (userLoc && p.lat && p.lng)
+      ? distanceMeters(userLoc.lat, userLoc.lng, p.lat, p.lng)
+      : null;
+    return { ...p, dist };
+  });
+
+  if (userLoc) {
+    withDist.sort((a, b) => {
+      if (a.dist === null && b.dist === null) return 0;
+      if (a.dist === null) return 1;
+      if (b.dist === null) return -1;
+      return a.dist - b.dist;
+    });
+  }
+
+  list.innerHTML = withDist.slice(0, 60).map(p => `
+    <div class="ph-item" onclick="selectPharmacy('${p.id}')">
+      <div class="name">${escapeHtml(p.name)}（${escapeHtml(p.id)}）</div>
+      <div class="addr">${escapeHtml(p.address || '')}</div>
+      ${p.dist !== null ? `<div class="dist">📍 距離約 ${formatDistance(p.dist)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// ── 定位最近藥局 ──
+let userLoc = null;
+
+function locateNearby() {
+  if (!navigator.geolocation) {
+    showToast('❌ 此瀏覽器不支援定位功能');
+    return;
+  }
+  const btn = document.getElementById('btn-locate');
+  btn.disabled = true;
+  btn.textContent = '📍 定位中…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      btn.disabled = false;
+      btn.textContent = '📍 定位最近藥局';
+      document.getElementById('locate-status').style.display = 'flex';
+      renderPharmacyList();
+      showToast('📍 已依距離排序');
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.textContent = '📍 定位最近藥局';
+      const msgMap = { 1: '你拒絕了定位權限，請到瀏覽器設定開啟', 2: '無法取得目前位置', 3: '定位逾時，請再試一次' };
+      showToast('❌ ' + (msgMap[err.code] || '定位失敗'));
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+  );
+}
+
+function clearLocate() {
+  userLoc = null;
+  document.getElementById('locate-status').style.display = 'none';
+  renderPharmacyList();
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(1) + ' km';
+}
+
+// ── TOAST ──
+let toastEl = null;
+function showToast(msg) {
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#101828;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.3);z-index:900;white-space:nowrap;opacity:0;transition:all .3s;';
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = msg;
+  toastEl.style.opacity = '1';
+  clearTimeout(toastEl._t);
+  toastEl._t = setTimeout(() => { toastEl.style.opacity = '0'; }, 2600);
+}
+
+// ── 選藥局 → 載入總覽 ──
+async function selectPharmacy(id) {
+  currentPharmacy = allPharmacies.find(p => p.id === id);
+  if (!currentPharmacy) return;
+
+  document.getElementById('view-picker').classList.remove('active');
+  document.getElementById('view-profile').classList.add('active');
+  document.getElementById('btn-switch-ph').style.display = '';
+  document.getElementById('header-sub').textContent = currentPharmacy.name;
+
+  renderInfoCard();
+  ['visits','orders','returns','inventory'].forEach(t => {
+    document.getElementById('panel-' + t).innerHTML = '<div class="loading">載入中…</div>';
+  });
+
+  const [visitsRes, profileRes] = await Promise.all([
+    fetch(`${WORKER}/visits/${encodeURIComponent(id)}`).catch(() => null),
+    fetch(`${WORKER}/pharmacy-profile?pharmacy=${encodeURIComponent(id)}`).catch(() => null),
+  ]);
+  const visitsData  = visitsRes  ? await visitsRes.json().catch(() => ({})) : {};
+  const profileData = profileRes ? await profileRes.json().catch(() => ({})) : {};
+
+  renderVisits(visitsData.visits || []);
+  renderOrders(profileData.orders || []);
+  renderReturns(profileData.returns || []);
+  renderInventory(profileData.inventory || []);
+}
+
+function backToPicker() {
+  document.getElementById('view-profile').classList.remove('active');
+  document.getElementById('view-picker').classList.add('active');
+  document.getElementById('btn-switch-ph').style.display = 'none';
+  document.getElementById('header-sub').textContent = '選擇要查詢的藥局';
+  currentPharmacy = null;
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+}
+
+function renderInfoCard() {
+  const p = currentPharmacy;
+  document.getElementById('info-card').innerHTML = `
+    <div class="info-name">${escapeHtml(p.name)}</div>
+    <div class="info-id">${escapeHtml(p.id)}</div>
+    <div class="info-grid">
+      ${p.address ? `<div class="info-row"><span class="label">地址</span><span class="val">${escapeHtml(p.address)}</span></div>` : ''}
+      ${p.phone ? `<div class="info-row"><span class="label">電話</span><span class="val">${escapeHtml(p.phone)}</span></div>` : ''}
+      ${p.pharmacist ? `<div class="info-row"><span class="label">藥師</span><span class="val">${escapeHtml(p.pharmacist)}</span></div>` : ''}
+      ${p.district ? `<div class="info-row"><span class="label">行政區</span><span class="val">${escapeHtml(p.district)}</span></div>` : ''}
+    </div>
+  `;
+}
+
+function renderVisits(visits) {
+  const el = document.getElementById('panel-visits');
+  if (!visits.length) { el.innerHTML = '<div class="empty-hint">尚無拜訪紀錄</div>'; return; }
+  el.innerHTML = visits.map(v => `
+    <div class="rec-card">
+      <div class="rec-head">
+        <span class="rec-date">${escapeHtml(v.date || '')}</span>
+        ${v.purpose ? `<span class="rec-tag">${escapeHtml(v.purpose)}</span>` : ''}
+      </div>
+      ${v.summary || v.content ? `<div class="rec-sub">${escapeHtml(v.summary || v.content)}</div>` : ''}
+      ${v.painPoints ? `<div class="rec-sub">🩹 痛點：${escapeHtml(v.painPoints)}</div>` : ''}
+      ${v.actionItems ? `<div class="rec-sub">✅ 待辦：${escapeHtml(v.actionItems)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function renderOrders(orders) {
+  const el = document.getElementById('panel-orders');
+  if (!orders.length) { el.innerHTML = '<div class="empty-hint">尚無出貨紀錄</div>'; return; }
+  const groups = {};
+  const order = [];
+  orders.forEach(o => {
+    const key = o.orderNo || '（無單號）';
+    if (!groups[key]) { groups[key] = { orderNo: o.orderNo, date: o.date, items: [], total: 0 }; order.push(key); }
+    groups[key].items.push(o);
+    groups[key].total += o.subtotal || 0;
+  });
+  el.innerHTML = order.map(key => {
+    const g = groups[key];
+    return `
+      <div class="rec-card">
+        <div class="rec-head">
+          <span class="rec-date">${escapeHtml(g.date || '日期不詳')}</span>
+          <span class="rec-tag">${escapeHtml(g.orderNo || '無單號')}</span>
+        </div>
+        ${g.items.map(it => `
+          <div class="item-line">
+            <span class="iname">${escapeHtml(it.productName)}</span>
+            <span class="iqty">×${it.qty} @${it.unitPrice}</span>
+          </div>
+        `).join('')}
+        <div class="rec-total"><span>小計</span><span>$${g.total.toLocaleString()}</span></div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderReturns(returns) {
+  const el = document.getElementById('panel-returns');
+  if (!returns.length) { el.innerHTML = '<div class="empty-hint">尚無退貨紀錄</div>'; return; }
+  el.innerHTML = returns.map(r => `
+    <div class="rec-card">
+      <div class="rec-head">
+        <span class="rec-date">${escapeHtml(r.date || '日期不詳')}</span>
+        ${r.status ? `<span class="rec-tag">${escapeHtml(r.status)}</span>` : ''}
+      </div>
+      ${r.items.map(it => `
+        <div class="item-line">
+          <span class="iname ${it.reason === '停售' ? 'reason-停售' : ''}">${escapeHtml(it.productName)}${it.reason ? `<span class="note-badge ${it.reason === '停售' ? 'danger' : ''}">${escapeHtml(it.reason)}</span>` : ''}</span>
+          <span class="iqty">×${it.qty} @${it.unitPrice}</span>
+        </div>
+      `).join('')}
+      <div class="rec-total"><span>退貨金額</span><span>$${r.amount.toLocaleString()}</span></div>
+    </div>
+  `).join('');
+}
+
+function renderInventory(sessions) {
+  const el = document.getElementById('panel-inventory');
+  if (!sessions.length) { el.innerHTML = '<div class="empty-hint">尚無盤點紀錄</div>'; return; }
+  el.innerHTML = sessions.map(s => `
+    <div class="rec-card">
+      <div class="rec-head">
+        <span class="rec-date">${escapeHtml(s.date || '日期不詳')}</span>
+        <span class="rec-tag">${s.items.length} 項</span>
+      </div>
+      ${s.items.map(it => `
+        <div class="item-line">
+          <span class="iname ${it.note && it.note.includes('停售') ? 'reason-停售' : ''}">${escapeHtml(it.productName)}${it.note ? `<span class="note-badge ${it.note.includes('停售') ? 'danger' : ''}">${escapeHtml(it.note)}</span>` : ''}</span>
+          <span class="iqty">×${it.qty ?? '?'}</span>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+init();
+</script>
+</body>
+</html>
