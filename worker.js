@@ -1243,9 +1243,18 @@ async function handleInvoiceTasks(env) {
 // ============================================================
 // 18. 盤點候選產品清單
 // ============================================================
-async function fetchGvizSheet(sheetId, sheetName) {
+// env 有帶且該 sheet 允許快取時，會用 KV 存 60 秒（Cloudflare KV 最短 TTL），
+// 減少反覆打 Google gviz 的往返時間；不帶 env 就是原本每次即時讀取。
+async function fetchGvizSheet(sheetId, sheetName, env) {
   const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
   const url = sheetName ? `${base}&sheet=${encodeURIComponent(sheetName)}` : base;
+  const cacheKey = `gviz:${sheetId}:${sheetName || ''}`;
+
+  if (env && env.TODOS_KV) {
+    const cached = await env.TODOS_KV.get(cacheKey, 'json');
+    if (cached) return cached;
+  }
+
   const res = await fetch(url);
   const text = await res.text();
   const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
@@ -1254,7 +1263,13 @@ async function fetchGvizSheet(sheetId, sheetName) {
   const rows = data?.table?.rows || [];
   const colMap = {};
   cols.forEach((c, i) => { colMap[c.label] = i; });
-  return { rows, colMap };
+  const result = { rows, colMap };
+
+  if (env && env.TODOS_KV) {
+    await env.TODOS_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 });
+  }
+
+  return result;
 }
 
 function gvizGet(row, colMap, label) {
@@ -1270,10 +1285,10 @@ async function handleInventoryCandidates(request, env) {
   if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
 
   const [orderData, returnData, returnOrderData, productData] = await Promise.all([
-    fetchGvizSheet(env.SHEET_ORDER, null),
-    fetchGvizSheet(env.SHEET_RETURN, null),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null),
-    fetchGvizSheet(env.SHEET_PRODUCT, null),
+    fetchGvizSheet(env.SHEET_ORDER, null, env),
+    fetchGvizSheet(env.SHEET_RETURN, null, env),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    fetchGvizSheet(env.SHEET_PRODUCT, null, env),
   ]);
 
   // 產品主檔：產品編號2 → 名稱/分類/包裝
@@ -1429,10 +1444,10 @@ async function handlePharmacyProfile(request, env) {
   if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
 
   const [orderData, productData, returnDetailData, returnOrderData, invMasterData, invDetailData] = await Promise.all([
-    fetchGvizSheet(env.SHEET_ORDER, null),
-    fetchGvizSheet(env.SHEET_PRODUCT, null),
-    fetchGvizSheet(env.SHEET_RETURN, null),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null),
+    fetchGvizSheet(env.SHEET_ORDER, null, env),
+    fetchGvizSheet(env.SHEET_PRODUCT, null, env),
+    fetchGvizSheet(env.SHEET_RETURN, null, env),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
     fetchGvizSheet(env.SHEET_INVENTORY, '盤點主檔'),
     fetchGvizSheet(env.SHEET_INVENTORY, '盤點明細'),
   ]);

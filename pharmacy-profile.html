@@ -316,17 +316,23 @@ async function selectPharmacy(id) {
     document.getElementById('panel-' + t).innerHTML = '<div class="loading">載入中…</div>';
   });
 
-  const [visitsRes, profileRes] = await Promise.all([
-    fetch(`${WORKER}/visits/${encodeURIComponent(id)}`).catch(() => null),
-    fetch(`${WORKER}/pharmacy-profile?pharmacy=${encodeURIComponent(id)}`).catch(() => null),
-  ]);
-  const visitsData  = visitsRes  ? await visitsRes.json().catch(() => ({})) : {};
-  const profileData = profileRes ? await profileRes.json().catch(() => ({})) : {};
+  // 兩個 API 各自回來各自渲染，不互相卡住——拜訪紀錄通常比較快會先出現
+  fetch(`${WORKER}/visits/${encodeURIComponent(id)}`)
+    .then(r => r.json())
+    .then(d => { if (currentPharmacy && currentPharmacy.id === id) renderVisits(d.visits || []); })
+    .catch(() => { if (currentPharmacy && currentPharmacy.id === id) renderVisits([]); });
 
-  renderVisits(visitsData.visits || []);
-  renderOrders(profileData.orders || []);
-  renderReturns(profileData.returns || []);
-  renderInventory(profileData.inventory || []);
+  fetch(`${WORKER}/pharmacy-profile?pharmacy=${encodeURIComponent(id)}`)
+    .then(r => r.json())
+    .then(d => {
+      if (!currentPharmacy || currentPharmacy.id !== id) return;
+      renderOrders(d.orders || []);
+      renderReturns(d.returns || []);
+      renderInventory(d.inventory || []);
+    })
+    .catch(() => {
+      if (currentPharmacy && currentPharmacy.id === id) { renderOrders([]); renderReturns([]); renderInventory([]); }
+    });
 }
 
 function backToPicker() {
