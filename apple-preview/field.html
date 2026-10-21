@@ -1,0 +1,1923 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>外勤模式 💊</title>
+<style>
+:root {
+  --bg:#f5f5f7;--white:#fff;--border:#e8e8ed;
+  --accent:#0071e3;--green:#1a7f37;--orange:#b45309;
+  --red:#d92d20;--yellow:#c6881f;--purple:#6e56cf;
+  --text:#1d1d1f;--muted:#6e6e73;
+  --radius:16px;
+  --shadow:0 2px 12px rgba(0,0,0,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'PingFang TC','Heiti TC','Microsoft JhengHei',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;max-width:480px;margin:0 auto;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── HEADER ── */
+.header{
+  background:linear-gradient(135deg,#1d1d1f,#000);
+  padding:16px 20px 18px;position:sticky;top:0;z-index:100;
+  box-shadow:0 4px 20px rgba(0,0,0,.22);
+}
+.header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.header-title{color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.header-date{color:rgba(255,255,255,.6);font-size:11px;font-weight:500}
+.header-badges{display:flex;gap:8px;align-items:center}
+.hbadge{
+  background:rgba(255,255,255,.15);backdrop-filter:blur(8px);
+  color:#fff;padding:5px 11px;border-radius:20px;
+  font-size:13px;font-weight:700;display:flex;align-items:center;gap:4px;
+}
+.progress-info{display:flex;justify-content:space-between;margin-bottom:7px}
+.progress-label{color:rgba(255,255,255,.7);font-size:12px}
+.progress-count{color:#fff;font-size:12px;font-weight:700}
+.progress-track{height:8px;background:rgba(255,255,255,.2);border-radius:10px;overflow:hidden}
+.progress-fill{
+  height:100%;background:var(--green);
+  border-radius:10px;transition:width .6s cubic-bezier(.16,1,.3,1);
+  width:0%;
+}
+
+/* ── CONTENT ── */
+.content{padding:16px;padding-bottom:90px}
+.section-title{
+  font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:1px;
+  margin-bottom:12px;margin-top:4px;
+}
+
+/* ── PHARMACY CARD ── */
+.ph-card{
+  background:var(--white);border-radius:var(--radius);
+  padding:18px;margin-bottom:12px;
+  box-shadow:var(--shadow);
+  transition:transform .15s,box-shadow .15s;
+  position:relative;overflow:hidden;
+}
+.ph-card:active{transform:scale(.985)}
+.ph-card.done{opacity:.55}
+.ph-card.done::after{
+  content:'✓ 完成';position:absolute;top:14px;right:14px;
+  background:var(--green);color:#fff;
+  font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;
+}
+
+.card-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:12px}
+.char-emoji{font-size:52px;line-height:1;flex-shrink:0;user-select:none}
+.card-meta{flex:1;min-width:0}
+.card-name{font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-tags{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.type-badge{
+  font-size:11px;font-weight:700;padding:2px 9px;
+  border-radius:10px;white-space:nowrap;
+}
+.district-tag{font-size:12px;color:var(--muted)}
+.hearts{font-size:17px;letter-spacing:1px;line-height:1}
+
+/* ── MOOD BUBBLE ── */
+.mood-bubble{
+  background:#fafafa;border:1px solid var(--border);
+  border-radius:12px;border-bottom-left-radius:4px;
+  padding:11px 14px;margin-bottom:12px;
+  display:flex;align-items:flex-start;gap:9px;
+}
+.mood-emoji{font-size:26px;flex-shrink:0;margin-top:1px;user-select:none}
+.mood-content{flex:1;min-width:0}
+.mood-text{font-size:14px;color:var(--text);line-height:1.55;font-style:italic}
+.mood-meta{font-size:11px;color:var(--muted);margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.emotion-flag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;display:inline-flex;align-items:center;gap:3px}
+.emotion-flag.neg{background:#fdeceb;color:#d92d20}
+.emotion-flag.warn{background:#fdf2e4;color:#b45309}
+.emotion-flag.pos{background:#e9f7ed;color:#1a7f37}
+
+/* ── CARD STATS ── */
+.card-stats{display:flex;gap:18px;margin-bottom:14px}
+.cs-item{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.cs-item strong{color:var(--text);font-weight:600}
+
+/* ── CHECK-IN BUTTON ── */
+.checkin-btn{
+  width:100%;padding:14px;border:none;border-radius:12px;
+  background:var(--accent);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all .15s;user-select:none;
+}
+.checkin-btn:active{transform:scale(.97);opacity:.9}
+.pts-tag{
+  background:rgba(255,255,255,.25);padding:2px 8px;
+  border-radius:10px;font-size:12px;
+}
+
+/* ── MISSION COMPLETE BANNER ── */
+.mission-banner{
+  background:linear-gradient(135deg,#0d3b22,#1a7f37);
+  border-radius:var(--radius);padding:28px 24px;
+  text-align:center;color:#fff;margin-bottom:12px;
+  display:none;
+}
+.mission-banner.show{display:block}
+.mission-banner .trophy{font-size:56px;margin-bottom:10px}
+.mission-banner h2{font-size:22px;font-weight:800;margin-bottom:6px}
+.mission-banner p{font-size:14px;opacity:.8;line-height:1.5}
+.mission-stats{
+  display:flex;gap:12px;justify-content:center;margin-top:16px;
+}
+.mstat{
+  background:rgba(255,255,255,.15);border-radius:10px;
+  padding:8px 16px;font-size:13px;font-weight:700;
+}
+
+/* ── STATS PAGE ── */
+.stats-wrap{display:none}
+.stats-wrap.active{display:block}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.stat-box{
+  background:var(--white);border-radius:var(--radius);
+  padding:20px;box-shadow:var(--shadow);text-align:center;
+}
+.stat-box .num{font-size:42px;font-weight:800;line-height:1;margin-bottom:4px}
+.stat-box .lbl{font-size:12px;color:var(--muted)}
+.shield-explain{
+  background:var(--white);border-radius:var(--radius);
+  padding:20px;box-shadow:var(--shadow);
+  display:flex;align-items:flex-start;gap:14px;margin-bottom:12px;
+}
+.shield-explain .icon{font-size:36px;flex-shrink:0}
+.shield-explain .info h3{font-size:14px;font-weight:700;margin-bottom:4px}
+.shield-explain .info p{font-size:12px;color:var(--muted);line-height:1.55}
+.best-streak-box{
+  background:var(--text);
+  border-radius:var(--radius);padding:20px;
+  color:#fff;text-align:center;box-shadow:var(--shadow);
+}
+.best-streak-box .num{font-size:48px;font-weight:800;margin-bottom:4px}
+.best-streak-box .lbl{font-size:13px;opacity:.85}
+
+/* ── LOADING ── */
+.loading-wrap{padding:40px;text-align:center;color:var(--muted)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{
+  width:28px;height:28px;border:3px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .7s linear infinite;margin:0 auto 12px;
+}
+
+/* ── CHECK-IN OVERLAY ── */
+.checkin-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.85);backdrop-filter:blur(6px);
+  z-index:500;display:none;
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:40px 32px;
+}
+.checkin-overlay.open{display:flex}
+
+@keyframes bounceIn{
+  0%{transform:scale(0);opacity:0}
+  55%{transform:scale(1.25)}
+  100%{transform:scale(1);opacity:1}
+}
+@keyframes slideUp{
+  from{transform:translateY(24px);opacity:0}
+  to{transform:translateY(0);opacity:1}
+}
+@keyframes pulse{
+  0%,100%{transform:scale(1)}50%{transform:scale(1.05)}
+}
+
+.ov-char{font-size:80px;animation:bounceIn .5s cubic-bezier(.34,1.56,.64,1) both;margin-bottom:4px;user-select:none}
+.ov-mood{font-size:40px;animation:bounceIn .5s cubic-bezier(.34,1.56,.64,1) .1s both;margin-bottom:16px;user-select:none}
+.ov-name{color:rgba(255,255,255,.6);font-size:13px;font-weight:600;margin-bottom:6px;animation:slideUp .4s ease .15s both}
+.ov-msg{color:#fff;font-size:19px;font-weight:700;text-align:center;margin-bottom:6px;animation:slideUp .4s ease .2s both}
+.ov-sub{color:rgba(255,255,255,.65);font-size:14px;text-align:center;margin-bottom:22px;animation:slideUp .4s ease .3s both;font-style:italic}
+.ov-points{
+  background:linear-gradient(135deg,#d99a3d,#b45309);
+  color:#fff;font-size:24px;font-weight:800;
+  padding:10px 32px;border-radius:20px;margin-bottom:14px;
+  animation:bounceIn .5s cubic-bezier(.34,1.56,.64,1) .4s both;
+}
+.ov-hearts{font-size:22px;margin-bottom:28px;animation:slideUp .4s ease .5s both;letter-spacing:2px}
+.ov-btn{
+  background:#fff;color:var(--text);border:none;
+  padding:14px 36px;border-radius:12px;
+  font-size:15px;font-weight:700;cursor:pointer;
+  animation:slideUp .4s ease .6s both;
+  width:100%;max-width:280px;
+}
+.ov-btn:active{transform:scale(.97)}
+
+@media (prefers-reduced-motion:reduce){
+  .ov-char,.ov-mood,.ov-name,.ov-msg,.ov-sub,.ov-points,.ov-hearts,.ov-btn{
+    animation:none!important;opacity:1!important;transform:none!important;
+  }
+}
+
+/* ── BOTTOM NAV ── */
+.bottom-nav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:480px;
+  background:var(--white);border-top:1px solid var(--border);
+  display:flex;padding:8px 0 env(safe-area-inset-bottom,8px);
+  box-shadow:0 -4px 12px rgba(0,0,0,.06);
+}
+.nav-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:3px;padding:8px;cursor:pointer;border:none;background:none;
+  color:var(--muted);font-size:10px;font-weight:600;transition:color .15s;
+  text-decoration:none;
+}
+.nav-btn .ni{font-size:22px}
+.nav-btn.active{color:var(--accent)}
+
+/* ── ROUTE PREVIEW ── */
+.brief-route-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:10px;
+}
+.brief-route-chip{
+  flex:1;background:var(--bg);border-radius:8px;
+  padding:7px 10px;font-size:12px;font-weight:600;color:var(--text);
+  text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;
+}
+.brief-route-chip.dest{background:#e8f2fd;color:#0071e3}
+.brief-route-arrow{color:var(--muted);font-size:14px;flex-shrink:0}
+.brief-map-frame{
+  width:100%;height:175px;border-radius:12px;
+  border:none;display:block;margin-bottom:12px;
+  background:var(--bg);
+}
+
+/* ── BRIEF SHEET ── */
+.brief-overlay-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);
+  z-index:200;display:none;
+}
+.brief-overlay-bg.open{display:block}
+.brief-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:300;max-height:88vh;overflow-y:auto;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .35s cubic-bezier(.32,0,.67,0);
+}
+.brief-sheet.open{transform:translateX(-50%) translateY(0)}
+.brief-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 16px;
+}
+.brief-header{
+  display:flex;align-items:center;gap:12px;margin-bottom:14px;
+}
+.brief-char{font-size:40px;line-height:1;flex-shrink:0;user-select:none}
+.brief-header-meta{flex:1;min-width:0}
+.brief-name{font-size:17px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brief-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.brief-close{
+  flex-shrink:0;background:var(--bg);border:none;
+  width:30px;height:30px;border-radius:50%;
+  font-size:14px;cursor:pointer;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+}
+.nav-big-btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  background:var(--green);
+  color:#fff;font-size:15px;font-weight:700;
+  padding:14px;border-radius:12px;
+  text-decoration:none;margin-bottom:14px;
+}
+.brief-ai-section{
+  background:#fafafa;border:1px solid var(--border);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px;
+}
+.brief-ai-label{
+  font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;
+}
+.brief-ai-text{font-size:14px;color:var(--text);line-height:1.6}
+.brief-loading{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+.brief-checkin-btn{
+  width:100%;padding:16px;border:none;border-radius:12px;
+  background:var(--accent);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;
+}
+.brief-checkin-btn:disabled{opacity:.45;cursor:not-allowed}
+.brief-history-link{
+  display:block;text-align:center;color:var(--muted);
+  font-size:13px;text-decoration:none;margin-top:12px;padding:8px;
+}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(16px);
+  background:var(--text);color:#fff;
+  padding:10px 20px;border-radius:20px;
+  font-size:13px;font-weight:600;
+  box-shadow:0 4px 16px rgba(0,0,0,.3);
+  z-index:900;white-space:nowrap;
+  opacity:0;transition:all .3s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── NAV MODE START BUTTON ── */
+.nav-start-wrap{margin-bottom:16px}
+.nav-start-btn{
+  width:100%;padding:18px;border:none;border-radius:14px;
+  background:var(--green);
+  color:#fff;font-size:16px;font-weight:800;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  box-shadow:0 4px 20px rgba(26,127,55,.3);transition:all .15s;
+}
+.nav-start-btn:active{transform:scale(.97)}
+.nav-start-sub{font-size:12px;font-weight:500;opacity:.85}
+
+/* ── NAV DESTINATION CARD ── */
+.nav-dest-card{
+  background:var(--white);border-radius:var(--radius);
+  padding:18px;margin-bottom:14px;
+  box-shadow:0 4px 20px rgba(0,113,227,.18);
+  border:2px solid var(--accent);
+}
+.nav-dest-header{
+  display:flex;align-items:center;gap:8px;margin-bottom:10px;
+}
+.nav-dest-badge{
+  background:var(--accent);color:#fff;
+  font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;
+}
+.nav-dest-idx{color:var(--muted);font-size:12px;margin-left:auto}
+.nav-dest-name{font-size:20px;font-weight:800;color:var(--text);margin-bottom:3px}
+.nav-dest-sub{font-size:13px;color:var(--muted);margin-bottom:12px}
+.nav-dest-map{
+  width:100%;height:160px;border-radius:10px;
+  border:none;display:block;margin-bottom:12px;background:var(--bg);
+}
+.gps-status{
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg);border-radius:10px;
+  padding:9px 12px;margin-bottom:12px;
+  font-size:13px;font-weight:600;color:var(--text);
+}
+.gps-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--muted);flex-shrink:0;transition:background .3s;
+}
+.gps-dot.searching{background:var(--yellow);animation:gpsPulse 1.5s infinite}
+.gps-dot.ok{background:var(--green);animation:gpsPulse 1.5s infinite}
+.gps-dot.arrived{background:var(--accent)}
+@keyframes gpsPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.75)}}
+.nav-btn-row{display:flex;gap:8px;margin-bottom:8px}
+.nav-open-maps-btn{
+  flex:1;padding:14px;border:none;border-radius:12px;
+  background:var(--accent);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  text-decoration:none;
+}
+.nav-arrived-btn{
+  padding:14px 16px;border:2px solid var(--green);border-radius:12px;
+  background:#fff;color:var(--green);font-size:14px;font-weight:700;
+  cursor:pointer;white-space:nowrap;
+}
+.nav-arrived-btn:active{background:var(--green);color:#fff}
+.nav-exit-btn{
+  width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;
+  background:#fff;color:var(--muted);font-size:13px;font-weight:600;
+  cursor:pointer;text-align:center;
+}
+
+/* ── UPCOMING LIST ── */
+.upcoming-title{
+  font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;
+}
+.upcoming-item{
+  display:flex;align-items:center;gap:12px;
+  background:var(--white);border-radius:12px;
+  padding:12px 14px;margin-bottom:8px;
+  box-shadow:var(--shadow);opacity:.7;
+}
+.upcoming-item.done{opacity:.35}
+.upcoming-num{
+  width:24px;height:24px;border-radius:50%;
+  background:var(--bg);color:var(--muted);
+  font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.upcoming-emoji{font-size:24px;flex-shrink:0}
+.upcoming-info{flex:1;min-width:0}
+.upcoming-name{
+  font-size:14px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.upcoming-sub{font-size:12px;color:var(--muted)}
+.upcoming-done-tag{font-size:11px;color:var(--green);font-weight:700;flex-shrink:0}
+
+/* ── WORKING OVERLAY ── */
+.working-overlay{
+  position:fixed;inset:0;
+  background:linear-gradient(160deg,#1d1d1f,#000);
+  z-index:600;display:none;
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:40px 28px;
+}
+.working-overlay.open{display:flex}
+@keyframes timerPulse{0%,100%{opacity:1}50%{opacity:.6}}
+.working-emoji{font-size:72px;margin-bottom:8px;user-select:none}
+.working-ph-name{color:rgba(255,255,255,.6);font-size:14px;font-weight:600;margin-bottom:4px}
+.working-label{color:#fff;font-size:18px;font-weight:800;margin-bottom:24px}
+.working-timer-display{
+  font-size:56px;font-weight:900;color:#fff;
+  letter-spacing:3px;margin-bottom:6px;
+  animation:timerPulse 2s infinite;
+  font-variant-numeric:tabular-nums;
+}
+.working-start-time{color:rgba(255,255,255,.45);font-size:13px;margin-bottom:40px}
+.working-done-btn{
+  background:var(--green);color:#fff;border:none;
+  padding:16px 32px;border-radius:14px;
+  font-size:16px;font-weight:800;cursor:pointer;
+  width:100%;max-width:280px;
+  box-shadow:0 4px 20px rgba(26,127,55,.35);
+}
+.working-done-btn:active{transform:scale(.97)}
+
+/* ── RECORD MODAL ── */
+.record-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:700;display:none;
+}
+.record-bg.open{display:block}
+.record-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:800;max-height:85vh;overflow-y:auto;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .35s cubic-bezier(.32,0,.67,0);
+}
+.record-sheet.open{transform:translateX(-50%) translateY(0)}
+.record-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 20px;
+}
+.record-title{font-size:17px;font-weight:800;color:var(--text);margin-bottom:4px}
+.record-subtitle{font-size:13px;color:var(--muted);margin-bottom:20px}
+.record-label{
+  font-size:13px;font-weight:700;color:var(--text);
+  margin-bottom:8px;display:block;
+}
+.record-select,.record-textarea{
+  width:100%;padding:12px 14px;border:1.5px solid var(--border);
+  border-radius:10px;font-size:14px;color:var(--text);
+  background:#fff;margin-bottom:16px;font-family:inherit;
+  -webkit-appearance:none;appearance:none;
+}
+.record-select:focus,.record-textarea:focus{outline:none;border-color:var(--accent)}
+.record-textarea{min-height:90px;resize:none;line-height:1.5}
+.record-btn-row{display:flex;gap:10px;margin-top:4px}
+.record-skip-btn{
+  flex:1;padding:14px;border:1.5px solid var(--border);
+  border-radius:12px;background:#fff;color:var(--muted);
+  font-size:14px;font-weight:700;cursor:pointer;
+}
+.record-submit-btn{
+  flex:2;padding:14px;border:none;border-radius:12px;
+  background:var(--accent);
+  color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+}
+.record-submit-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── SKIP RECORD 確認警告 ── */
+.record-skip-confirm{
+  background:#fdf2e4;border:1.5px solid #b45309;
+  border-radius:12px;padding:12px 14px;margin-bottom:14px;
+  display:none;
+}
+.record-skip-confirm.show{display:block}
+.record-skip-warn-text{
+  font-size:13px;color:#b45309;font-weight:600;
+  margin-bottom:10px;line-height:1.5;
+}
+.record-skip-confirm-row{display:flex;gap:8px}
+.record-skip-cancel{
+  flex:1;padding:11px;border:1.5px solid var(--border);
+  border-radius:10px;background:#fff;color:var(--text);
+  font-size:13px;font-weight:700;cursor:pointer;
+}
+.record-skip-confirm-btn{
+  flex:1;padding:11px;border:none;border-radius:10px;
+  background:#b45309;color:#fff;
+  font-size:13px;font-weight:700;cursor:pointer;
+}
+
+/* ── SKIP PHARMACY MODAL ── */
+.skip-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:700;display:none;
+}
+.skip-bg.open{display:block}
+.skip-sheet{
+  position:fixed;bottom:0;left:50%;
+  width:100%;max-width:480px;
+  background:var(--white);border-radius:20px 20px 0 0;
+  padding:0 20px calc(32px + env(safe-area-inset-bottom,0px));
+  z-index:800;
+  transform:translateX(-50%) translateY(100%);
+  transition:transform .3s cubic-bezier(.32,0,.67,0);
+}
+.skip-sheet.open{transform:translateX(-50%) translateY(0)}
+.skip-handle{
+  width:36px;height:4px;background:var(--border);
+  border-radius:2px;margin:12px auto 18px;
+}
+.skip-title{font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px}
+.skip-ph-name{font-size:13px;color:var(--muted);margin-bottom:18px}
+.skip-reason-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:8px;margin-bottom:16px;
+}
+.skip-reason-chip{
+  padding:12px 8px;border:1.5px solid var(--border);border-radius:10px;
+  background:#fff;font-size:13px;font-weight:600;color:var(--text);
+  cursor:pointer;text-align:center;transition:all .15s;
+}
+.skip-reason-chip.selected{
+  border-color:var(--orange);background:#fdf2e4;color:var(--orange);
+}
+.skip-confirm-btn{
+  width:100%;padding:14px;border:none;border-radius:12px;
+  background:var(--orange);color:#fff;
+  font-size:15px;font-weight:800;cursor:pointer;margin-bottom:10px;
+}
+.skip-cancel-btn{
+  width:100%;padding:12px;border:none;background:none;
+  color:var(--muted);font-size:14px;font-weight:600;cursor:pointer;
+}
+
+/* ── MISSION BANNER 跳過清單 ── */
+.skipped-list-wrap{
+  background:rgba(180,83,9,.2);border-radius:12px;
+  padding:12px 14px;margin-top:14px;text-align:left;
+}
+.skipped-list-title{
+  font-size:12px;font-weight:700;color:#e3a455;
+  margin-bottom:8px;
+}
+.skipped-item{
+  font-size:12px;color:rgba(255,255,255,.8);
+  padding:4px 0;border-bottom:1px solid rgba(255,255,255,.1);
+  display:flex;justify-content:space-between;
+}
+.skipped-item:last-child{border-bottom:none}
+.skipped-reason{color:rgba(255,255,255,.5);font-size:11px}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="header-title">💊 今日外勤</div>
+      <div class="header-date" id="header-date"></div>
+    </div>
+    <div class="header-badges">
+      <div class="hbadge">🔥 <span id="streak-num">0</span> 天</div>
+      <div class="hbadge">🛡️ <span id="shield-num">0</span></div>
+    </div>
+  </div>
+  <div class="progress-info">
+    <span class="progress-label">今日使命</span>
+    <span class="progress-count"><span id="done-num">0</span> / <span id="total-num">—</span> 家</span>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" id="prog-fill"></div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+  <!-- MAIN: 今日使命 -->
+  <div id="main-wrap">
+    <div class="section-title" id="main-section-title">今日優先拜訪</div>
+    <div id="plan-source-badge" style="display:none;margin-bottom:10px;padding:8px 14px;background:#e8f2fd;border:1px solid #b9d8f7;border-radius:10px;font-size:13px;color:#0071e3;font-weight:600">
+      📋 今日任務清單
+      <span id="plan-source-sub" style="font-size:11px;font-weight:400;color:#0071e3;margin-left:6px">（從待辦清單載入）</span>
+    </div>
+    <div id="mission-banner" class="mission-banner">
+      <div class="trophy">🏆</div>
+      <h2>今日使命達成！</h2>
+      <p id="mission-msg">所有優先藥局都拜訪完了，辛苦了！</p>
+      <div class="mission-stats">
+        <div class="mstat">✅ <span id="mb-done">0</span> 家</div>
+        <div class="mstat">⭐ <span id="mb-pts">0</span> 分</div>
+        <div class="mstat">🔥 <span id="mb-streak">0</span> 天連勝</div>
+      </div>
+      <div class="skipped-list-wrap" id="mb-skipped-wrap" style="display:none">
+        <div class="skipped-list-title">⚠️ 今日未拜訪（記得補行程）</div>
+        <div id="mb-skipped-list"></div>
+      </div>
+    </div>
+    <!-- NAV MODE: 開始按鈕 (非導航模式時顯示) -->
+    <div class="nav-start-wrap" id="nav-start-wrap">
+      <button class="nav-start-btn" onclick="startNavMode()">
+        🚀 開始今日導航行程
+        <span class="nav-start-sub">GPS 抵達偵測 · 自動跳出拜訪資料</span>
+      </button>
+    </div>
+
+    <!-- NAV MODE: 當前目的地卡片 -->
+    <div class="nav-dest-card" id="nav-dest-card" style="display:none">
+      <div class="nav-dest-header">
+        <span class="nav-dest-badge">🏃 導航中</span>
+        <span class="nav-dest-idx" id="nav-dest-idx">1 / — 站</span>
+      </div>
+      <div class="nav-dest-name" id="nav-dest-name">—</div>
+      <div class="nav-dest-sub" id="nav-dest-sub">—</div>
+      <iframe id="nav-dest-map" class="nav-dest-map" src="" loading="lazy"></iframe>
+      <div class="gps-status">
+        <div class="gps-dot searching" id="gps-dot"></div>
+        <span id="gps-text">等待 GPS 定位中...</span>
+      </div>
+      <div class="nav-btn-row">
+        <a class="nav-open-maps-btn" id="nav-open-maps" href="#" target="_blank">🗺️ 開啟 Google Maps 導航</a>
+        <button class="nav-arrived-btn" onclick="manualArrival()">📍 我到了</button>
+      </div>
+      <div class="nav-btn-row" style="margin-top:4px">
+        <button class="nav-exit-btn" style="flex:1" onclick="exitNavMode()">✕ 結束行程</button>
+        <button class="nav-exit-btn" style="flex:1;color:var(--orange);border-color:var(--orange)"
+                onclick="openSkipModal()">⏭ 跳過這家</button>
+      </div>
+    </div>
+
+    <!-- NAV MODE: 接下來的行程 -->
+    <div id="upcoming-wrap" style="display:none">
+      <div class="upcoming-title">接下來的行程</div>
+      <div id="upcoming-list"></div>
+    </div>
+
+    <!-- 一般模式：藥局卡片清單 -->
+    <div id="cards-wrap">
+      <div class="loading-wrap">
+        <div class="spinner"></div>
+        <div>載入今日藥局中...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS: 我的統計 -->
+  <div id="stats-wrap" class="stats-wrap">
+    <div class="section-title">今日成果</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="num" id="s-done" style="color:var(--green)">0</div>
+        <div class="lbl">完成拜訪</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" id="s-pts" style="color:var(--yellow)">0</div>
+        <div class="lbl">今日積分</div>
+      </div>
+    </div>
+    <div class="section-title" style="margin-top:8px">連勝系統</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="num" style="color:var(--orange)">🔥 <span id="s-streak">0</span></div>
+        <div class="lbl">目前連勝天數</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" style="font-size:32px">🛡️ <span id="s-shields">0</span></div>
+        <div class="lbl">保護盾</div>
+      </div>
+    </div>
+    <div class="shield-explain">
+      <div class="icon">🛡️</div>
+      <div class="info">
+        <h3>保護盾是什麼？</h3>
+        <p>每連勝 5 天自動獲得 1 個保護盾。<br>
+        某天沒達標時，自動消耗 1 個盾保護連勝不中斷。<br>
+        讓系統更人性化，壞日子不用擔心。</p>
+      </div>
+    </div>
+    <div class="best-streak-box">
+      <div class="num">🏅 <span id="s-best">0</span></div>
+      <div class="lbl">歷史最長連勝</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav">
+  <button class="nav-btn active" id="nav-home" onclick="switchTab('home')">
+    <span class="ni">🗺️</span>今日使命
+  </button>
+  <button class="nav-btn" id="nav-stats" onclick="switchTab('stats')">
+    <span class="ni">📊</span>我的統計
+  </button>
+  <a class="nav-btn" href="index.html">
+    <span class="ni">🖥️</span>桌機版
+  </a>
+</div>
+
+<!-- BRIEF SHEET -->
+<div class="brief-overlay-bg" id="brief-bg" onclick="closeBrief()"></div>
+<div class="brief-sheet" id="brief-sheet">
+  <div class="brief-handle"></div>
+  <div class="brief-header">
+    <div class="brief-char" id="brief-char">🦊</div>
+    <div class="brief-header-meta">
+      <div class="brief-name" id="brief-ph-name">藥局名稱</div>
+      <div class="brief-sub" id="brief-ph-sub">—</div>
+    </div>
+    <button class="brief-close" onclick="closeBrief()">✕</button>
+  </div>
+  <!-- Route preview -->
+  <div id="brief-route-wrap" style="display:none">
+    <div class="brief-route-row">
+      <span class="brief-route-chip" id="brief-from-label">出發地</span>
+      <span class="brief-route-arrow">▶</span>
+      <span class="brief-route-chip dest" id="brief-to-label">藥局</span>
+    </div>
+    <iframe id="brief-map-frame" class="brief-map-frame" src="" loading="lazy" allowfullscreen></iframe>
+  </div>
+  <a class="nav-big-btn" id="brief-nav-link" href="#" target="_blank">
+    🗺️ 開始導航（含路線）
+  </a>
+  <div id="brief-ai-wrap">
+    <div class="brief-loading">
+      <div class="spinner" style="margin:0 auto 8px"></div>
+      <div>AI 分析中...</div>
+    </div>
+  </div>
+  <button class="brief-checkin-btn" id="brief-checkin-btn"
+          onclick="doBriefCheckin()" disabled>
+    ✅ 已到達，打卡得分
+  </button>
+  <a class="brief-history-link" href="https://bh06211301.github.io/pharmacy-visit-app/" target="_blank">📋 查看完整拜訪日誌</a>
+</div>
+
+<!-- CHECK-IN OVERLAY -->
+<div class="checkin-overlay" id="ov">
+  <div class="ov-char" id="ov-char">🦊</div>
+  <div class="ov-mood" id="ov-mood">😄</div>
+  <div class="ov-name" id="ov-name">康健藥局</div>
+  <div class="ov-msg" id="ov-msg">謝謝你來看我！</div>
+  <div class="ov-sub" id="ov-sub">感情值 +1</div>
+  <div class="ov-points" id="ov-pts">+20 分</div>
+  <div class="ov-hearts" id="ov-hearts">❤️❤️❤️❤️❤️</div>
+  <button class="ov-btn" id="ov-btn" onclick="handleCheckinClose()">繼續下一家 →</button>
+</div>
+
+<!-- WORKING OVERLAY -->
+<div class="working-overlay" id="working-overlay">
+  <div class="working-emoji" id="working-emoji">🏪</div>
+  <div class="working-ph-name" id="working-ph-name">—</div>
+  <div class="working-label">⏱ 作業進行中</div>
+  <div class="working-timer-display" id="working-timer">00:00</div>
+  <div class="working-start-time" id="working-start-time">—</div>
+  <button class="working-done-btn" onclick="finishWorking()">✅ 完成，填寫拜訪紀錄</button>
+</div>
+
+<!-- RECORD MODAL -->
+<div class="record-bg" id="record-bg"></div>
+<div class="record-sheet" id="record-sheet">
+  <div class="record-handle"></div>
+  <div class="record-title">📝 填寫拜訪紀錄</div>
+  <div class="record-subtitle" id="record-ph-name">—</div>
+  <label class="record-label">拜訪目的</label>
+  <select class="record-select" id="record-purpose">
+    <option value="例行拜訪">例行拜訪</option>
+    <option value="產品介紹">產品介紹</option>
+    <option value="訂單追蹤">訂單追蹤</option>
+    <option value="客訴處理">客訴處理</option>
+    <option value="新客開發">新客開發</option>
+    <option value="送貨">送貨 📦</option>
+    <option value="請款">請款 🧾</option>
+    <option value="收款">收款</option>
+    <option value="其他">其他</option>
+  </select>
+  <label class="record-label">拜訪內容 <span style="color:var(--muted);font-weight:400">（選填）</span></label>
+  <textarea class="record-textarea" id="record-content" placeholder="簡短記錄本次拜訪重點..."></textarea>
+  <!-- 略過確認區塊 -->
+  <div class="record-skip-confirm" id="record-skip-confirm">
+    <div class="record-skip-warn-text">⚠️ 略過後此次拜訪不會寫入紀錄<br>建議事後到「拜訪紀錄」頁面補填</div>
+    <div class="record-skip-confirm-row">
+      <button class="record-skip-cancel" onclick="cancelSkipRecord()">繼續填寫</button>
+      <button class="record-skip-confirm-btn" onclick="confirmSkipRecord()">確定略過</button>
+    </div>
+  </div>
+  <div class="record-btn-row">
+    <button class="record-skip-btn" id="record-skip-btn" onclick="askSkipRecord()">略過</button>
+    <button class="record-submit-btn" id="record-submit-btn" onclick="submitVisitRecord()">✅ 送出得分</button>
+  </div>
+</div>
+
+<!-- SKIP PHARMACY MODAL -->
+<div class="skip-bg" id="skip-bg" onclick="closeSkipModal()"></div>
+<div class="skip-sheet" id="skip-sheet">
+  <div class="skip-handle"></div>
+  <div class="skip-title">⏭ 跳過這家？</div>
+  <div class="skip-ph-name" id="skip-ph-name">—</div>
+  <div class="skip-reason-grid" id="skip-reason-grid">
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'今天休息')">🚪 今天休息</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'已電話聯絡')">📞 已電話聯絡</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'時間不夠')">⏰ 時間不夠</button>
+    <button class="skip-reason-chip" onclick="selectSkipReason(this,'下次再拜訪')">📅 下次再拜訪</button>
+  </div>
+  <button class="skip-confirm-btn" onclick="confirmSkipPharmacy()">確認跳過，前往下一站</button>
+  <button class="skip-cancel-btn" onclick="closeSkipModal()">取消</button>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const WORKER       = 'https://still-meadow-0efd.bh06211301.workers.dev';
+const VISIT_WORKER = 'https://weathered-hall-88a0.bh06211301.workers.dev';
+const MAPS_KEY     = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc';
+const ORIGIN       = '新北市汐止區湖東街五巷25號';
+let cards = [];
+let today = null;
+let streak = null;
+let DAD_PHARMACY_IDS = new Set();
+
+// ── 待辦 API（寫入請求排隊，避免快速連續操作互相覆蓋）──────────
+let _todoApiQueue = Promise.resolve();
+function _queueTodoApi(fn) {
+  const result = _todoApiQueue.then(fn, fn);
+  _todoApiQueue = result.catch(() => {});
+  return result;
+}
+async function todoApiCreate(data) {
+  return _queueTodoApi(async () => {
+    const res = await fetch(WORKER + '/todos-v2', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    return res.json();
+  });
+}
+
+// ── DATE ──────────────────────────────────────────────────────
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function yesterdayStr() {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDate(str) {
+  const d = new Date(str + 'T00:00:00');
+  return d.toLocaleDateString('zh-TW', { month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+// ── STREAK ────────────────────────────────────────────────────
+function loadStreak() {
+  const raw = localStorage.getItem('field_streak');
+  return raw ? JSON.parse(raw) : { count: 0, lastDate: null, shields: 0, best: 0 };
+}
+function saveStreak(s) { localStorage.setItem('field_streak', JSON.stringify(s)); }
+
+function loadToday() {
+  const t = todayStr();
+  const raw = localStorage.getItem('field_today');
+  if (raw) {
+    const d = JSON.parse(raw);
+    if (d.date === t) {
+      if (!d.skipped) d.skipped = [];
+      return d;
+    }
+  }
+  return { date: t, done: [], skipped: [], pts: 0 };
+}
+function saveToday(d) { localStorage.setItem('field_today', JSON.stringify(d)); }
+
+function initStreak() {
+  const s = loadStreak();
+  const t = todayStr(), y = yesterdayStr();
+  if (s.lastDate && s.lastDate !== t && s.lastDate !== y) {
+    if (s.shields > 0) { s.shields--; }
+    else { s.count = 0; }
+    saveStreak(s);
+  }
+  return s;
+}
+
+function onMissionComplete() {
+  const s = loadStreak();
+  const t = todayStr(), y = yesterdayStr();
+  if (s.lastDate === t) return s;
+  if (s.lastDate === y || s.count === 0) s.count++;
+  else s.count = 1;
+  s.lastDate = t;
+  if (s.count > s.best) s.best = s.count;
+  if (s.count % 5 === 0) {
+    s.shields++;
+    showToast(`🛡️ 獲得保護盾！連勝 ${s.count} 天達成`);
+  }
+  saveStreak(s);
+  return s;
+}
+
+// ── CHARACTER ─────────────────────────────────────────────────
+function charType(daysSince, totalAmt) {
+  const d = daysSince, a = totalAmt || 0;
+  if (d === null || d === undefined)
+    return { emoji: '🐣', label: '新朋友', color: '#b45309', bg: '#fdf2e4' };
+  if (a > 20000 && d < 30)
+    return { emoji: '🦁', label: '大金主', color: '#b45309', bg: '#fdf2e4' };
+  if (a > 20000 && d >= 30)
+    return { emoji: '🦊', label: '神秘大戶', color: '#6e56cf', bg: '#f1eefb' };
+  if (d > 90)
+    return { emoji: '🍂', label: '快失聯', color: '#d92d20', bg: '#fdeceb' };
+  if (a === 0)
+    return { emoji: '🐢', label: '慢熱型', color: '#1a7f37', bg: '#e9f7ed' };
+  if (d <= 7)
+    return { emoji: '🐘', label: '老朋友', color: '#0071e3', bg: '#e8f2fd' };
+  return { emoji: '🐘', label: '老朋友', color: '#6e6e73', bg: '#f5f5f7' };
+}
+
+function charMood(daysSince) {
+  const d = daysSince;
+  if (d === null || d === undefined)
+    return { emoji: '😄', say: '你好你好！我還不認識你呢～', after: '感謝你第一次來看我！' };
+  if (d <= 7)
+    return { emoji: '😄', say: '嘿嘿你又來啦！', after: '我就知道你不會忘記我！' };
+  if (d <= 14)
+    return { emoji: '😊', say: '最近還不錯喔，謝謝你過來', after: '下次還要來哦！' };
+  if (d <= 21)
+    return { emoji: '🙂', say: '有空多過來坐坐', after: '哎，終於等到你了' };
+  if (d <= 30)
+    return { emoji: '🥺', say: '有點想你了...', after: '還好你沒忘記我！' };
+  if (d <= 60)
+    return { emoji: '😤', say: `都快一個月了你去哪了！`, after: '好吧...算你及時趕到' };
+  if (d <= 90)
+    return { emoji: '😢', say: '我以為你不來了...', after: '謝謝你還記得我...' };
+  return { emoji: '😶', say: '...（沉默）', after: '...你終於來了' };
+}
+
+// ── EMOTION ANALYSIS ─────────────────────────────────────────
+function analyzeEmotion(visit) {
+  if (!visit) return { sentiment: 'neutral', flag: null, emoji: '😐' };
+  const tags = visit.tags || [];
+  const text = [(visit.content || ''), (visit.summary || '')].join(' ');
+  if (tags.includes('客訴')) return { sentiment: 'negative', flag: '上次有客訴', emoji: '😟' };
+  if (tags.includes('缺貨')) return { sentiment: 'warning', flag: '上次缺貨', emoji: '⚠️' };
+  if (tags.includes('競品')) return { sentiment: 'warning', flag: '有競品壓力', emoji: '🟠' };
+  if (tags.includes('滿意')) return { sentiment: 'positive', flag: null, emoji: '😊' };
+  const neg = ['態度冷','婉拒','不需要','不滿','拒絕','沒興趣','冷漠','抱怨','不感興趣'];
+  const pos = ['很好聊','感謝','有興趣','接受','下次帶','開心','好聊','推薦','願意'];
+  if (neg.some(k => text.includes(k))) return { sentiment: 'negative', flag: '上次互動不順', emoji: '😟' };
+  if (pos.some(k => text.includes(k))) return { sentiment: 'positive', flag: null, emoji: '😊' };
+  return { sentiment: 'neutral', flag: null, emoji: '😐' };
+}
+
+function buildVisitMap(allVisits) {
+  const grouped = {};
+  for (const v of allVisits) {
+    if (!v.pharmacyId) continue;
+    if (!grouped[v.pharmacyId]) grouped[v.pharmacyId] = [];
+    grouped[v.pharmacyId].push(v);
+  }
+  const result = {};
+  for (const [id, visits] of Object.entries(grouped)) {
+    const sorted = visits
+      .filter(v => v.date)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!sorted.length) continue;
+    const lastVisit = sorted[0];
+    let avgGap = null;
+    if (sorted.length >= 2) {
+      const gaps = [];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const diff = Math.round((new Date(sorted[i].date) - new Date(sorted[i+1].date)) / 86400000);
+        if (diff > 0) gaps.push(diff);
+      }
+      if (gaps.length) avgGap = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
+    }
+    result[id] = { avgGap, lastVisit, lastEmotion: analyzeEmotion(lastVisit), recentVisits: sorted.slice(0, 5) };
+  }
+  return result;
+}
+
+function smartMood(ph, vs) {
+  const d = ph.daysSince;
+  if (!vs || !vs.avgGap || d === null || d === undefined) return charMood(d);
+  const ratio = d / vs.avgGap;
+  const emo = vs.lastEmotion;
+  const isNeg = emo?.sentiment === 'negative' || emo?.sentiment === 'warning';
+  if (ratio < 1) {
+    if (isNeg) return { emoji:'⚠️', say:`上次${emo.flag||'有些問題'}，這次要好好處理`, after:'謝謝你特地來修補關係！', ratioLabel:`準時 · 需修補`, healthColor:'#d99a3d' };
+    return { emoji:'😊', say:'最近有規律來看我，感覺很好！', after:'你真的很用心，謝謝！', ratioLabel:`狀態良好`, healthColor:'#1a7f37' };
+  }
+  if (ratio < 1.5) {
+    if (isNeg) return { emoji:'😬', say:`有點晚了，而且${emo.flag||'上次還有問題'}`, after:'總算來了，我們把問題說清楚吧', ratioLabel:`逾期 ${ratio.toFixed(1)}x · 需處理`, healthColor:'#b45309' };
+    return { emoji:'🥺', say:'有點想你了...不過上次感覺還不錯', after:'你回來了！感情還在的～', ratioLabel:`逾期 ${ratio.toFixed(1)}x`, healthColor:'#d99a3d' };
+  }
+  if (ratio < 2) {
+    if (isNeg) return { emoji:'😰', say:`拖太久了！${emo.flag||'上次還沒處理好'}`, after:'謝謝你終於來了，一起把問題解決吧', ratioLabel:`嚴重逾期 ${ratio.toFixed(1)}x`, healthColor:'#d92d20' };
+    return { emoji:'😤', say:`快兩個週期沒來了，你去哪啦！`, after:'好啦算你及時趕到，感情底子還在', ratioLabel:`逾期 ${ratio.toFixed(1)}x`, healthColor:'#b45309' };
+  }
+  if (isNeg) return { emoji:'🔴', say:`緊急！逾期 ${ratio.toFixed(1)} 倍週期，${emo.flag||'問題還在'}`, after:'謝謝你終於來了，先處理問題', ratioLabel:`緊急 ${ratio.toFixed(1)}x`, healthColor:'#8f2415' };
+  return { emoji:'😱', say:`${ratio.toFixed(1)} 個週期沒見了！雖然上次感覺還行`, after:'你終於想起我了！感情還可以救！', ratioLabel:`嚴重逾期 ${ratio.toFixed(1)}x`, healthColor:'#d92d20' };
+}
+
+function hearts(daysSince) {
+  const d = daysSince;
+  if (d === null || d === undefined) return 0;
+  if (d <= 7)  return 5;
+  if (d <= 14) return 4;
+  if (d <= 21) return 3;
+  if (d <= 30) return 2;
+  if (d <= 60) return 1;
+  return 0;
+}
+
+function renderHearts(n) {
+  return '❤️'.repeat(n) + '🖤'.repeat(5 - n);
+}
+
+function calcPts(daysSince, neverVisited, hasPending) {
+  let p = 10;
+  if (neverVisited) p += 15;
+  if (hasPending)   p += 10;
+  const d = daysSince;
+  if (d === null || d === undefined) return p;
+  if (d > 60)      p += 30;
+  else if (d > 30) p += 20;
+  else if (d > 14) p += 10;
+  return p;
+}
+
+// ── LAST STOP ─────────────────────────────────────────────────
+function saveLastStop(ph) {
+  localStorage.setItem('field_lastStop', JSON.stringify({
+    name:     ph.name,
+    district: ph.district || '',
+    addr:     ph.addr || '',
+    lat:      geocodeCache[ph.addr || ph.name]?.lat || ph.lat || null,
+    lng:      geocodeCache[ph.addr || ph.name]?.lng || ph.lng || null,
+  }));
+}
+function getLastStop() {
+  const raw = localStorage.getItem('field_lastStop');
+  return raw ? JSON.parse(raw) : null;
+}
+
+// ── AI BRIEF SHEET ────────────────────────────────────────────
+let currentBriefId = null;
+
+async function openBrief(id) {
+  const ph = cards.find(p => p.id === id);
+  if (!ph) return;
+  currentBriefId = id;
+
+  const ct = charType(ph.daysSince, ph.totalAmount);
+  document.getElementById('brief-char').textContent = ct.emoji;
+  document.getElementById('brief-ph-name').textContent = ph.name;
+  document.getElementById('brief-ph-sub').textContent =
+    [ph.district, ph.daysSince !== null ? `${ph.daysSince} 天前拜訪` : '從未拜訪'].filter(Boolean).join(' · ');
+
+  // Navigation: use Directions mode (auto-current-location)
+  const navDest = ph.lat && ph.lng
+    ? `${ph.lat},${ph.lng}`
+    : encodeURIComponent(ph.name + (ph.district ? ' ' + ph.district : '') + ' 台灣');
+  document.getElementById('brief-nav-link').href =
+    `https://www.google.com/maps/dir/?api=1&destination=${navDest}&travelmode=driving`;
+
+  // Route preview map (Google Maps Embed) — 起點固定用 My+Location（目前位置），避免點地圖開啟 Maps 時起點錯誤
+  const destQ = (ph.lat && ph.lng)
+    ? `${ph.lat},${ph.lng}`
+    : encodeURIComponent(ph.name + ' ' + (ph.district || '') + ' 台灣');
+  document.getElementById('brief-from-label').textContent = '目前位置';
+  document.getElementById('brief-to-label').textContent   = ph.name;
+  document.getElementById('brief-map-frame').src =
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=My+Location&destination=${destQ}&mode=driving&language=zh-TW`;
+  document.getElementById('brief-route-wrap').style.display = '';
+
+  document.getElementById('brief-ai-wrap').innerHTML =
+    `<div class="brief-loading"><div class="spinner" style="margin:0 auto 8px"></div><div>AI 分析中...</div></div>`;
+
+  const btn = document.getElementById('brief-checkin-btn');
+  btn.disabled = true;
+  btn.textContent = '✅ 已到達，打卡得分';
+  btn.onclick = doBriefCheckin;
+
+  document.getElementById('brief-bg').classList.add('open');
+  document.getElementById('brief-sheet').classList.add('open');
+  if (navigator.vibrate) navigator.vibrate(20);
+
+  try {
+    const brief = await fetchAIBrief(ph);
+    renderBrief(brief);
+  } catch (e) {
+    document.getElementById('brief-ai-wrap').innerHTML =
+      `<div class="brief-loading" style="color:var(--red)">⚠️ AI 分析失敗，可直接打卡</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeBrief() {
+  document.getElementById('brief-bg').classList.remove('open');
+  document.getElementById('brief-sheet').classList.remove('open');
+  currentBriefId = null;
+}
+
+function doBriefCheckin() {
+  const id = currentBriefId;
+  closeBrief();
+  if (id) setTimeout(() => doCheckin(id), 320);
+}
+
+async function fetchAIBrief(ph) {
+  const visits = ph.visitStats?.recentVisits || [];
+
+  if (!visits.length) {
+    return {
+      last_visit: '尚無拜訪紀錄',
+      pending: '無待追蹤事項',
+      profile: '新客戶，可先自我介紹建立關係',
+      suggestion: '了解藥局特性、主要藥師姓名與需求方向'
+    };
+  }
+
+  const historyText = visits.map((v, i) => {
+    const parts = [v.purpose, v.summary, v.content].filter(Boolean).join('；');
+    const actions = v.actionItems ? `待辦：${v.actionItems}` : '';
+    return `[${i + 1}] ${v.date || '—'}：${parts} ${actions}`.trim();
+  }).join('\n');
+
+  const today = new Date().toLocaleDateString('zh-TW');
+  const systemPrompt = `你是醫藥業務的智慧助理，現在要幫業務在拜訪「${ph.name}」之前做準備。
+今天日期：${today}
+以下是這家藥局的歷史拜訪紀錄（最近 ${visits.length} 筆）：
+
+${historyText}
+
+請整理四個區塊，每區 1-2 句，簡潔有力：
+1. 上次拜訪：日期、主要內容、結果
+2. 未完成追蹤：遺留待辦，若無說「無待追蹤」
+3. 客戶特徵：藥師偏好、關係溫度
+4. 今次建議切入點：這次怎麼開場或推進
+
+請全部用繁體中文回答，不要用英文。只輸出純 JSON：{"last_visit":"...","pending":"...","profile":"...","suggestion":"..."}`;
+
+  const res = await fetch(VISIT_WORKER, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: '請整理拜訪前提醒。' }
+      ]
+    })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const raw = data.text || data.choices?.[0]?.message?.content
+    || data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const match = raw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : raw.trim());
+}
+
+function renderBrief(brief) {
+  const sections = [
+    { icon: '🗓', label: '上次拜訪',    key: 'last_visit' },
+    { icon: '⚠️', label: '未完成追蹤', key: 'pending' },
+    { icon: '👤', label: '客戶特徵',    key: 'profile' },
+    { icon: '💡', label: '建議切入點', key: 'suggestion' },
+  ];
+  document.getElementById('brief-ai-wrap').innerHTML =
+    sections.map(s => `
+      <div class="brief-ai-section">
+        <div class="brief-ai-label">${s.icon} ${s.label}</div>
+        <div class="brief-ai-text">${(brief[s.key] || '—').replace(/\n/g, '<br>')}</div>
+      </div>`).join('');
+}
+
+// ── RENDER ────────────────────────────────────────────────────
+function renderCard(ph) {
+  const isDone = today.done.includes(ph.id);
+  const ct   = charType(ph.daysSince, ph.totalAmount);
+  const mood = smartMood(ph, ph.visitStats);
+  const emo  = ph.visitStats?.lastEmotion;
+  const h    = hearts(ph.daysSince);
+  const pts  = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
+  const dText = ph.daysSince !== null && ph.daysSince !== undefined
+    ? `${ph.daysSince} 天前` : '從未拜訪';
+  const aText = ph.totalAmount
+    ? `$${(ph.totalAmount / 1000).toFixed(0)}k` : '—';
+
+  const emoClass = emo?.sentiment === 'negative' ? 'neg'
+                 : emo?.sentiment === 'warning'  ? 'warn' : 'pos';
+  const metaHtml = (mood.ratioLabel || emo?.flag) ? `
+    <div class="mood-meta">
+      ${mood.ratioLabel ? `<span style="color:${mood.healthColor||'var(--muted)'}">● ${mood.ratioLabel}</span>` : ''}
+      ${emo?.flag ? `<span class="emotion-flag ${emoClass}">${emo.emoji} ${emo.flag}</span>` : ''}
+    </div>` : '';
+
+  return `
+  <div class="ph-card${isDone ? ' done' : ''}" id="c-${ph.id}">
+    <div class="card-top">
+      <div class="char-emoji">${ct.emoji}</div>
+      <div class="card-meta">
+        <div class="card-name">${ph.name}</div>
+        <div class="card-tags">
+          <span class="type-badge" style="background:${ct.bg};color:${ct.color}">${ct.label}</span>
+          <span class="district-tag">${ph.district || ''}</span>
+        </div>
+        <div class="hearts">${renderHearts(h)}</div>
+      </div>
+    </div>
+    <div class="mood-bubble">
+      <div class="mood-emoji">${mood.emoji}</div>
+      <div class="mood-content">
+        <div class="mood-text">「${mood.say}」</div>
+        ${metaHtml}
+      </div>
+    </div>
+    <div class="card-stats">
+      <div class="cs-item">📅 <strong>${dText}</strong></div>
+      <div class="cs-item">💰 <strong>${aText}</strong></div>
+      ${ph.hasPending ? '<div class="cs-item">📌 <strong>有待追蹤</strong></div>' : ''}
+    </div>
+    ${ph.taskMemo ? `<div style="margin:6px 0 2px;padding:6px 10px;background:#e9f7ed;border-radius:6px;font-size:12px;color:#1a7f37">📋 ${ph.taskMemo}</div>` : ''}
+    ${!isDone ? `
+    <button class="checkin-btn" onclick="openBrief('${ph.id}')">
+      📍 前往 + AI提醒
+      <span class="pts-tag">+${pts} 分</span>
+    </button>` : ''}
+  </div>`;
+}
+
+function render() {
+  const wrap = document.getElementById('cards-wrap');
+  // 更新來源標籤
+  const badge = document.getElementById('plan-source-badge');
+  if (badge) badge.style.display = usingCalendarPlan ? '' : 'none';
+
+  if (!cards.length) {
+    wrap.innerHTML = usingCalendarPlan
+      ? '<div class="loading-wrap">今日待辦清單尚未排入任何任務，請到主頁面待辦清單排入今日</div>'
+      : '<div class="loading-wrap">找不到今日推薦藥局</div>';
+    return;
+  }
+  wrap.innerHTML = cards.map(renderCard).join('');
+  updateProgress();
+}
+
+function updateProgress() {
+  const done = today.done.length;
+  const total = cards.length;
+  const pct = total > 0 ? (done / total * 100) : 0;
+  document.getElementById('done-num').textContent = done;
+  document.getElementById('total-num').textContent = total;
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('s-done').textContent = done;
+  document.getElementById('s-pts').textContent = today.pts;
+  document.getElementById('s-streak').textContent = streak.count;
+  document.getElementById('s-shields').textContent = streak.shields;
+  document.getElementById('s-best').textContent = streak.best;
+  document.getElementById('streak-num').textContent = streak.count;
+  document.getElementById('shield-num').textContent = streak.shields;
+  if (done >= total && total > 0) showMissionComplete();
+}
+
+function showMissionComplete() {
+  const banner = document.getElementById('mission-banner');
+  banner.classList.add('show');
+  document.getElementById('mb-done').textContent = today.done.length;
+  document.getElementById('mb-pts').textContent = today.pts;
+  document.getElementById('mb-streak').textContent = streak.count;
+
+  // 顯示跳過的藥局清單
+  const skipped = today.skipped || [];
+  const swrap = document.getElementById('mb-skipped-wrap');
+  const slist = document.getElementById('mb-skipped-list');
+  if (skipped.length > 0) {
+    swrap.style.display = '';
+    slist.innerHTML = skipped.map(s => `
+      <div class="skipped-item">
+        <span>${s.name}</span>
+        <span class="skipped-reason">${s.reason}</span>
+      </div>`).join('');
+  } else {
+    swrap.style.display = 'none';
+  }
+
+  banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── CHECK-IN ──────────────────────────────────────────────────
+function doCheckin(id) {
+  if (today.done.includes(id)) return;
+
+  const ph = cards.find(p => p.id === id);
+  if (!ph) return;
+
+  const ct   = charType(ph.daysSince, ph.totalAmount);
+  const mood = smartMood(ph, ph.visitStats);
+  const pts  = calcPts(ph.daysSince, ph.neverVisited, ph.hasPending);
+  const newH = Math.min(hearts(ph.daysSince) + 1, 5);
+
+  document.getElementById('ov-char').textContent = ct.emoji;
+  document.getElementById('ov-mood').textContent = '😄';
+  document.getElementById('ov-name').textContent = ph.name;
+  document.getElementById('ov-msg').textContent = mood.after;
+  document.getElementById('ov-sub').textContent = `感情值 +1`;
+  document.getElementById('ov-pts').textContent = `+${pts} 分`;
+  document.getElementById('ov-hearts').textContent = renderHearts(newH);
+
+  // 導航模式：按鈕文字改為「前往下一站」
+  document.getElementById('ov-btn').textContent = navMode ? '前往下一站 →' : '繼續下一家 →';
+  document.getElementById('ov').classList.add('open');
+  if (navigator.vibrate) navigator.vibrate(40);
+
+  today.done.push(id);
+  today.pts += pts;
+  saveToday(today);
+  saveLastStop(ph);
+
+  document.getElementById(`c-${id}`)?.classList.add('done');
+
+  if (today.done.length >= cards.length) {
+    streak = onMissionComplete();
+  }
+
+  updateProgress();
+}
+
+function closeCheckin() {
+  document.getElementById('ov').classList.remove('open');
+  render();
+}
+
+// ── TAB ───────────────────────────────────────────────────────
+function switchTab(tab) {
+  const isHome = tab === 'home';
+  document.getElementById('main-wrap').style.display = isHome ? '' : 'none';
+  document.getElementById('stats-wrap').classList.toggle('active', !isHome);
+  document.getElementById('nav-home').classList.toggle('active', isHome);
+  document.getElementById('nav-stats').classList.toggle('active', !isHome);
+  if (!isHome) updateProgress();
+}
+
+// ── TOAST ─────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── LOAD DATA ─────────────────────────────────────────────────
+let usingCalendarPlan = false;
+
+async function loadData() {
+  try {
+    const [recRes, stRes, visitsRes, todosRes, calPlanRes, dadRes] = await Promise.all([
+      fetch(WORKER + '/recommend-today'),
+      fetch(WORKER + '/customer-status').catch(() => null),
+      fetch(WORKER + '/all-visits').catch(() => null),
+      fetch(WORKER + '/todos-v2').catch(() => null),
+      fetch(WORKER + '/calendar-plan').catch(() => null),
+      fetch(WORKER + '/dad-pharmacies').catch(() => null),
+    ]);
+
+    const recJson    = await recRes.json();
+    const stJson     = stRes     ? await stRes.json().catch(() => ({})) : {};
+    const visitsJson = visitsRes ? await visitsRes.json().catch(() => []) : [];
+    const todosJson  = todosRes  ? await todosRes.json().catch(() => []) : [];
+    const calPlanJson = calPlanRes ? await calPlanRes.json().catch(() => ({})) : {};
+    const dadJson    = dadRes    ? await dadRes.json().catch(() => ({})) : {};
+    if (dadJson.ok) DAD_PHARMACY_IDS = new Set(dadJson.ids);
+
+    const statuses  = stJson.statuses || {};
+    const allVisits = Array.isArray(visitsJson)
+      ? visitsJson
+      : (visitsJson.visits || visitsJson.records || []);
+    const visitMap  = buildVisitMap(allVisits);
+    const todos     = Array.isArray(todosJson) ? todosJson : (todosJson.todos || []);
+    const today     = todayStr();
+
+    // all = 全部藥局（新版worker），fallback 到 recommended（舊版相容）
+    const allRecs = recJson.all || recJson.recommended || recJson.recommendations || recJson || [];
+    const recs    = recJson.recommended || allRecs;
+
+    // 建立 id 與 name 雙重 key → recommend 資料 map
+    const recMap = {};
+    allRecs.forEach(p => {
+      recMap[p.id]   = p;
+      recMap[p.name] = p;
+    });
+
+    // helper：把 pharmacyId/name 的基本資料組成 card
+    const buildCard = (id, name, address, memos) => {
+      const rec = recMap[id] || recMap[name] || {};
+      const vs  = visitMap[name] || visitMap[id] || null;
+      let daysSince = rec.daysSince ?? null;
+      if (daysSince === null && vs?.lastVisit?.date) {
+        daysSince = Math.round(
+          (new Date() - new Date(vs.lastVisit.date.replace(/\//g, '-'))) / 86400000
+        );
+      }
+      return {
+        id,
+        name,
+        district:    rec.district || '',
+        daysSince,
+        totalAmount: rec.totalAmount || 0,
+        hasPending:  rec.hasPending || false,
+        neverVisited:daysSince === null && !vs,
+        visitStats:  vs,
+        lat:         rec.lat || rec.latitude || null,
+        lng:         rec.lng || rec.longitude || null,
+        addr:        address || rec.address || rec.addr || '',
+        taskMemo:    memos ? memos.join('、') : undefined,
+      };
+    };
+
+    // ── 合併兩個來源：todos-v2（待辦任務）+ KV 月曆計畫（地圖選店）────
+    const dayTodos   = todos.filter(t => !t.done && t.scheduledDate === today && t.pharmacyId);
+    const calPlanPhs = calPlanJson.plan?.[today]?.pharmacies || [];
+
+    // 以 pharmacyId 為主鍵合併，todos 備註優先
+    const grouped = {};
+    dayTodos.forEach(t => {
+      if (!grouped[t.pharmacyId]) grouped[t.pharmacyId] = { id: t.pharmacyId, name: t.pharmacyName || t.pharmacyId, addr: '', memos: [] };
+      grouped[t.pharmacyId].memos.push(t.task);
+    });
+    calPlanPhs.forEach(p => {
+      if (p.id && !grouped[p.id]) grouped[p.id] = { id: p.id, name: p.name, addr: p.address || '', memos: [] };
+    });
+
+    if (Object.keys(grouped).length > 0) {
+      usingCalendarPlan = true;
+      const subEl = document.getElementById('plan-source-sub');
+      if (subEl) {
+        const src = dayTodos.length > 0 && calPlanPhs.length > 0 ? '（待辦清單＋月曆計畫）'
+          : dayTodos.length > 0 ? '（從待辦清單載入）' : '（從月曆計畫載入）';
+        subEl.textContent = src;
+      }
+      cards = Object.values(grouped)
+        .filter(g => statuses[g.id] !== 'dead' && statuses[g.name] !== 'dead')
+        .map(g => buildCard(g.id, g.name, g.addr, g.memos.length > 0 ? g.memos : null));
+
+    } else {
+      // ── 最後：AI 推薦清單 ─────────────────────────────────────
+      usingCalendarPlan = false;
+      cards = recs
+        .filter(p => statuses[p.id] !== 'dead')
+        .slice(0, 8)
+        .map(p => ({
+          id:          p.id,
+          name:        p.name,
+          district:    p.district || '',
+          daysSince:   p.daysSince,
+          totalAmount: p.totalAmount || 0,
+          hasPending:  p.hasPending || false,
+          neverVisited:p.neverVisited || false,
+          visitStats:  visitMap[p.name] || visitMap[p.id] || null,
+          lat:         p.lat || p.latitude || null,
+          lng:         p.lng || p.longitude || null,
+          addr:        p.addr || p.address || '',
+        }));
+    }
+
+    // ── 套用路線順序（若 confirmRoute 有存入排序）────────────────
+    const orderedIds = (calPlanJson.plan?.[today]?.route?.orderedPharmacies) || [];
+    if (orderedIds.length > 0) {
+      const ordered = [];
+      orderedIds.forEach(id => {
+        const c = cards.find(c => c.id === id);
+        if (c) ordered.push(c);
+      });
+      cards.forEach(c => { if (!orderedIds.includes(c.id)) ordered.push(c); });
+      cards = ordered;
+    }
+
+    render();
+  } catch (err) {
+    document.getElementById('cards-wrap').innerHTML =
+      '<div class="loading-wrap">⚠️ 載入失敗，請重新整理</div>';
+  }
+}
+
+// ── NAV MODE STATE ────────────────────────────────────────────
+let navMode = false;
+let navIndex = 0;
+let geoWatchId = null;
+let arrivalHandled = false;
+let workingPhId = null;
+let workStartTime = null;
+let workTimerInterval = null;
+const geocodeCache = {};
+
+// ── GEOCODING ─────────────────────────────────────────────────
+async function getCoords(ph) {
+  if (ph.lat && ph.lng) return { lat: +ph.lat, lng: +ph.lng };
+  const key = ph.addr || ph.name;
+  if (geocodeCache[key]) return geocodeCache[key];
+  try {
+    const q = encodeURIComponent((ph.addr || ph.name) + ' 台灣');
+    const r = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${q}&key=${MAPS_KEY}`
+    );
+    const d = await r.json();
+    if (d.results?.[0]?.geometry?.location) {
+      const loc = d.results[0].geometry.location;
+      geocodeCache[key] = { lat: loc.lat, lng: loc.lng };
+      return geocodeCache[key];
+    }
+  } catch(e) {}
+  return null;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2
+    + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── NAV MODE: 進入 / 離開 ─────────────────────────────────────
+function startNavMode() {
+  if (!cards.length) { showToast('請先等待藥局清單載入'); return; }
+  navMode = true;
+  navIndex = 0;
+  arrivalHandled = false;
+  document.getElementById('nav-start-wrap').style.display = 'none';
+  document.getElementById('cards-wrap').style.display = 'none';
+  document.getElementById('nav-dest-card').style.display = '';
+  document.getElementById('upcoming-wrap').style.display = '';
+  updateNavCard();
+  startGeoWatch();
+  showToast('🚀 導航行程開始！');
+}
+
+function exitNavMode() {
+  navMode = false;
+  stopGeoWatch();
+  document.getElementById('nav-start-wrap').style.display = '';
+  document.getElementById('cards-wrap').style.display = '';
+  document.getElementById('nav-dest-card').style.display = 'none';
+  document.getElementById('upcoming-wrap').style.display = 'none';
+}
+
+// ── NAV MODE: 更新目的地卡片 ──────────────────────────────────
+async function updateNavCard() {
+  // 跳過已打卡的
+  while (navIndex < cards.length && today.done.includes(cards[navIndex].id)) navIndex++;
+
+  if (navIndex >= cards.length) {
+    exitNavMode();
+    showMissionComplete();
+    return;
+  }
+
+  arrivalHandled = false;
+  const ph = cards[navIndex];
+  const ct = charType(ph.daysSince, ph.totalAmount);
+
+  document.getElementById('nav-dest-name').textContent = ct.emoji + ' ' + ph.name;
+  document.getElementById('nav-dest-sub').textContent = [
+    ph.district,
+    ph.daysSince !== null ? `${ph.daysSince} 天前拜訪` : '從未拜訪'
+  ].filter(Boolean).join(' · ');
+  document.getElementById('nav-dest-idx').textContent =
+    `${navIndex + 1} / ${cards.length} 站`;
+
+  // 路線地圖（起點固定用 My+Location，避免點地圖開啟 Maps 時起點錯誤）
+  const coords = await getCoords(ph);
+  let destQ;
+  if (coords) {
+    destQ = `${coords.lat},${coords.lng}`;
+    ph.lat = coords.lat;
+    ph.lng = coords.lng;
+  } else {
+    destQ = encodeURIComponent(ph.name + ' ' + (ph.district || '') + ' 台灣');
+  }
+
+  document.getElementById('nav-dest-map').src =
+    `https://www.google.com/maps/embed/v1/directions?key=${MAPS_KEY}&origin=My+Location&destination=${destQ}&mode=driving&language=zh-TW`;
+
+  document.getElementById('nav-open-maps').href =
+    `https://www.google.com/maps/dir/?api=1&destination=${destQ}&travelmode=driving`;
+
+  document.getElementById('gps-dot').className = 'gps-dot searching';
+  document.getElementById('gps-text').textContent = '定位中...';
+
+  renderUpcoming();
+}
+
+function renderUpcoming() {
+  const list = document.getElementById('upcoming-list');
+  const rest = cards.slice(navIndex + 1);
+  if (!rest.length) {
+    list.innerHTML =
+      '<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px">這是最後一站！加油！</div>';
+    return;
+  }
+  list.innerHTML = rest.map((ph, i) => {
+    const ct = charType(ph.daysSince, ph.totalAmount);
+    const isDone = today.done.includes(ph.id);
+    return `
+    <div class="upcoming-item${isDone ? ' done' : ''}">
+      <div class="upcoming-num">${navIndex + 2 + i}</div>
+      <div class="upcoming-emoji">${ct.emoji}</div>
+      <div class="upcoming-info">
+        <div class="upcoming-name">${ph.name}</div>
+        <div class="upcoming-sub">${ph.district || ''} · ${ph.daysSince !== null ? ph.daysSince + '天前' : '未拜訪'}</div>
+      </div>
+      ${isDone ? '<span class="upcoming-done-tag">✓ 完成</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── GEOLOCATION ───────────────────────────────────────────────
+function startGeoWatch() {
+  if (!navigator.geolocation) {
+    document.getElementById('gps-text').textContent = '此裝置不支援 GPS';
+    return;
+  }
+  stopGeoWatch();
+  geoWatchId = navigator.geolocation.watchPosition(
+    onGeoUpdate, onGeoError,
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+}
+
+function stopGeoWatch() {
+  if (geoWatchId !== null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+
+async function onGeoUpdate(pos) {
+  if (!navMode || arrivalHandled) return;
+  const { latitude: myLat, longitude: myLng } = pos.coords;
+  const ph = cards[navIndex];
+  if (!ph) return;
+
+  const coords = await getCoords(ph);
+  if (!coords) {
+    document.getElementById('gps-text').textContent = '無法取得目的地座標';
+    return;
+  }
+
+  const dist = haversine(myLat, myLng, coords.lat, coords.lng);
+  const distText = dist < 1000
+    ? `${Math.round(dist)} 公尺`
+    : `${(dist / 1000).toFixed(1)} 公里`;
+
+  document.getElementById('gps-dot').className = 'gps-dot ok';
+  document.getElementById('gps-text').textContent = `距 ${ph.name}：${distText}`;
+
+  if (dist <= 200) triggerArrival();
+}
+
+function onGeoError() {
+  document.getElementById('gps-dot').className = 'gps-dot';
+  document.getElementById('gps-text').textContent = 'GPS 無法定位（可手動點「我到了」）';
+}
+
+function triggerArrival() {
+  if (arrivalHandled) return;
+  arrivalHandled = true;
+  const ph = cards[navIndex];
+  document.getElementById('gps-dot').className = 'gps-dot arrived';
+  document.getElementById('gps-text').textContent = `✅ 已抵達 ${ph.name}！`;
+  if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+  showToast(`📍 已抵達 ${ph.name}！`);
+  setTimeout(() => openBriefForNav(ph.id), 900);
+}
+
+function manualArrival() {
+  if (arrivalHandled) return;
+  triggerArrival();
+}
+
+// ── SKIP PHARMACY ─────────────────────────────────────────────
+let selectedSkipReason = '未說明';
+
+function openSkipModal() {
+  if (!navMode || navIndex >= cards.length) return;
+  const ph = cards[navIndex];
+  document.getElementById('skip-ph-name').textContent = ph.name;
+  selectedSkipReason = '未說明';
+  document.querySelectorAll('.skip-reason-chip').forEach(c => c.classList.remove('selected'));
+  document.getElementById('skip-bg').classList.add('open');
+  document.getElementById('skip-sheet').classList.add('open');
+}
+
+function closeSkipModal() {
+  document.getElementById('skip-bg').classList.remove('open');
+  document.getElementById('skip-sheet').classList.remove('open');
+}
+
+function selectSkipReason(el, reason) {
+  selectedSkipReason = reason;
+  document.querySelectorAll('.skip-reason-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function confirmSkipPharmacy() {
+  if (navIndex >= cards.length) return;
+  const ph = cards[navIndex];
+
+  // 存入今日跳過清單
+  if (!today.skipped) today.skipped = [];
+  today.skipped.push({ id: ph.id, name: ph.name, reason: selectedSkipReason });
+  saveToday(today);
+
+  closeSkipModal();
+  showToast(`⏭ 已跳過「${ph.name}」（${selectedSkipReason}）`);
+
+  // 前往下一站
+  navIndex++;
+  updateNavCard();
+}
+
+function openBriefForNav(id) {
+  openBrief(id);
+  // 覆寫打卡按鈕為「進入作業」
+  const btn = document.getElementById('brief-checkin-btn');
+  btn.textContent = '🏪 進入作業';
+  btn.onclick = () => {
+    closeBrief();
+    setTimeout(() => startWorking(id), 320);
+  };
+}
+
+// ── WORKING STATE ─────────────────────────────────────────────
+function startWorking(phId) {
+  workingPhId = phId;
+  workStartTime = new Date();
+  const ph = cards.find(p => p.id === phId);
+  const ct = ph ? charType(ph.daysSince, ph.totalAmount) : { emoji: '🏪' };
+
+  document.getElementById('working-emoji').textContent = ct.emoji;
+  document.getElementById('working-ph-name').textContent = ph?.name || '—';
+  document.getElementById('working-start-time').textContent =
+    '開始時間：' + workStartTime.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('working-timer').textContent = '00:00';
+  document.getElementById('working-overlay').classList.add('open');
+  if (navigator.vibrate) navigator.vibrate(60);
+
+  clearInterval(workTimerInterval);
+  workTimerInterval = setInterval(() => {
+    const sec = Math.floor((new Date() - workStartTime) / 1000);
+    const m = String(Math.floor(sec / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    document.getElementById('working-timer').textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function finishWorking() {
+  clearInterval(workTimerInterval);
+  document.getElementById('working-overlay').classList.remove('open');
+  openRecordModal(workingPhId);
+}
+
+// ── RECORD MODAL ──────────────────────────────────────────────
+function openRecordModal(phId) {
+  const ph = cards.find(p => p.id === phId);
+  document.getElementById('record-ph-name').textContent = ph?.name || '—';
+  document.getElementById('record-purpose').value = '例行拜訪';
+  document.getElementById('record-content').value = '';
+  const btn = document.getElementById('record-submit-btn');
+  btn.disabled = false;
+  btn.textContent = '✅ 送出得分';
+  document.getElementById('record-bg').classList.add('open');
+  document.getElementById('record-sheet').classList.add('open');
+}
+
+function closeRecordModal() {
+  document.getElementById('record-bg').classList.remove('open');
+  document.getElementById('record-sheet').classList.remove('open');
+}
+
+// 略過紀錄：先顯示確認警告
+function askSkipRecord() {
+  document.getElementById('record-skip-confirm').classList.add('show');
+  document.getElementById('record-skip-btn').style.display = 'none';
+  document.getElementById('record-submit-btn').style.display = 'none';
+}
+
+function cancelSkipRecord() {
+  document.getElementById('record-skip-confirm').classList.remove('show');
+  document.getElementById('record-skip-btn').style.display = '';
+  document.getElementById('record-submit-btn').style.display = '';
+}
+
+function confirmSkipRecord() {
+  const ph = cards.find(p => p.id === workingPhId);
+  closeRecordModal();
+  doCheckin(workingPhId);
+  // 提醒事後補填
+  setTimeout(() => showToast(`📝 記得補填「${ph?.name || ''}」的拜訪紀錄`), 600);
+}
+
+function skipRecord() { askSkipRecord(); } // 舊呼叫保留相容
+
+async function submitVisitRecord() {
+  const phId = workingPhId;
+  const ph = cards.find(p => p.id === phId);
+  const phName = ph?.name || '';
+  const purpose = document.getElementById('record-purpose').value;
+  const content = document.getElementById('record-content').value.trim();
+  const btn = document.getElementById('record-submit-btn');
+  const visitId = 'V_' + Date.now();
+  const ds = todayStr();
+  btn.disabled = true;
+  btn.textContent = '送出中...';
+
+  try {
+    await fetch(WORKER + '/add-visit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'addVisit',
+        visitId,
+        pharmacyName: phName,
+        pharmacyId: phId || '',
+        date: ds,
+        purpose,
+        content: content,
+      })
+    });
+    showToast('✅ 拜訪紀錄已儲存！');
+
+    // ── 自動建立老爸聯絡事項（與 index.html 的 submitNewVisit 邏輯保持一致）──
+    const isDelivery = purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content);
+    const isPayment  = purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content);
+    const isRedSlip  = isDelivery || isPayment || /紅單|交貨/.test(content);
+    const isDad      = phId && DAD_PHARMACY_IDS.has(phId);
+
+    if (isDad && isDelivery) {
+      await todoApiCreate({ task: `【${phName}】還帳單給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
+    if (isDad && isPayment) {
+      await todoApiCreate({ task: `【${phName}】交資料袋給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
+    if (isRedSlip) {
+      await todoApiCreate({ task: `【${phName}】把紅單放回抽屜（等整理日整理）`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: ds, type: 'return_receipt' });
+    }
+  } catch(e) {
+    showToast('⚠️ 紀錄儲存失敗，但打卡成功');
+  }
+
+  closeRecordModal();
+  doCheckin(phId);
+}
+
+// ── CHECKIN CLOSE: 導航模式往下一站 ──────────────────────────
+function handleCheckinClose() {
+  document.getElementById('ov').classList.remove('open');
+  if (navMode) {
+    navIndex++;
+    updateNavCard();
+    renderUpcoming();
+  } else {
+    render();
+  }
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+streak = initStreak();
+today  = loadToday();
+
+document.getElementById('header-date').textContent = fmtDate(todayStr());
+document.getElementById('streak-num').textContent = streak.count;
+document.getElementById('shield-num').textContent = streak.shields;
+document.getElementById('done-num').textContent   = today.done.length;
+document.getElementById('s-pts').textContent      = today.pts;
+document.getElementById('s-streak').textContent   = streak.count;
+document.getElementById('s-shields').textContent  = streak.shields;
+document.getElementById('s-best').textContent     = streak.best;
+
+loadData();
+</script>
+</body>
+</html>
