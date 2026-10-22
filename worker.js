@@ -37,12 +37,14 @@ const CORS_HEADERS = {
 //   relatedTodoIds,      ← 關聯待辦 id 陣列
 //   sourceVisitId, sourceVisitDate,
 //   type,                ← return_receipt | get_receipt | revisit | prepare | follow_up | other
-//   newPhAddress, newPhCity, healthInsurance, source,
+//   source,
 //   createdAt
 //
 // 【有效象限值】前端 QMETA 與此處 AI prompt 必須一致
-//   ui | ii | iii | iv | pool | dad | pending_newph | newph | invoice
-//   AI 只建議前五種（dad / pending_newph / newph / invoice 由系統自動設定）
+//   ui | ii | iii | iv | pool | dad | invoice
+//   AI 只建議前五種（dad / invoice 由系統自動設定）
+//   2026-10-23 拿掉 pending_newph／newph：從沒接過真的資料來源的空殼篩選機制，
+//   新開藥局篩選改用 new-pharmacy-screening（screening.html）那一套
 //
 // 【/today-orders — 今日出貨清單（訂單主檔）】
 //   GET  → { ok, date, orders: [{orderNo,storeCode,storeName,totalAmount,status}] }
@@ -855,7 +857,7 @@ async function handleTodosV2(request, env) {
     if (idx === -1) return json({ error: '找不到此待辦' }, 404);
 
     const updated = { ...todos[idx] };
-    const allowedFields = ['task','quadrant','pharmacyId','pharmacyName','scheduledDate','done','doneAt','aiSuggestions','resolution','relatedTodoIds','sourceVisitId','sourceVisitDate','type','newPhAddress','newPhCity','healthInsurance','source'];
+    const allowedFields = ['task','quadrant','pharmacyId','pharmacyName','scheduledDate','done','doneAt','aiSuggestions','resolution','relatedTodoIds','sourceVisitId','sourceVisitDate','type','source'];
     for (const f of allowedFields) {
       if (body[f] !== undefined) updated[f] = body[f];
     }
