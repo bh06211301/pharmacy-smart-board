@@ -205,7 +205,10 @@ body{
   <!-- View B：候選清單 -->
   <div class="view" id="view-candidates">
     <div class="selected-ph-bar">
-      <div class="name" id="cand-ph-name"></div>
+      <div style="flex:1;min-width:0">
+        <div class="name" id="cand-ph-name"></div>
+        <div id="cand-visit-badge" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+      </div>
       <button class="switch-btn" onclick="backToPicker()">換藥局</button>
     </div>
     <div id="cand-list"></div>
@@ -227,6 +230,7 @@ const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
 let allPharmacies = [];
 let currentPharmacy = null;
 let currentSession = null;
+let currentVisitId = '';
 let candidates = [];
 // touched[productId] = { qty, note, expiry }
 let touched = {};
@@ -355,6 +359,7 @@ async function selectPharmacy(id) {
   currentPharmacy = allPharmacies.find(p => p.id === id);
   if (!currentPharmacy) return;
   currentSession = genSessionId();
+  currentVisitId = '';
   touched = {};
 
   document.getElementById('view-picker').classList.remove('active');
@@ -362,9 +367,33 @@ async function selectPharmacy(id) {
   document.getElementById('btn-switch-ph').style.display = '';
   document.getElementById('header-sub').textContent = currentPharmacy.name;
   document.getElementById('cand-ph-name').textContent = `${currentPharmacy.name}（${currentPharmacy.id}）`;
+  document.getElementById('cand-visit-badge').textContent = '';
   document.getElementById('submit-bar').style.display = '';
 
+  linkTodayVisit(); // 不等待，不卡候選清單載入；找不到也不影響盤點送出
   await loadCandidates();
+}
+
+// 找這家店「今天」的拜訪紀錄，有的話盤點送出時一併帶上 Visit_ID，讓盤點歷史查得到是哪趟拜訪做的；
+// 找不到（例如還沒打拜訪紀錄，或盤點前就直接開盤點）就維持空字串，跟原本行為一樣不擋流程
+async function linkTodayVisit() {
+  const badge = document.getElementById('cand-visit-badge');
+  if (!currentPharmacy) return;
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`;
+  try {
+    const res = await fetch(`${WORKER}/visits/${encodeURIComponent(currentPharmacy.id)}`);
+    const data = await res.json();
+    const todayVisit = (data.visits || []).find(v => v.date === todayStr);
+    currentVisitId = todayVisit ? todayVisit.visitId : '';
+  } catch (e) {
+    currentVisitId = '';
+  }
+  if (badge && currentPharmacy) {
+    badge.textContent = currentVisitId
+      ? `🔗 已連結今日拜訪紀錄（${currentVisitId}）`
+      : 'ℹ️ 今日尚無拜訪紀錄，盤點將不會連結特定拜訪';
+  }
 }
 
 function backToPicker() {
@@ -375,6 +404,7 @@ function backToPicker() {
   document.getElementById('submit-bar').style.display = 'none';
   currentPharmacy = null;
   currentSession = null;
+  currentVisitId = '';
   candidates = [];
   touched = {};
 }
@@ -560,6 +590,7 @@ async function submitInventory() {
       body: JSON.stringify({
         pharmacyId: currentPharmacy.id,
         visitDate,
+        visitId: currentVisitId || '',
         items,
       }),
     });
