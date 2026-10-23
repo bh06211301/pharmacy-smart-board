@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LINE 速記解析 📋</title>
+<style>
+:root {
+  --bg:#f0f2f8;--white:#fff;--border:#e4e7f0;
+  --accent:#3b6ef5;--green:#10b981;--orange:#f97316;
+  --red:#ef4444;--yellow:#f59e0b;
+  --text:#101828;--muted:#6b7280;
+  --radius:16px;
+  --shadow:0 2px 12px rgba(16,24,40,.1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+body{
+  font-family:-apple-system,'SF Pro Display','Inter',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;max-width:480px;margin:0 auto;
+}
+
+/* ── HEADER ── */
+.header{
+  background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);
+  padding:16px 20px 18px;position:sticky;top:0;z-index:100;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+}
+.header-title{color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.header-sub{color:rgba(255,255,255,.6);font-size:12px;margin-top:4px}
+
+/* ── CONTENT ── */
+.content{padding:16px;padding-bottom:40px}
+
+.input-box{
+  background:var(--white);border-radius:var(--radius);padding:14px;
+  margin-bottom:12px;box-shadow:var(--shadow);
+}
+.input-box textarea{
+  width:100%;min-height:220px;border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;font-size:13px;font-family:inherit;color:var(--text);
+  resize:vertical;line-height:1.6;
+}
+.input-hint{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5}
+
+.parse-btn{
+  width:100%;padding:14px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  margin-bottom:16px;
+}
+.parse-btn:disabled{opacity:.5;cursor:not-allowed}
+.parse-btn:active:not(:disabled){transform:scale(.98)}
+
+.loading{text-align:center;color:var(--muted);font-size:13px;padding:30px 20px}
+.empty-hint{text-align:center;color:var(--muted);font-size:13px;padding:30px 20px}
+
+/* ── VISIT CARD ── */
+.visit-card{
+  background:var(--white);border-radius:var(--radius);padding:14px;
+  margin-bottom:10px;box-shadow:var(--shadow);
+}
+.visit-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.visit-time{font-size:12px;color:var(--muted);font-weight:600}
+.visit-store{font-size:15px;font-weight:700;margin-top:2px}
+.conf-badge{
+  font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:10px;white-space:nowrap;flex-shrink:0;
+}
+.conf-high{background:#d1fae5;color:#047857}
+.conf-medium{background:#fef3c7;color:#92400e}
+.conf-low{background:#ffedd5;color:#c2410c}
+.conf-none{background:#fee2e2;color:#b91c1c}
+
+.item-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:8px 0;border-top:1px solid var(--border);font-size:13px;
+}
+.item-row:first-of-type{border-top:none}
+.item-raw{color:var(--muted);font-size:11.5px}
+.item-matched{font-weight:600;margin-top:1px}
+.item-matched.unmatched{color:var(--red);font-weight:500}
+.item-qty{font-size:13px;font-weight:700;color:var(--text);flex-shrink:0;white-space:nowrap}
+
+.visit-note{font-size:11.5px;color:var(--muted);margin-top:8px;background:var(--bg);border-radius:8px;padding:6px 10px}
+
+.skip-section{
+  background:var(--white);border-radius:var(--radius);padding:14px;
+  box-shadow:var(--shadow);margin-top:4px;
+}
+.skip-title{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.skip-line{font-size:12px;color:var(--muted);padding:4px 0;border-top:1px solid var(--border)}
+.skip-line:first-of-type{border-top:none}
+
+.toast{
+  position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(16px);
+  background:var(--text);color:#fff;padding:10px 20px;border-radius:20px;
+  font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.3);
+  z-index:900;white-space:nowrap;opacity:0;transition:all .3s;pointer-events:none;
+  max-width:90vw;overflow:hidden;text-overflow:ellipsis;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">📋 LINE 速記解析</div>
+  <div class="header-sub">貼上 LINE 聊天記錄或自己打的速記，整理成訂單草稿（純顯示，不會寫入任何資料表）</div>
+</div>
+
+<div class="content">
+  <div class="input-box">
+    <textarea id="raw-text" placeholder="貼上像這樣的內容：&#10;2026.10.21 星期三&#10;15:51 蔡皓宇（小蔡） 大豆3 芝麻素3&#10;16:39 成家 葡萄糖胺檸檬酸鈣各二"></textarea>
+    <div class="input-hint">會自動比對真實產品清單跟藥局名單；查不到對應的會老實標記出來，不會亂猜。</div>
+  </div>
+  <button class="parse-btn" id="parse-btn" onclick="parseNotes()">🔍 整理成訂單草稿</button>
+
+  <div id="result"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function confClass(c) {
+  return { high:'conf-high', medium:'conf-medium', low:'conf-low' }[c] || 'conf-none';
+}
+function confLabel(c) {
+  return { high:'高信心', medium:'中信心', low:'低信心' }[c] || '查無對應';
+}
+
+async function parseNotes() {
+  const text = document.getElementById('raw-text').value.trim();
+  if (!text) { showToast('請先貼上內容'); return; }
+
+  const btn = document.getElementById('parse-btn');
+  const result = document.getElementById('result');
+  btn.disabled = true;
+  btn.textContent = '整理中…';
+  result.innerHTML = '<div class="loading">AI 比對產品/藥局清單中，資料量大可能要等幾秒…</div>';
+
+  try {
+    const res = await fetch(WORKER + '/parse-line-notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '解析失敗');
+    renderResult(data.visits || [], data.skippedLines || []);
+  } catch (e) {
+    result.innerHTML = `<div class="empty-hint">❌ ${escapeHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 整理成訂單草稿';
+  }
+}
+
+function renderResult(visits, skippedLines) {
+  const result = document.getElementById('result');
+  if (!visits.length && !skippedLines.length) {
+    result.innerHTML = '<div class="empty-hint">沒有解析出任何內容</div>';
+    return;
+  }
+
+  let html = visits.map(v => {
+    const store = v.store
+      ? `${escapeHtml(v.store.name)}（${escapeHtml(v.store.id)}）`
+      : '⚠️ 查無對應藥局';
+    const items = (v.items || []).map(it => {
+      const matched = it.matchedProductName
+        ? escapeHtml(it.matchedProductName) + (it.matchedProductId ? `（${escapeHtml(it.matchedProductId)}）` : '')
+        : `⚠️ 查無對應（原字：${escapeHtml(it.raw || '')}）`;
+      return `
+        <div class="item-row">
+          <div style="flex:1;min-width:0">
+            <div class="item-matched ${it.matchedProductId ? '' : 'unmatched'}">${matched}</div>
+            <div class="item-raw">原文：${escapeHtml(it.raw || '')}</div>
+          </div>
+          <div class="item-qty">×${it.qty ?? 1}</div>
+          <span class="conf-badge ${confClass(it.confidence)}">${confLabel(it.confidence)}</span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="visit-card">
+        <div class="visit-head">
+          <div>
+            <div class="visit-time">📅 ${escapeHtml(v.date || '')}　⏱ ${escapeHtml(v.timeRange || '')}</div>
+            <div class="visit-store">${store}</div>
+          </div>
+          <span class="conf-badge ${confClass(v.storeConfidence)}">${confLabel(v.storeConfidence)}</span>
+        </div>
+        ${items}
+        ${v.note ? `<div class="visit-note">📝 ${escapeHtml(v.note)}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  if (skippedLines.length) {
+    html += `
+      <div class="skip-section">
+        <div class="skip-title">已忽略、判斷不是訂單的行（${skippedLines.length}）</div>
+        ${skippedLines.map(l => `<div class="skip-line">${escapeHtml(l)}</div>`).join('')}
+      </div>`;
+  }
+
+  result.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+</script>
+</body>
+</html>

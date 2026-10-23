@@ -196,6 +196,11 @@ export default {
         return await handleInventorySubmit(request, env);
       }
 
+      // ★ LINE 速記解析 → 結構化訂單草稿（只回傳，不寫入任何資料表）
+      if (path === '/parse-line-notes' && request.method === 'POST') {
+        return await handleParseLineNotes(request, env);
+      }
+
       // ★ 產品照片（R2）
       if (path.startsWith('/product-photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.replace('/product-photo/', ''));
@@ -1539,6 +1544,86 @@ async function handlePharmacyProfile(request, env) {
   const inventory = Object.values(mySessions).sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
 
   return json({ ok: true, pharmacy, orders, returns, inventory });
+}
+
+// ============================================================
+// 22. LINE 速記解析（業務員在 LINE 上用極簡速記打的拜訪/訂單筆記，
+//     比對真實產品/藥局清單解析成結構化草稿；純回傳顯示，不寫入任何資料表）
+// ============================================================
+async function handleParseLineNotes(request, env) {
+  const { text } = await request.json();
+  if (!text || !text.trim()) return json({ error: '缺少文字內容' }, 400);
+
+  const [productData, pharmacyData] = await Promise.all([
+    fetchGvizSheet(env.SHEET_PRODUCT, null, env),
+    fetchGvizSheet(env.SHEET_PHARMACY, '新客戶資料表_AppSheet', env),
+  ]);
+
+  const products = productData.rows
+    .map(row => ({
+      id:       String(gvizGet(row, productData.colMap, '產品編號2') || '').trim(),
+      name:     String(gvizGet(row, productData.colMap, '產品名稱') || '').trim(),
+      category: String(gvizGet(row, productData.colMap, '小分類名稱') || '').trim(),
+    }))
+    .filter(p => p.id && p.name);
+
+  const pharmacies = pharmacyData.rows
+    .map(row => ({
+      id:   String(gvizGet(row, pharmacyData.colMap, 'Customer_ID') || '').trim(),
+      name: String(gvizGet(row, pharmacyData.colMap, '店名') || '').trim(),
+    }))
+    .filter(p => p.id && p.name);
+
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const prompt = `你是藥局業務助理，幫忙把業務員在 LINE 上用極簡速記打的拜訪/訂單筆記，解析成結構化資料。
+
+【真實產品清單】（id|名稱|分類，只能比對到這個清單裡的產品，比對不到就老實標記找不到，不要亂猜一個相近的名字）：
+${products.map(p => `${p.id}|${p.name}|${p.category}`).join('\n')}
+
+【真實藥局清單】（id|店名，只能比對到這個清單裡的店，比對不到就老實標記找不到）：
+${pharmacies.map(p => `${p.id}|${p.name}`).join('\n')}
+
+【已知的錯字/暱稱對照】（業務員常用語音輸入打字，同一個產品每次打錯的方式都不一樣，以下是過去驗證過的對應，供參考不是全部，共用同一個字不代表是同一個產品，例如「肝尖」是甘堅胃腸藥、「肝藥」卻是朝鮮薊，不要只看字面相似度）：
+舒伯特→葡萄糖-舒伯特葡萄糖；隻麻酥/芝麻素→芝麻素-新樂康芝麻素；愛寧書/愛寧叔→新愛寧舒錠；補精→美佳養生濃縮補精；鈣/蓋→新勇力優鈣；退熱貼→新泰康退熱貼；血紅素→金速美血紅素；諾力鈣/葡萄糖安/葡萄糖胺→諾立維他鈣；多多b→多多維力錠；B50/b50→富美樂B錠；膠原蛋白粉→泰康膠原蛋白胜肽粉；義課粽/異客總→益克綜膠囊食品；草先機/樂保養/肝藥→朝鮮薊-樂寶益；見了清→健樂清；肝尖/肝尖中→新甘樫胃腸藥
+
+【原始文字】（格式通常是「日期標題」+「HH:MM 姓名 內容」逐行，今天是 ${todayStr}）：
+${text}
+
+請依照以下規則解析：
+1. 同一天內、時間間隔在15分鐘以內的連續訊息，判斷為同一次拜訪（同一家店），除非中間出現新的明確店名。時間間隔超過1小時，視為換了一家店（即使沒有重新打店名）。
+2. 每次拜訪要盡量判斷是哪家店（用藥局清單比對），比對不到就 store 填 null、storeConfidence 填 "none"，不要亂猜一個相近的店名。
+3. 每一行裡「產品+數字黏在一起」代表品項+數量（例如「葉黃素3」= 葉黃素 數量3），沒有數字就預設數量1，「各二」「兩盒」這類中文數量詞也要換成數字。
+4. 排班提醒（日期、時段文字）、人名+評語、純店名列表、「圖片」這類不是訂單內容的行，整行原文放進 skippedLines，不要當作品項硬塞進某次拜訪。
+5. 查不到對應產品的詞，仍要放進該次拜訪的 items 裡（保留原始文字），但 matchedProductId/matchedProductName 填 null、confidence 填 "none"，不要自己掰一個相近產品名稱。
+6. 只輸出 JSON，不要 markdown 包裹、不要任何說明文字。
+
+輸出格式（嚴格遵守，不要多加欄位）：
+{"visits":[{"date":"YYYY-MM-DD","timeRange":"16:10-16:10","store":{"id":"C071","name":"康喜藥局"},"storeConfidence":"high|medium|low|none","items":[{"raw":"原始文字","matchedProductId":"1A","matchedProductName":"正式名稱","qty":3,"confidence":"high|medium|low|none"}],"note":""}],"skippedLines":["原始文字"]}
+（store 查無對應時填 null；matchedProductId/matchedProductName 查無對應時都填 null）`;
+
+  const geminiRes = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
+    }),
+  });
+  const geminiData = await geminiRes.json();
+  if (!geminiRes.ok) return json({ error: `Gemini 錯誤：${geminiData?.error?.message}` }, 500);
+
+  const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  let parsed;
+  try {
+    const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    return json({ error: 'AI 回應不是有效 JSON，請重試一次' }, 500);
+  }
+
+  return json({ ok: true, visits: parsed.visits || [], skippedLines: parsed.skippedLines || [] });
 }
 
 // ============================================================
