@@ -1,0 +1,128 @@
+/* =========================================================
+   SmartRoute 規劃流程 v2：設計變數
+   來源：Claude Design 畫布 A0～A10 線框
+   用法：每一頁 <link rel="stylesheet" href="design-tokens.css">
+         頁面樣式一律引用這裡的變數，不要直接寫色碼。
+   ========================================================= */
+
+:root {
+  /* ---------- 文字 ---------- */
+  --sr-ink:            #2B2F36;  /* 主要文字、標題、深色標籤底 */
+  --sr-ink-2:          #4B5563;  /* 次要文字、說明、未選中的選單 */
+  --sr-ink-3:          #6B7280;  /* 提示文字、placeholder、輔助標籤 */
+  --sr-on-dark:        #FFFFFF;  /* 深色或主色底上的文字 */
+
+  /* ---------- 底色 ---------- */
+  --sr-bg:             #FFFFFF;  /* 頁面、卡片、主選單 */
+  --sr-bg-subtle:      #F6F7F8;  /* 側欄、第 1 欄、表頭、休息日 */
+  --sr-bg-selected:    #F4F6F8;  /* 已勾選的清單列 */
+  --sr-bg-track:       #E4E7EB;  /* 進度條、倍數條的底 */
+  --sr-bg-muted:       #DDE1E6;  /* 禁止日、1～3 家的日子 */
+
+  /* ---------- 線 ---------- */
+  --sr-line:           #C3C8CF;  /* 一般框線、欄與欄之間的分隔 */
+  --sr-line-soft:      #E4E7EB;  /* 區塊內分隔 */
+  --sr-line-row:       #EEF0F2;  /* 清單列之間 */
+  --sr-line-dashed:    #9AA1AB;  /* 虛線框：待決定、可拖入、提示 */
+
+  /* ---------- 主色（藍） ---------- */
+  --sr-primary:        #2F6FDB;  /* 主要按鈕、連結、選中底線、今天外框、路線 */
+  --sr-primary-hover:  #1F4FA0;
+  --sr-primary-soft:   #8FB3EE;  /* 寄單期色帶、次要強調 */
+  --sr-primary-tint:   #EAF1FD;  /* 選中列的淡底 */
+
+  /* ---------- 警示（紅） ---------- */
+  --sr-danger:         #A3361F;  /* 逾期文字、規則衝突、紅框 */
+  --sr-danger-strong:  #C0462A;  /* 主選單數字徽章 */
+  --sr-danger-soft:    #E8B4A6;  /* 該去了（倍數 1.0～1.5） */
+  --sr-danger-tint:    #F8D7D1;  /* 逾期站點的光暈 */
+
+  /* ---------- 倍數分級（客戶總覽、地圖共用） ---------- */
+  --sr-ratio-4:        #A3361F;  /* 1.5 倍以上：很久了，白字 */
+  --sr-ratio-3:        #E8B4A6;  /* 1.0～1.5：該去了 */
+  --sr-ratio-2:        #DDE1E6;  /* 0.5～1.0：快到了 */
+  --sr-ratio-1:        #F6F7F8;  /* 0.5 以下：還早 */
+
+  /* ---------- 月曆拜訪量（A6） ---------- */
+  --sr-load-high:      #2B2F36;  /* 7 家以上，白字 */
+  --sr-load-mid:       #9AA1AB;  /* 4～6 家，白字 */
+  --sr-load-low:       #DDE1E6;  /* 1～3 家 */
+
+  /* ---------- 字體 ---------- */
+  --sr-font: 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --sr-weight-regular: 400;
+  --sr-weight-medium:  500;
+  --sr-weight-bold:    700;
+
+  /* ---------- 字級 ---------- */
+  --sr-text-2xs: 11px;   /* 倍數條標籤、日曆小字 */
+  --sr-text-xs:  12px;   /* 標籤、篩選膠囊、來源說明 */
+  --sr-text-sm:  13px;   /* 次要說明、推薦理由 */
+  --sr-text-base:14px;   /* 一般內文、清單 */
+  --sr-text-md:  15px;   /* 店名、主選單、主要按鈕 */
+  --sr-text-lg:  16px;   /* 區塊標題（例：今天一定要去） */
+  --sr-text-xl:  20px;   /* 頁首日期 */
+  --sr-text-2xl: 26px;   /* 頁面標題、藥局檔案店名、預估收工時間 */
+  --sr-leading:  1.6;    /* 段落行高 */
+  --sr-leading-tight: 1.3;
+
+  /* ---------- 間距（4 的倍數為主） ---------- */
+  --sr-space-1:  4px;
+  --sr-space-2:  6px;
+  --sr-space-3:  8px;
+  --sr-space-4:  10px;
+  --sr-space-5:  12px;
+  --sr-space-6:  16px;
+  --sr-space-7:  20px;
+  --sr-space-8:  24px;
+  --sr-space-9:  28px;
+
+  /* ---------- 圓角 ---------- */
+  --sr-radius-xs:   3px;   /* 小標籤 */
+  --sr-radius-sm:   4px;   /* 類型標籤、日曆格 */
+  --sr-radius-md:   6px;   /* 按鈕、輸入框、清單卡 */
+  --sr-radius-lg:   8px;   /* 面板、地圖框 */
+  --sr-radius-xl:   12px;  /* 對話框 */
+  --sr-radius-pill: 999px; /* 篩選膠囊、徽章、站點圓點 */
+
+  /* ---------- 高度 ---------- */
+  --sr-nav-h:        56px;  /* 主選單 */
+  --sr-btn-h:        44px;  /* 一般按鈕（觸控最小） */
+  --sr-btn-h-lg:     48px;  /* 頁面主要動作 */
+  --sr-btn-h-sm:     32px;  /* 卡片內小按鈕 */
+  --sr-input-h:      44px;
+  --sr-step-size:    26px;  /* 步驟數字圓 */
+
+  /* ---------- 版面 ---------- */
+  --sr-drawer-w:     840px; /* 藥局檔案抽屜 */
+  --sr-dialog-w:     620px; /* 規則衝突對話框 */
+  --sr-col-min:      340px; /* A1 三欄的最小寬度 */
+  --sr-breakpoint:   768px; /* 低於此寬度欄位堆疊（手機版另設計） */
+
+  /* ---------- 焦點 ---------- */
+  --sr-focus: 0 0 0 3px rgba(47, 111, 219, 0.35);
+}
+
+/* ---------- 基本設定 ---------- */
+html, body {
+  margin: 0;
+  background: var(--sr-bg);
+  color: var(--sr-ink);
+  font-family: var(--sr-font);
+  font-size: var(--sr-text-base);
+  line-height: var(--sr-leading);
+  font-variant-numeric: tabular-nums;  /* 數字等寬，時間、金額才會對齊 */
+}
+
+a { color: var(--sr-primary); }
+a:hover { color: var(--sr-primary-hover); }
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--sr-focus);
+  border-radius: var(--sr-radius-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
