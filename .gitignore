@@ -1,8 +1,13 @@
 # 本地開發設定（含 API Key，不上傳 GitHub）
 CLAUDE.md
 .env
+.dev.vars
 *.local
 
 # OS 暫存
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# wrangler dev 本機暫存/KV/R2 狀態，不是原始碼
+.wrangler/

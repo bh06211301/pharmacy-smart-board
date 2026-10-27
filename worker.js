@@ -1,6 +1,8 @@
 // ============================================================
 // 藥局業務智能 Worker v3
 // 新增：POST/GET /customer-status — 客戶狀態管理（死客戶標記）
+// 2026-10-24：死客戶／負責人(我/老爸) 改讀寫 新客戶資料表_AppSheet 的 停用(Z)/負責人(AA) 欄，
+//            取代原本的「客戶狀態」分頁代理與 dad:pharmacies KV（見下方【/customer-status】【/dad-pharmacies】）
 // ============================================================
 // 環境變數：
 //   GEMINI_API_KEY
@@ -10,13 +12,19 @@
 //   SHEET_ORDER     = 13HB7e9mzL0H6Nhfyl-AKhjO8M_GElnqPldTk-u-0ni8
 // ============================================================
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_MODEL_PRO = 'gemini-2.5-flash';
+import { PLANNER_CONFIG } from './planner-config.js';
+
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const GEMINI_MODEL_PRO = 'gemini-3.5-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const GEMINI_URL_PRO = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_PRO}:generateContent`;
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxdCQvTWLTLtTLrpL5gpZZrvsEAujA0xnQ9gOiX0o23mR2y6ZTJHtSDqEmt_LmqZBFA/exec';
 const GAS_VISIT_URL = 'https://script.google.com/macros/s/AKfycbxBDS60OKaAhxeS53qrN7O1TbbN_wHSaJgwKJeFVjgr8ZuxpS-RV6aRu-uEwTJwKvzN9g/exec';
+// 新開藥局篩選（new-pharmacy-screening）的 Web App，讀「藥局每日異動追蹤」篩選分頁。
+// 這份試算表沒有開「知道連結的人可檢視」（跟其他 SHEET_* 不同），gviz 直接讀會是登入頁，
+// 改用它自己的 doGet API（已經是 FIELD 對應好的 JSON，含 stage/stageDate），密碼走 wrangler secret：SCREENING_API_TOKEN
+const SCREENING_API_URL = 'https://script.google.com/macros/s/AKfycbyUJrKP1PsAOsQx8sVnJE5dwMhsn7LdEdZctsP_Y_T8em7AM5BtubDDpR1eL-1ZLxUNuQ/exec';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -65,10 +73,15 @@ const CORS_HEADERS = {
 //   PUT  → body: { plan: {...} }，回傳 { ok }
 //   KV key: calendar:plan
 //
-// 【/dad-pharmacies — 爸爸客戶清單】
-//   GET  → { ok, ids: ['C116',...] }（首次呼叫自動用 DEFAULT_DAD_IDS 初始化）
+// 【/customer-status — 死客戶標記，2026-10-24 改為讀寫主表「停用」欄】
+//   GET  → { ok, statuses: { [Customer_ID]: {status:'dead', note} } }（讀 /pharmacies 的 deadReason，非空才列入）
+//   POST → body: { id, status:'dead'|'active', note }，寫入 GAS_VISIT_URL action:'updatePharmacyFlag' field:'dead'
+//          status='dead' 且 note 空白時預設寫入「死客戶」（欄位只要非空值就算死客戶，不能寫空字串）
+//
+// 【/dad-pharmacies — 爸爸客戶清單，2026-10-24 改為讀寫主表「負責人」欄】
+//   GET  → { ok, ids: ['C116',...] }（讀 /pharmacies 裡 owner === '老爸' 的 id）
 //   POST → body: { id, action: 'add'|'remove' }，回傳 { ok, ids }
-//   KV key: dad:pharmacies
+//          寫入 GAS_VISIT_URL action:'updatePharmacyFlag' field:'dad'，value 為 '老爸'（add）或 ''（remove，預設即我）
 //
 // ============================================================
 
@@ -120,7 +133,7 @@ export default {
 
       // ★ 新增：客戶狀態管理
       if (path === '/customer-status') {
-        return await handleCustomerStatus(request);
+        return await handleCustomerStatus(request, env);
       }
 
       // ★ 新增：業務待辦清單（舊版，保留相容）
@@ -210,6 +223,27 @@ export default {
       // ★ 藥局資訊總覽（出貨明細 + 退貨紀錄 + 盤點歷史）
       if (path === '/pharmacy-profile' && request.method === 'GET') {
         return await handlePharmacyProfile(request, env);
+      }
+
+      // ★ SmartRoute 規劃流程 v2 第 1 階段：推薦清單（倍數＋待追蹤分）
+      if (path === '/api/plan' && request.method === 'GET') {
+        return await handlePlannerPlan(request, env);
+      }
+
+      // ★ 2026-10-27 新增：客戶叫貨健康度分級（只讀分析，跟 /api/plan 完全獨立、不影響 SmartRoute 評分）
+      // 只在 wrangler dev 本機測，還沒決定要不要留、要不要 commit
+      if (path === '/api/customer-tiers' && request.method === 'GET') {
+        return await handleCustomerTiers(env);
+      }
+
+      // ★ 店家規則（代理到 GAS 的 addRule/updateRule）
+      if (path === '/api/rules' && request.method === 'POST') {
+        return await handlePlannerRules(request, env);
+      }
+
+      // ★ 待追蹤（代理到 GAS 的 addFollowup/resolveFollowup）
+      if (path === '/api/followups' && request.method === 'POST') {
+        return await handlePlannerFollowups(request, env);
       }
 
       return json({ error: '找不到這個 endpoint' }, 404);
@@ -386,6 +420,9 @@ async function handleGetPharmacies(request, env) {
       chatTopics:  get('聊天話題'),
       background:  get('家庭背景'),
       profileNote: get('藥師備註'),
+      deadReason:  get('停用') || '',   // 非空字串＝死客戶，空字串＝正常客戶
+      owner:       get('負責人') || '', // '老爸' 或 '我'（含空白，視為我）
+      status:      get('狀態') || '',   // C 欄，2026-10-27 補：'其他通路' 用來排除叫貨統計抓不到的客戶（見 SPEC 4.5）
     };
   }).filter(p => p.id && p.name);
 
@@ -579,12 +616,42 @@ ${notesText}
 // ============================================================
 // 5. 所有藥局拜訪摘要
 // ============================================================
+// 「未建檔店家」暫存代號 → 正式 Customer_ID 對照表（已轉正欄非空才列入）。
+// 2026-10-27：木木好藥局（暫存代號 f3e4049d69）轉正成 C137 之後，不改拜訪紀錄表本身的歷史列
+// （避免動到原始資料），改成讀取時合併——之後任何暫存店家轉正都走同一套機制，不用再寫一次性腳本改歷史列。
+async function fetchTempPharmacyConversionMap_(env) {
+  const sheetId = env.SHEET_PHARMACY;
+  const sheetName = '未建檔店家';
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+
+  const res = await fetch(url);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+
+  const rows = data?.table?.rows || [];
+  const cols = data?.table?.cols || [];
+  const colMap = {};
+  cols.forEach((c, i) => { colMap[c.label] = i; });
+
+  const map = {};
+  rows.forEach(row => {
+    const tempId = row.c[colMap['id']]?.v || '';
+    const convertedId = row.c[colMap['已轉正']]?.v || '';
+    if (tempId && convertedId) map[tempId] = convertedId;
+  });
+  return map;
+}
+
 async function handleVisitsSummary(env) {
   const sheetId = env.SHEET_VISIT;
   const sheetName = '拜訪紀錄表';
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
 
-  const res = await fetch(url);
+  const [res, conversionMap] = await Promise.all([
+    fetch(url),
+    fetchTempPharmacyConversionMap_(env),
+  ]);
   const text = await res.text();
   const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
   const data = JSON.parse(jsonStr);
@@ -603,11 +670,12 @@ async function handleVisitsSummary(env) {
 
   const summary = {};
   rows.forEach(row => {
-    const id   = row.c[colMap['店名']]?.v || '';
+    let id      = row.c[colMap['店名']]?.v || '';
     const date = parseGvizDate(row.c[colMap['拜訪日期']]?.v || '');
     const tags = row.c[colMap['Tags']]?.v || '';
     const actionItems = row.c[colMap['Action Items']]?.v || '';
     if (!id) return;
+    if (conversionMap[id]) id = conversionMap[id]; // 暫存代號已轉正：合併進正式 Customer_ID
 
     if (!summary[id]) {
       summary[id] = { lastDate: '', visitCount: 0, hasPending: false };
@@ -672,17 +740,15 @@ async function handleOrdersSummary(env) {
 // 7. AI 推薦今日行程
 // ============================================================
 async function handleRecommendToday(env) {
-  const [pharmaciesRes, visitsRes, ordersRes, dadRaw] = await Promise.all([
+  const [pharmaciesRes, visitsRes, ordersRes] = await Promise.all([
     handleGetPharmacies(null, env).then(r => r.json()),
     handleVisitsSummary(env).then(r => r.json()),
     handleOrdersSummary(env).then(r => r.json()),
-    env.TODOS_KV.get('dad:pharmacies'),
   ]);
 
   const pharmacies  = pharmaciesRes.pharmacies || [];
   const visitMap    = visitsRes.summary || {};
   const orderMap    = ordersRes.summary || {};
-  const dadIds      = new Set(dadRaw ? JSON.parse(dadRaw) : []);
 
   const scored = pharmacies.map(p => {
     const v = visitMap[p.id] || {};
@@ -694,8 +760,10 @@ async function handleRecommendToday(env) {
     const neverOrdered = !o.orderCount;
     const neverVisited = !v.visitCount;
 
-    const isDead = totalAmount > 0 && daysSince > 180 && !v.visitCount && !dadIds.has(p.id);
-    if (isDead) return null;
+    // 死客戶直接讀主表「停用」欄（p.deadReason），不再用天數/金額猜測——
+    // 舊的猜測規則對「老爸」的客戶不準（這套系統沒追蹤到老爸的拜訪/叫貨資料），
+    // 現在欄位是真實標記，不需要再排除老爸的客戶
+    if (p.deadReason) return null;
 
     let score = 0;
 
@@ -754,27 +822,32 @@ function buildReason(daysSince, totalAmount, hasPending, neverVisited) {
 }
 
 // ============================================================
-// 8. 客戶狀態管理（代理到 Google Apps Script）
+// 8. 客戶狀態管理（死客戶，2026-10-24 改讀寫主表「停用」欄，見檔頭【/customer-status】）
 // ============================================================
-async function handleCustomerStatus(request) {
+async function handleCustomerStatus(request, env) {
   if (request.method === 'GET') {
-    const res = await fetch(`${GAS_URL}?action=getStatuses`, {
-      redirect: 'follow',
-    });
+    const res = await handleGetPharmacies(null, env);
     const data = await res.json();
-    return json(data);
+    const statuses = {};
+    (data.pharmacies || []).forEach(p => {
+      if (p.deadReason) statuses[p.id] = { status: 'dead', note: p.deadReason };
+    });
+    return json({ ok: true, statuses });
   }
 
   if (request.method === 'POST') {
     const body = await request.json();
-    const res = await fetch(GAS_URL, {
+    const { id, status, note } = body;
+    if (!id) return json({ error: '缺少 id' }, 400);
+    const value = status === 'dead' ? (note || '死客戶') : '';
+    const res = await fetch(GAS_VISIT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ action: 'updatePharmacyFlag', id, field: 'dead', value }),
       redirect: 'follow',
     });
     const data = await res.json();
-    return json(data);
+    return json({ ok: !!data.success, ...data });
   }
 
   return json({ error: '不支援此 method' }, 405);
@@ -1112,8 +1185,6 @@ async function handleProductOrders(request, env) {
 // ============================================================
 // 16. 月曆計畫（KV 持久化）
 // ============================================================
-const DEFAULT_DAD_IDS = ['C116','C117','C118','C119','C120','C121','C122','C123','C124','C125','C126','C129'];
-
 async function handleCalendarPlan(request, env) {
   if (request.method === 'GET') {
     const raw = await env.TODOS_KV.get('calendar:plan');
@@ -1128,30 +1199,34 @@ async function handleCalendarPlan(request, env) {
 }
 
 // ============================================================
-// 17. 爸爸客戶清單（KV 持久化）
+// 17. 爸爸客戶清單（2026-10-24 改讀寫主表「負責人」欄，見檔頭【/dad-pharmacies】）
 // ============================================================
 async function handleDadPharmacies(request, env) {
   if (request.method === 'GET') {
-    const raw = await env.TODOS_KV.get('dad:pharmacies');
-    if (!raw) {
-      // 首次呼叫自動初始化
-      await env.TODOS_KV.put('dad:pharmacies', JSON.stringify(DEFAULT_DAD_IDS));
-      return json({ ok: true, ids: DEFAULT_DAD_IDS });
-    }
-    return json({ ok: true, ids: JSON.parse(raw) });
+    const res = await handleGetPharmacies(null, env);
+    const data = await res.json();
+    const ids = (data.pharmacies || []).filter(p => p.owner === '老爸').map(p => p.id);
+    return json({ ok: true, ids });
   }
   if (request.method === 'POST') {
     const body = await request.json();
     const { id, action } = body;
     if (!id || !action) return json({ error: '缺少 id 或 action' }, 400);
-    const raw = await env.TODOS_KV.get('dad:pharmacies');
-    const ids = new Set(raw ? JSON.parse(raw) : DEFAULT_DAD_IDS);
-    if (action === 'add') ids.add(id);
-    else if (action === 'remove') ids.delete(id);
-    else return json({ error: 'action 必須是 add 或 remove' }, 400);
-    const updated = [...ids];
-    await env.TODOS_KV.put('dad:pharmacies', JSON.stringify(updated));
-    return json({ ok: true, ids: updated });
+    if (action !== 'add' && action !== 'remove') return json({ error: 'action 必須是 add 或 remove' }, 400);
+    const value = action === 'add' ? '老爸' : '';
+    const writeRes = await fetch(GAS_VISIT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'updatePharmacyFlag', id, field: 'dad', value }),
+      redirect: 'follow',
+    });
+    const writeData = await writeRes.json();
+    if (!writeData.success) return json({ ok: false, error: writeData.error || '寫入失敗' }, 500);
+
+    const res = await handleGetPharmacies(null, env);
+    const data = await res.json();
+    const ids = (data.pharmacies || []).filter(p => p.owner === '老爸').map(p => p.id);
+    return json({ ok: true, ids });
   }
   return json({ error: '不支援此 method' }, 405);
 }
@@ -1551,6 +1626,7 @@ async function handlePharmacyProfile(request, env) {
 //     比對真實產品/藥局清單解析成結構化草稿；純回傳顯示，不寫入任何資料表）
 // ============================================================
 async function handleParseLineNotes(request, env) {
+  const tStart = Date.now();
   const { text } = await request.json();
   if (!text || !text.trim()) return json({ error: '缺少文字內容' }, 400);
 
@@ -1558,6 +1634,7 @@ async function handleParseLineNotes(request, env) {
     fetchGvizSheet(env.SHEET_PRODUCT, null, env),
     fetchGvizSheet(env.SHEET_PHARMACY, '新客戶資料表_AppSheet', env),
   ]);
+  console.log(`[parse-line-notes] sheets fetched, elapsed=${Date.now() - tStart}ms`);
 
   const products = productData.rows
     .map(row => ({
@@ -1603,27 +1680,674 @@ ${text}
 {"visits":[{"date":"YYYY-MM-DD","timeRange":"16:10-16:10","store":{"id":"C071","name":"康喜藥局"},"storeConfidence":"high|medium|low|none","items":[{"raw":"原始文字","matchedProductId":"1A","matchedProductName":"正式名稱","qty":3,"confidence":"high|medium|low|none"}],"note":""}],"skippedLines":["原始文字"]}
 （store 查無對應時填 null；matchedProductId/matchedProductName 查無對應時都填 null）`;
 
-  const geminiRes = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
-    }),
-  });
-  const geminiData = await geminiRes.json();
-  if (!geminiRes.ok) return json({ error: `Gemini 錯誤：${geminiData?.error?.message}` }, 500);
+  // 改走 OpenRouter（2026-10-24）：直接打 Gemini API 在 Cloudflare Workers 上會遇到
+  // 「User location is not supported」地區限制（Cloudflare 出口IP不固定，剛好分配到
+  // Google 不支援的地區就會被拒絕，跟帳號/金鑰/模型都無關），照抄 visit-worker 已經驗證
+  // 穩定的備援模型清單 + JSON 驗證重試邏輯，不是只要「有回應」就算數
+  // 2026-10-24 用 OpenRouter 的 /api/v1/models 即時查過，這批是當下真的還在架上的免費模型
+  // （visit-worker 2026-10-07 那份清單短短不到一個月又有一半掛掉/被限流，免費模型汰換很快，
+  //   之後若又大量失敗，用同樣方式重新查 https://openrouter.ai/api/v1/models 重排清單即可）
+  const models = [
+    'nvidia/nemotron-3.5-super-vl:free',
+    'nvidia/nemotron-3.5-lightning:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    'xingchen-agi/xing4.0-29b-a4b:free',
+    'google/gemma-4-31b-it:free',
+    'google/gemma-4-26b-a4b-it:free',
+    'cohere/north-mini-code:free',
+  ];
 
-  const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  let parsed;
-  try {
-    const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch (e) {
-    return json({ error: 'AI 回應不是有效 JSON，請重試一次' }, 500);
+  function extractJson(content) {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      JSON.parse(match[0]);
+      return match[0];
+    } catch (e) {
+      return null;
+    }
   }
 
+  let parsed = null;
+  let lastError = '';
+
+  console.log(`[parse-line-notes] promptLen=${prompt.length} elapsedSoFar=${Date.now() - tStart}ms`);
+  const OVERALL_DEADLINE_MS = 25000;
+  for (const model of models) {
+    // 整條備援清單合計最多 25 秒，不管試到第幾個模型，時間到就直接放棄，不要讓單一個卡住的模型
+    // 拖垮整個請求（曾經實測過：單一模型就算設了 10 秒逾時，在某些情況下還是可能不觸發）
+    if (Date.now() - tStart > OVERALL_DEADLINE_MS) {
+      console.log(`[parse-line-notes] overall deadline (${OVERALL_DEADLINE_MS}ms) reached, stop trying more models`);
+      lastError = lastError || '整體逾時';
+      break;
+    }
+    const t0 = Date.now();
+    // 單一模型最多等 10 秒，卡住/掛著不回應就直接換下一個，不要讓整條備援清單被一個模型拖垮
+    // 雙重保險：AbortController 中斷連線 + Promise.race 強制逾時，避免只靠 AbortSignal 在某些情況下沒確實生效
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('逾時（超過10秒未回應）')), 10000);
+    });
+    try {
+      const res = await Promise.race([
+        fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.OPENROUTER_KEY}`,
+            'HTTP-Referer': 'https://bh06211301.github.io',
+            'X-Title': 'Pharmacy Smart Board',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 8000,
+            temperature: 0.2,
+          }),
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - t0;
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      console.log(`[parse-line-notes] model=${model} status=${res.status} elapsed=${elapsed}ms contentLen=${content?.length || 0} errMsg=${data.error?.message || ''}`);
+      if (!content || !content.trim()) {
+        lastError = data.error?.message || 'empty content';
+        continue;
+      }
+      const jsonStr = extractJson(content);
+      if (!jsonStr) {
+        lastError = '回應不是有效 JSON';
+        console.log(`[parse-line-notes] contentPreview=${content.slice(0, 200)}`);
+        continue;
+      }
+      parsed = JSON.parse(jsonStr);
+      break;
+    } catch (e) {
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - t0;
+      const msg = e.name === 'AbortError' ? '逾時（超過10秒未回應）' : e.message;
+      console.log(`[parse-line-notes] model=${model} EXCEPTION elapsed=${elapsed}ms msg=${msg}`);
+      lastError = msg;
+      continue;
+    }
+  }
+
+  if (!parsed) return json({ error: `AI 解析失敗（已試過全部備援模型）：${lastError}` }, 500);
+
   return json({ ok: true, visits: parsed.visits || [], skippedLines: parsed.skippedLines || [] });
+}
+
+// ============================================================
+// SmartRoute 規劃流程 v2 第 1 階段：/api/plan、/api/rules、/api/followups
+// docs/SPEC.md 第 4 節。參數都在 planner-config.js，這裡只有計算邏輯。
+// 環境變數新增：SHEET_SCREENING（藥局每日異動追蹤）、SHEET_PLANNER（藥局規劃資料）
+// ============================================================
+
+async function fetchGvizRows(sheetId, sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
+  const data = JSON.parse(jsonStr);
+  const rows = data?.table?.rows || [];
+  const cols = data?.table?.cols || [];
+  const colMap = {};
+  cols.forEach((c, i) => { colMap[c.label] = i; });
+  return rows.map(row => {
+    const get = (label) => row.c[colMap[label]]?.v ?? '';
+    return { get };
+  });
+}
+
+function daysBetween(fromDateStr, toDate) {
+  if (!fromDateStr) return null;
+  const from = new Date(String(fromDateStr).replace(/\//g, '-'));
+  if (isNaN(from)) return null;
+  return Math.floor((toDate - from) / 86400000);
+}
+
+function ratioTierOf(ratio) {
+  if (ratio >= PLANNER_CONFIG.ratioColorThresholds.veryLate) return 'very-late';
+  if (ratio >= PLANNER_CONFIG.ratioColorThresholds.late) return 'late';
+  if (ratio >= PLANNER_CONFIG.ratioColorThresholds.soon) return 'soon';
+  return 'early';
+}
+
+// ============================================================
+// 客戶叫貨健康度分級（2026-10-27 改版）
+// /api/plan（正式客戶排序）跟 /api/customer-tiers（客戶總覽頁分級）共用這一組函數，
+// 確保兩邊看到的「這家是大咖/潛力新店/冷淡/一般」永遠一致。
+// ============================================================
+// 排除規則（2026-10-27 第二版，統一叫「不拜訪」）。符合任一條都不進任何統計分母，但要能在 A1 手動加成
+// 「送貨」錨點（錨點 UI 還沒做，這裡只管排除分級/排序）：
+//   - Z 欄「停用」有值：死客戶，無條件排除，不算進「不拜訪」這組。
+//   - AA 欄「負責人」＝老爸：系統對老爸那邊的叫貨大多沒有紀錄（詳見 CLAUDE.md「死客戶／爸爸客戶 改欄位化」）。
+//   - F 欄「縣市」在 PLANNER_CONFIG.excludedCities（新竹縣/新竹市）：C130 艾美藥局縣市欄本來就是新竹縣，
+//     這條規則已經會抓到它，不用另開例外清單。
+//   - C 欄「狀態」＝不拜訪：手動標記（目前 C135、C047 已填），取代原本叫「其他通路」的名字。
+function isEligibleForTiering_(p) {
+  if (p.deadReason) return false;
+  if (p.owner === '老爸') return false;
+  if (PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0) return false;
+  if (p.status === '不拜訪') return false;
+  return true;
+}
+
+function monthsSinceJs(d1, d2) {
+  let months = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
+  if (d2.getDate() < d1.getDate()) months -= 1;
+  return Math.max(months, 0);
+}
+
+function percentile_(sorted, p) {
+  if (!sorted.length) return null;
+  const k = (sorted.length - 1) * p, f = Math.floor(k), c = Math.min(f + 1, sorted.length - 1);
+  return f === c ? sorted[f] : sorted[f] + (sorted[c] - sorted[f]) * (k - f);
+}
+
+function quartiles_(sorted) {
+  if (!sorted.length) return { min: null, q1: null, median: null, q3: null, max: null };
+  return { min: sorted[0], q1: percentile_(sorted, 0.25), median: percentile_(sorted, 0.5), q3: percentile_(sorted, 0.75), max: sorted[sorted.length - 1] };
+}
+
+// 依客戶代號分組的叫貨統計。eligiblePharmacies 必須是已經過 isEligibleForTiering_ 篩過的名單，
+// 訂單主檔裡不在名單上的 id（死客戶/老爸/新竹/不拜訪）直接跳過，不會污染任何分母。
+// 2026-10-27 補：月均跟近3個月都改用「叫貨－退貨」淨額，不再只看叫貨——寄賣店 7 個月整理退貨時，
+// 賣不掉的會退回、賣掉的會轉進貨再下一張單，兩筆都算叫貨會把同一批貨算兩次（自強藥局 C113 實測驗證過，
+// 詳見 SPEC 4.5）。退貨單（returnOrderRows）的「店名」欄位直接存 Customer_ID，不用再 join 到明細。
+function buildOrderStatsById_(orderRows, orderColMap, returnOrderRows, returnOrderColMap, eligiblePharmacies, today) {
+  const nameById = {};
+  eligiblePharmacies.forEach(p => { nameById[p.id] = p.name; });
+
+  const ordersById = {};
+  orderRows.forEach(row => {
+    const id = String(row.c[orderColMap['店名']]?.v || '').trim();
+    if (!id || !nameById[id]) return;
+    const d = parseGvizDate(row.c[orderColMap['訂單日期']]?.v || '');
+    if (!d) return;
+    const date = new Date(String(d).replace(/\//g, '-'));
+    if (isNaN(date)) return;
+    const amount = parseFloat(row.c[orderColMap['總金額']]?.v || 0) || 0;
+    (ordersById[id] = ordersById[id] || []).push({ date, amount });
+  });
+
+  const returnsById = {};
+  returnOrderRows.forEach(row => {
+    const id = String(row.c[returnOrderColMap['店名']]?.v || '').trim();
+    if (!id || !nameById[id]) return;
+    const d = parseGvizDate(row.c[returnOrderColMap['退貨日期']]?.v || '');
+    if (!d) return;
+    const date = new Date(String(d).replace(/\//g, '-'));
+    if (isNaN(date)) return;
+    const amount = parseFloat(row.c[returnOrderColMap['退貨金額']]?.v || 0) || 0;
+    (returnsById[id] = returnsById[id] || []).push({ date, amount });
+  });
+
+  const yearAgo = new Date(today); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  const threeMoAgo = new Date(today); threeMoAgo.setMonth(threeMoAgo.getMonth() - 3);
+
+  const statsById = {};
+  eligiblePharmacies.forEach(p => {
+    const orders = ordersById[p.id] || [];
+    if (!orders.length) {
+      statsById[p.id] = { id: p.id, name: p.name, hasOrders: false };
+      return;
+    }
+    const returns = returnsById[p.id] || [];
+
+    const dates = orders.map(o => o.date);
+    const firstDate = new Date(Math.min(...dates));
+    const lastDate = new Date(Math.max(...dates));
+
+    const monthSet12mo = new Set();
+    orders.forEach(o => { if (o.date >= yearAgo && o.date <= today) monthSet12mo.add(o.date.getFullYear() + '-' + o.date.getMonth()); });
+
+    // 叫貨次數＝不同叫貨日期的數量（不是月份數，用來判斷「有沒有回購」）——只看叫貨，退貨不影響這個次數
+    const orderCount = new Set(orders.map(o => o.date.toISOString().slice(0, 10))).size;
+
+    const coopMonths = Math.max(monthsSinceJs(firstDate, today), 1);
+    const totalOrderAmount = orders.reduce((s, o) => s + o.amount, 0);
+    const totalReturnAmount = returns.reduce((s, o) => s + o.amount, 0);
+    const netAmount = totalOrderAmount - totalReturnAmount;
+    const avgMonthly = netAmount / coopMonths;
+
+    const amount3moOrders = orders.filter(o => o.date >= threeMoAgo && o.date <= today).reduce((s, o) => s + o.amount, 0);
+    const amount3moReturns = returns.filter(o => o.date >= threeMoAgo && o.date <= today).reduce((s, o) => s + o.amount, 0);
+    const amount3mo = amount3moOrders - amount3moReturns; // 淨額，退貨比新單多時可以是負數
+    const recent3MonthlyRate = amount3mo / 3;
+    const momentumRatio = avgMonthly > 0 ? recent3MonthlyRate / avgMonthly : 0;
+
+    statsById[p.id] = {
+      id: p.id, name: p.name, hasOrders: true,
+      firstDate: firstDate.toISOString().slice(0, 10), coopMonths,
+      lastOrderDate: lastDate.toISOString().slice(0, 10),
+      orderMonths12mo: monthSet12mo.size, orderCount,
+      totalOrderAmount, totalReturnAmount, netAmount, avgMonthly, amount3mo, recent3MonthlyRate, momentumRatio,
+      daysSinceLastOrder: Math.floor((today - lastDate) / 86400000),
+      monthsSinceLastOrder: monthsSinceJs(lastDate, today),
+    };
+  });
+  return statsById;
+}
+
+function avgMonthlyPercentile_(statsById, p) {
+  const list = Object.values(statsById).filter(s => s.hasOrders).map(s => s.avgMonthly).sort((a, b) => a - b);
+  return percentile_(list, p);
+}
+
+// 動量提醒（叫貨下滑／叫貨回溫），跟分級正交——大咖/潛力新店/一般都可能觸發，冷淡不標下滑
+// （冷淡本身已經代表近3個月必定是0，標下滑沒有新資訊；回溫門檻>200%在冷淡狀態下數學上也不可能達成）。
+function detectMomentumAlert_(stat, tier, medianAvgMonthly) {
+  const A = PLANNER_CONFIG.alertThresholds;
+  if (tier !== '冷淡' && stat.avgMonthly >= medianAvgMonthly && stat.momentumRatio < A.decliningMomentumBelow) {
+    return '叫貨下滑';
+  }
+  if (stat.momentumRatio > A.reboundMomentumAbove) {
+    return '叫貨回溫';
+  }
+  return null;
+}
+
+// 分級＋提醒合一（2026-10-27 第二版）：大咖 ▸ 首批後沒回購 ▸ 潛力新店 ▸ 冷淡 ▸ 一般，依序檢查，符合就停。
+// 「首批後沒回購」判斷是分級序列的一部分（命中就強制歸一般，不會被判成潛力新店），
+// 跟「叫貨下滑／叫貨回溫」這組動量提醒是分開邏輯，兩者不會同時出現在同一家店上。
+// 門檻與間隔集中在 PLANNER_CONFIG.tierThresholds / tierIntervalDays / alertThresholds。
+function classifyTierAndAlert_(stat, p70AvgMonthly, medianAvgMonthly) {
+  const T = PLANNER_CONFIG.tierThresholds;
+  const A = PLANNER_CONFIG.alertThresholds;
+  if (!stat.hasOrders) return { tier: '一般', intervalDays: PLANNER_CONFIG.tierIntervalDays.一般, alert: null };
+
+  if (stat.orderMonths12mo >= T.bigAccountMinMonths) {
+    const tier = '大咖';
+    return { tier, intervalDays: PLANNER_CONFIG.tierIntervalDays[tier], alert: detectMomentumAlert_(stat, tier, medianAvgMonthly) };
+  }
+  if (stat.coopMonths <= T.potentialMaxCoopMonths && stat.orderCount === 1 && stat.daysSinceLastOrder > A.noRepeatMinDaysSince) {
+    return { tier: '一般', intervalDays: PLANNER_CONFIG.tierIntervalDays.一般, alert: '首批後沒回購' };
+  }
+  if (stat.coopMonths <= T.potentialMaxCoopMonths && stat.avgMonthly >= p70AvgMonthly) {
+    const tier = '潛力新店';
+    return { tier, intervalDays: PLANNER_CONFIG.tierIntervalDays[tier], alert: detectMomentumAlert_(stat, tier, medianAvgMonthly) };
+  }
+  if (stat.monthsSinceLastOrder > T.coldMinMonthsSinceOrder) {
+    return { tier: '冷淡', intervalDays: PLANNER_CONFIG.tierIntervalDays.冷淡, alert: null };
+  }
+  const tier = '一般';
+  return { tier, intervalDays: PLANNER_CONFIG.tierIntervalDays[tier], alert: detectMomentumAlert_(stat, tier, medianAvgMonthly) };
+}
+
+// 兩個日期字串取比較晚的那個（其中一個缺就回另一個；都缺回 null）——用來算「最後接觸日」＝拜訪或叫貨取比較近的
+function laterDateOrNull_(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return (new Date(String(a).replace(/\//g, '-')) >= new Date(String(b).replace(/\//g, '-'))) ? a : b;
+}
+
+async function handleCustomerTiers(env) {
+  const today = new Date();
+  const [pharmaciesRes, orderData, returnOrderData] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    fetchOrderMasterRows(env),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, eligible, today);
+
+  const p70AvgMonthly = avgMonthlyPercentile_(statsById, 0.70);
+  const medianAvgMonthly = avgMonthlyPercentile_(statsById, 0.50);
+
+  const tiers = { 潛力新店: [], 大咖: [], 冷淡: [], 一般: [] };
+  const neverOrdered = [];
+  const noRepeatOrder = [];
+  const declining = [];
+  const rebounding = [];
+
+  eligible.forEach(p => {
+    const stat = statsById[p.id];
+    if (!stat.hasOrders) { neverOrdered.push({ id: p.id, name: p.name }); return; }
+    const { tier, alert } = classifyTierAndAlert_(stat, p70AvgMonthly, medianAvgMonthly);
+    stat.tier = tier;
+    stat.rankScore = stat.momentumRatio * stat.avgMonthly;
+    tiers[tier].push(stat);
+
+    if (alert === '首批後沒回購') noRepeatOrder.push(stat);
+    else if (alert === '叫貨下滑') declining.push(stat);
+    else if (alert === '叫貨回溫') rebounding.push(stat);
+  });
+
+  const allStatsWithOrders = Object.values(statsById).filter(s => s.hasOrders);
+  const top15 = allStatsWithOrders.slice().sort((a, b) => b.rankScore - a.rankScore).slice(0, 15);
+
+  return json({
+    ok: true,
+    note: '只讀分析；跟 /api/plan 共用 classifyTierAndAlert_，分級定義保證兩邊一致',
+    excludedCount: {
+      total: allPharmacies.length, afterExclude: eligible.length,
+      dead: allPharmacies.filter(p => p.deadReason).length,
+      dad: allPharmacies.filter(p => p.owner === '老爸').length,
+      hsinchu: allPharmacies.filter(p => PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0).length,
+      noVisit: allPharmacies.filter(p => p.status === '不拜訪').length,
+    },
+    neverOrderedCount: neverOrdered.length,
+    neverOrdered,
+    tierCounts: Object.fromEntries(Object.entries(tiers).map(([k, v]) => [k, v.length])),
+    tiers,
+    avgMonthlyQuartiles: quartiles_(allStatsWithOrders.map(s => s.avgMonthly).sort((a, b) => a - b)),
+    p70AvgMonthly, medianAvgMonthly,
+    orderMonthsQuartiles: quartiles_(allStatsWithOrders.map(s => s.orderMonths12mo).sort((a, b) => a - b)),
+    top15,
+    noRepeatOrder, declining, rebounding,
+  });
+}
+
+// 星期：同時接受「、」和「,」分隔（Sheets 多選存成逗號格式，手動輸入常用頓號）
+const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']; // 對應 JS Date.getDay() 0~6
+function matchesWeekday(weekdaysStr, planDate) {
+  if (!weekdaysStr) return false;
+  const todayName = WEEKDAY_NAMES[planDate.getDay()];
+  return weekdaysStr.split(/[、,]/).map(s => s.trim()).includes(todayName);
+}
+
+// 每月日期：格式「起-迄」（含「5-5」這種單日），檢查規劃日的「日」是否落在範圍內
+function matchesMonthDay(monthDaysStr, planDate) {
+  if (!monthDaysStr) return false;
+  const m = String(monthDaysStr).match(/^(\d+)\s*-\s*(\d+)$/);
+  if (!m) return false;
+  const day = planDate.getDate();
+  return day >= parseInt(m[1], 10) && day <= parseInt(m[2], 10);
+}
+
+// 2026-10-25 補：/api/plan 每家店附上 ruleStatus（可以去／擋住／提醒＋規則說明），A1/A8 第 2 階段要用。
+// 日期無關的規則（星期、每月日期都空白，例如「拜訪前先做」「其他提醒」類）一律視為永遠適用。
+// 衝突對話框（A4）、自動調整時段仍排在第 3 階段，這裡只做標示，不會真的改排序。
+function evalRuleStatus(ruleRows, storeId, planDate) {
+  const matched = ruleRows.filter(r => {
+    if (r.get('店家代號') !== storeId) return false;
+    if ((r.get('狀態') || '有效') !== '有效') return false;
+    const weekdays = r.get('星期');
+    const monthDays = r.get('每月日期');
+    if (!weekdays && !monthDays) return true; // 沒有日期限制的規則，永遠適用
+    return matchesWeekday(weekdays, planDate) || matchesMonthDay(monthDays, planDate);
+  });
+  if (!matched.length) return { status: '可以去', rules: [] };
+
+  const block = matched.find(r => r.get('排程處理') === '擋住');
+  if (block) return { status: '擋住', rules: matched.map(r => r.get('說明')).filter(Boolean) };
+
+  const adjust = matched.find(r => r.get('排程處理') === '自動調整');
+  if (adjust) return { status: '自動調整', rules: matched.map(r => r.get('說明')).filter(Boolean) };
+
+  return { status: '提醒', rules: matched.map(r => r.get('說明')).filter(Boolean) };
+}
+
+// 待追蹤分：該店全部未完成待追蹤加總，上限 followupScoreCap；同時回傳給 reason 用的摘要文字
+function scoreFollowups(followupRows, storeId, planDate) {
+  let score = 0;
+  const items = [];
+  followupRows.forEach(f => {
+    if (f.get('店家代號') !== storeId) return;
+    if ((f.get('狀態') || '未完成') !== '未完成') return;
+    const deadlineType = f.get('期限類型') || '下次經過';
+    const item = f.get('事項') || '';
+    let points = 0;
+    if (deadlineType === '下次經過') {
+      points = PLANNER_CONFIG.followupScore.nextVisit;
+    } else {
+      // daysBetween(a,b) 算的是 b-a（天數），這裡要「期限 - 規劃日」還剩幾天
+      const deadline = f.get('期限');
+      const daysUntil = deadline ? -daysBetween(deadline, planDate) : null;
+      if (daysUntil === null) points = PLANNER_CONFIG.followupScore.dueLater;
+      else if (daysUntil <= 3) points = PLANNER_CONFIG.followupScore.dueWithin3Days;
+      else if (daysUntil <= 7) points = PLANNER_CONFIG.followupScore.dueWithin7Days;
+      else points = PLANNER_CONFIG.followupScore.dueLater;
+    }
+    score += points;
+    if (item) items.push(item);
+  });
+  return { score: Math.min(score, PLANNER_CONFIG.followupScoreCap), items };
+}
+
+async function handlePlannerPlan(request, env) {
+  const url = new URL(request.url);
+  const dateParam = url.searchParams.get('date');
+  const planDate = dateParam ? new Date(dateParam) : new Date();
+  if (isNaN(planDate)) return json({ error: 'date 格式不對，要 YYYY-MM-DD' }, 400);
+
+  const [pharmaciesRes, visitsRes, screeningRows, followupRows, ruleRows, orderData, returnOrderData, contractData] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    handleVisitsSummary(env).then(r => r.json()),
+    env.SCREENING_API_TOKEN
+      ? fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json()).then(d => d.rows || [])
+      : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則') : Promise.resolve([]),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    // 「客戶合約」目前沒開「知道連結的人可檢視」，gviz 會拿到 Google 登入頁而不是 JSON，
+    // 用 try/catch 吞掉，當作沒有合約資料（全部店都走沒合約的 7 個月規則），不要讓整個 /api/plan 掛掉
+    env.SHEET_CONTRACT
+      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
+      : Promise.resolve({ rows: [], colMap: {} }),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const visitMap = visitsRes.summary || {};
+
+  // 2026-10-27 改版：排除死客戶／老爸／新竹縣市／狀態=不拜訪（isEligibleForTiering_，跟 /api/customer-tiers 共用），
+  // 只對剩下的「我」負責正式客戶做分級與倍數排序。分級邏輯跟 /api/customer-tiers 共用 classifyTierAndAlert_。
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, eligible, planDate);
+  const p70AvgMonthly = avgMonthlyPercentile_(statsById, 0.70);
+  const medianAvgMonthly = avgMonthlyPercentile_(statsById, 0.50);
+
+  const list = [];
+  const anchors = [];
+  const eligibleIds = new Set(eligible.map(p => p.id));
+
+  // 第四種提醒「寄賣整理」：只掃排除規則篩過的名單（死客戶/老爸/新竹/不拜訪不檢查，2026-10-27 修正，
+  // 之前版本掃全部客戶，誤把死客戶 C015/C038 列進來）。先彙整每家店目前「寄賣中(資料夾)」的全部訂單
+  // （allTotal 不管多久，staleXxx 只算 >= consignmentCleanupMonths 個月的），下面依有沒有合約分兩種處理。
+  const consignmentByStore = {};
+  orderData.rows.forEach(row => {
+    const status = String(row.c[orderData.colMap['紅單實體狀態']]?.v || '').trim();
+    if (status !== '寄賣中(資料夾)') return;
+    const id = String(row.c[orderData.colMap['店名']]?.v || '').trim();
+    if (!id || !eligibleIds.has(id)) return;
+    const d = parseGvizDate(row.c[orderData.colMap['訂單日期']]?.v || '');
+    if (!d) return;
+    const orderDate = new Date(String(d).replace(/\//g, '-'));
+    if (isNaN(orderDate)) return;
+    const amount = parseFloat(row.c[orderData.colMap['總金額']]?.v || 0) || 0;
+    const monthsSince = monthsSinceJs(orderDate, planDate);
+    const entry = (consignmentByStore[id] = consignmentByStore[id] || { allTotal: 0, staleCount: 0, staleMaxMonths: 0, staleTotal: 0 });
+    entry.allTotal += amount;
+    if (monthsSince >= PLANNER_CONFIG.consignmentCleanupMonths) {
+      entry.staleCount += 1;
+      entry.staleTotal += amount;
+      entry.staleMaxMonths = Math.max(entry.staleMaxMonths, monthsSince);
+    }
+  });
+
+  // 「客戶合約」：合約狀態＝終止 不算簽約店，空白視為有效。讀不到（分享權限/試算表問題）就當作沒有合約資料。
+  const contractByStore = {};
+  contractData.rows.forEach(row => {
+    const id = String(row.c[contractData.colMap['Customer_ID']]?.v || '').trim();
+    if (!id) return;
+    const status = String(row.c[contractData.colMap['合約狀態']]?.v || '').trim();
+    if (status === '終止') return;
+    const amount = parseFloat(row.c[contractData.colMap['切口金額']]?.v || 0) || 0;
+    contractByStore[id] = amount;
+  });
+
+  // 待追蹤拆成「已到期」跟「還沒到期」兩組：已到期的整筆變成 anchors（來源標「待追蹤」），不參加排名；
+  // 還沒到期的（含「下次經過」這種沒有具體日期的）留在原地，乘上 followupMultiplier 影響排序分。
+  // 期限類型＝下次經過：沒有具體日期可比，一律視為「還沒到期」。
+  function splitFollowups_(storeId) {
+    const due = [], notDue = [];
+    followupRows.forEach(f => {
+      if (f.get('店家代號') !== storeId) return;
+      if ((f.get('狀態') || '未完成') !== '未完成') return;
+      const deadlineType = f.get('期限類型') || '下次經過';
+      const item = f.get('事項') || '';
+      if (deadlineType === '指定日期前') {
+        const deadline = f.get('期限');
+        const daysUntil = deadline ? -daysBetween(deadline, planDate) : null;
+        if (daysUntil !== null && daysUntil <= 0) { due.push({ item, deadline }); return; }
+      }
+      notDue.push({ item });
+    });
+    return { due, notDue };
+  }
+
+  // 正式客戶：倍數改用「最後接觸日」＝拜訪日跟叫貨日取比較近的那個（2026-10-27 第二版，拿掉上一版
+  // 「只看拜訪日、從未拜訪排最前」的做法）。兩者都沒有時倍數固定 1.0（不特別拉最前也不墊底）。
+  // 間隔依分級（大咖/潛力新店/冷淡/一般）決定，見 PLANNER_CONFIG.tierIntervalDays。
+  eligible.forEach(p => {
+    const stat = statsById[p.id];
+    const { tier, intervalDays, alert } = classifyTierAndAlert_(stat, p70AvgMonthly, medianAvgMonthly);
+    const avgMonthly = stat.hasOrders ? stat.avgMonthly : 0;
+    const alertText = alert ? `［${alert}］` : '';
+    const ruleStatus = evalRuleStatus(ruleRows, p.id, planDate);
+    const visitDate = (visitMap[p.id] || {}).lastDate || '';
+    const orderDate = stat.hasOrders ? stat.lastOrderDate : '';
+    const lastContactDate = laterDateOrNull_(visitDate, orderDate);
+
+    const { due, notDue } = splitFollowups_(p.id);
+    due.forEach(f => anchors.push({ id: p.id, name: p.name, source: '待追蹤', item: f.item, deadline: f.deadline || null }));
+    const followupMultiplier = notDue.length ? PLANNER_CONFIG.followupMultiplier : 1;
+    const notDueItems = notDue.map(f => f.item).filter(Boolean);
+
+    let daysSince, rawRatio;
+    if (!lastContactDate) {
+      daysSince = null;
+      rawRatio = 1.0; // 從未拜訪也從未叫貨：倍數固定 1.0
+    } else {
+      daysSince = daysBetween(lastContactDate, planDate);
+      rawRatio = daysSince / intervalDays;
+    }
+    // 2026-10-27 補：冷淡的店倍數封頂（PLANNER_CONFIG.tierRatioCap），避免很久沒接觸的店單靠天數就衝到排序前段；
+    // 其他級別不設上限。封頂只影響排序分，reason 裡仍會顯示原始倍數讓你知道實際差多久。
+    const ratioCapForTier = PLANNER_CONFIG.tierRatioCap[tier];
+    const ratio = ratioCapForTier ? Math.min(rawRatio, ratioCapForTier) : rawRatio;
+    const ratioCapped = ratio !== rawRatio;
+
+    // 第四種提醒「寄賣整理」：有合約看金額（寄賣中總額 >= 切口金額×倍率），沒合約看天數（維持7個月規則）。
+    // 不寫 anchors，直接影響這家店自己的排序分跟推薦理由。
+    const contractAmount = contractByStore[p.id];
+    const isContracted = contractAmount !== undefined;
+    const consignment = consignmentByStore[p.id] || null;
+    let consignmentText = '';
+    let consignmentMultiplier = 1;
+    if (isContracted) {
+      const allTotal = consignment ? consignment.allTotal : 0;
+      if (allTotal >= contractAmount * PLANNER_CONFIG.consignmentReconcileMultiplier) {
+        consignmentText = `該對帳：寄賣中 $${Math.round(allTotal).toLocaleString()} / 切口 $${Math.round(contractAmount).toLocaleString()}`;
+      }
+    } else if (consignment && consignment.staleCount > 0) {
+      consignmentText = `寄賣${consignment.staleCount}張待整理，最久${consignment.staleMaxMonths}個月，共 $${Math.round(consignment.staleTotal).toLocaleString()}`;
+      consignmentMultiplier = PLANNER_CONFIG.consignmentMultiplier;
+    }
+
+    const rankScoreBase = ratio * avgMonthly; // 倍數(已套冷淡封頂)×月均叫貨，不設上限
+    const rankScore = rankScoreBase * followupMultiplier * consignmentMultiplier;
+    const score = Math.round(rankScore);
+    list.push({
+      id: p.id, name: p.name, type: 'customer', stage: '正式客戶', tier, intervalDays,
+      daysSince, ratio: Math.round(ratio * 100) / 100, rawRatio: Math.round(rawRatio * 100) / 100, ratioCapped, avgMonthly,
+      score, rankScore: Math.round(rankScore), followupMultiplier, followupItems: notDueItems, ruleStatus, alert,
+      isContracted, contractAmount: isContracted ? contractAmount : null,
+      consignmentAllTotal: consignment ? Math.round(consignment.allTotal) : 0,
+      consignmentStaleCount: consignment ? consignment.staleCount : 0,
+      consignmentStaleMaxMonths: consignment ? consignment.staleMaxMonths : 0,
+      consignmentStaleTotal: consignment ? Math.round(consignment.staleTotal) : 0,
+      consignmentMultiplier,
+      reason: (daysSince === null
+          ? `${tier}　從未拜訪也從未叫貨，倍數固定 1.0`
+          : `${tier}　${daysSince} / ${intervalDays} 天 = ${(Math.round(rawRatio * 100) / 100)} 倍` +
+            (ratioCapped ? `（封頂算 ${ratio}）` : '')) +
+        `　月均 $${Math.round(avgMonthly).toLocaleString()}` +
+        (followupMultiplier !== 1 ? `　待追蹤×${followupMultiplier}` : '') +
+        (alertText ? `　${alertText}` : '') +
+        (consignmentText ? `　［${consignmentText}］` + (consignmentMultiplier !== 1 ? `×${consignmentMultiplier}` : '') : '') +
+        (notDueItems.length ? `，${notDueItems.join('、')}` : ''),
+    });
+  });
+
+  // 新店開發（篩選分頁，決定＝要去，階段不是轉正式／放棄）：維持原本的階段邏輯，完全不受上面改版影響——
+  // 起算日＝進入階段日期，間隔依階段，倍數公式仍是舊版 min(倍數,ratioCap)*weight。
+  screeningRows.forEach(r => {
+    const { decision, stage, id, name } = r;
+    if (decision !== '要去') return;
+    if (!stage || stage === '轉正式' || stage === '放棄') return;
+    const interval = PLANNER_CONFIG.stageIntervalDays[stage];
+    if (!interval) return; // 不認得的階段文字，跳過不猜
+    const daysSince = daysBetween(r.stageDate, planDate);
+    if (daysSince === null) return;
+    const ratio = daysSince / interval;
+    const intervalScore = Math.min(ratio, PLANNER_CONFIG.ratioCap) * PLANNER_CONFIG.intervalScoreWeight;
+    const followup = scoreFollowups(followupRows, id, planDate);
+    const score = Math.round(intervalScore + followup.score);
+    const ruleStatus = evalRuleStatus(ruleRows, id, planDate);
+    list.push({
+      id, name, type: 'new-store', stage,
+      daysSince, interval, ratio: Math.round(ratio * 100) / 100, ratioTier: ratioTierOf(ratio),
+      score, followupItems: followup.items, ruleStatus,
+      reason: `${stage}　${daysSince} / ${interval} 天 = ${(Math.round(ratio * 100) / 100)} 倍` +
+        (followup.items.length ? `，${followup.items.join('、')}` : ''),
+    });
+  });
+
+  // 排序：倍數≥1（該去了）＞ 倍數<1（還沒到）；組內用 score（＝倍數×月均叫貨×待追蹤倍率）遞減排序，
+  // 不設上限；同分再用月均決勝。
+  function bucketOf(item) { return item.ratio >= 1 ? 1 : 0; }
+  list.sort((a, b) => {
+    const diff = bucketOf(b) - bucketOf(a);
+    if (diff !== 0) return diff;
+    return (b.score - a.score) || ((b.avgMonthly || 0) - (a.avgMonthly || 0));
+  });
+
+  return json({
+    ok: true,
+    date: planDate.toISOString().slice(0, 10),
+    recommended: list,
+    anchors,
+    p70AvgMonthly, medianAvgMonthly,
+    note: '2026-10-27 第二版：倍數改用「最後接觸日」(拜訪或叫貨取較近)，兩者都沒有固定倍數1.0；分級決定間隔；倍數≥1用倍數×月均排序不設上限；到期待追蹤移入 anchors 不參加排名，未到期的乘上 followupMultiplier；還沒套用 2 公里錨點半徑篩選；老爸/新竹縣市/狀態=不拜訪 已排除在推薦外，要在 A1 手動加成送貨錨點（等 A1 錨點 UI 做出來再接）',
+  });
+}
+
+// 店家規則：新增/修改都轉送 GAS（gas-backend 的 addRule/updateRule action）
+async function handlePlannerRules(request, env) {
+  const body = await request.json();
+  const action = body.ruleId ? 'updateRule' : 'addRule';
+  const res = await fetch(GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...body }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  return json({ ok: !!data.success, ...data });
+}
+
+// 待追蹤：新增/結案都轉送 GAS（gas-backend 的 addFollowup/resolveFollowup action）
+async function handlePlannerFollowups(request, env) {
+  const body = await request.json();
+  const action = body.resolve ? 'resolveFollowup' : 'addFollowup';
+  const res = await fetch(GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...body }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  return json({ ok: !!data.success, ...data });
 }
 
 // ============================================================

@@ -860,8 +860,24 @@ async function post(path, body) {
   const r = await fetch(WORKER + path, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
-  if (!r.ok) { const t = await r.text(); throw new Error(t || 'HTTP ' + r.status); }
+  if (!r.ok) {
+    const t = await r.text();
+    let msg = t || ('HTTP ' + r.status);
+    try { const j = JSON.parse(t); if (j?.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
   return r.json();
+}
+
+// 把 catch 到的 Error 轉成使用者看得懂的訊息：後端明確回報的錯誤（如 Gemini 錯誤）照原樣顯示，
+// 其他未預期的程式例外（TypeError 等）一律顯示通用訊息，不把原始技術錯誤字串丟給使用者看
+function friendlyErrorMsg(e) {
+  const raw = e?.message || String(e || '');
+  if (/^Gemini 錯誤|quota/i.test(raw)) return 'AI 服務暫時無法使用：' + raw;
+  if (/Cannot read propert|is not defined|is not a function|undefined is not/i.test(raw)) {
+    return '系統發生未預期的錯誤，請重新整理頁面後再試一次';
+  }
+  return raw;
 }
 
 // ══════════════════════════════
@@ -1362,9 +1378,12 @@ async function runSchedule() {
     const routeData = await routeResp.json();
     if (!routeData.routes?.length) throw new Error('找不到路線');
     const route0 = routeData.routes[0];
-    const order = route0.optimizedIntermediateWaypointIndex || locs.map((_, i) => i);
+    const orderRaw = route0.optimizedIntermediateWaypointIndex;
+    const order = (Array.isArray(orderRaw) && orderRaw.length === enriched.length)
+      ? orderRaw
+      : enriched.map((_, i) => i);
     const legs = route0.legs;
-    const reordered = order.map(i => enriched[i]);
+    const reordered = order.map(i => enriched[i]).filter(Boolean);
     let totalMeters = 0;
     const arrivalTimes = [];
     let cumMin = 8 * 60 + 30;
@@ -1390,7 +1409,7 @@ async function runSchedule() {
       drawRoutePolyline(encoded, _todayMap, false);
     }
   } catch(e) {
-    resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 路線計算失敗：${e.message}</div>`;
+    resultEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">❌ 路線計算失敗：${friendlyErrorMsg(e)}</div>`;
   } finally {
     btn.disabled = false; btn.innerHTML = '📍 計算最短路線';
   }
@@ -2169,7 +2188,7 @@ async function fetchScript(idx) {
         <button class="btn btn-primary btn-sm" onclick="fetchScript(${idx})">🔄 重新生成</button>
       </div>`;
   } catch(e) {
-    panel.innerHTML = `<div style="color:var(--red);font-size:13px;padding:8px 0">❌ ${e.message}</div>`;
+    panel.innerHTML = `<div style="color:var(--red);font-size:13px;padding:8px 0">❌ ${friendlyErrorMsg(e)}</div>`;
   }
 }
 
@@ -2971,7 +2990,7 @@ async function calCalcRoute(ds) {
     renderCalendar();
     renderDayPanel(ds);
   } catch(e) {
-    toast('❌ 路線計算失敗：' + e.message);
+    toast('❌ 路線計算失敗：' + friendlyErrorMsg(e));
     if (btn) { btn.disabled = false; btn.innerHTML = '✦ AI 排序 + 路線預估'; }
   }
 }
