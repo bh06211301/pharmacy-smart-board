@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜今天</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* Phase 2 骨架：三欄版面＋主選單＋頁首列。資料渲染留給步驟 3～5 補。 */
+  * { box-sizing: border-box; }
+
+  /* ---------- 主選單（DESIGN.md 2.1） ---------- */
+  .nav {
+    height: var(--sr-nav-h);
+    background: var(--sr-bg);
+    border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6);
+    padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center;
+    border-bottom: 3px solid transparent;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .nav-manage-link { font-size: var(--sr-text-sm); color: var(--sr-ink-2); text-decoration: none; }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  /* .nav-badge 自己設了 display，跟瀏覽器預設的 [hidden]{display:none} 同一個特異度，
+     誰在後面誰贏——這條在後面，所以要補這條才會真的消失，不然 0 的時候會變成空紅點 */
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); }
+  .plan-date-input {
+    height: 32px; font-size: var(--sr-text-sm); border: 1px solid var(--sr-line);
+    border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-family: var(--sr-font);
+  }
+  .find-pharmacy-input {
+    width: 200px; height: 36px; background: var(--sr-bg-subtle); border: 1px solid var(--sr-line);
+    border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm);
+    font-family: var(--sr-font);
+  }
+
+  /* ---------- 頁首列（DESIGN.md 2.2） ---------- */
+  .page-header {
+    display: flex; align-items: center; gap: var(--sr-space-7);
+    padding: var(--sr-space-4) var(--sr-space-8);
+    border-bottom: 1px solid var(--sr-line);
+  }
+  .page-header-date { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .page-header-route-points { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+  .page-header-placeholder { font-size: var(--sr-text-xs); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-sm); padding: 2px 8px; }
+  .view-toggle { display: flex; border: 1px solid var(--sr-ink); border-radius: 6px; overflow: hidden; }
+  .view-toggle-btn { height: 28px; padding: 0 var(--sr-space-5); font-size: var(--sr-text-xs); background: var(--sr-bg); border: none; color: var(--sr-ink); cursor: pointer; font-family: var(--sr-font); }
+  .view-toggle-btn.active { background: var(--sr-ink); color: var(--sr-on-dark); font-weight: var(--sr-weight-bold); }
+  .view-toggle-btn:disabled { color: var(--sr-ink-3); cursor: not-allowed; }
+  .finish-time-block { margin-left: auto; text-align: right; }
+  .finish-time-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .finish-time-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .finish-time-value.late { color: var(--sr-danger); }
+
+  /* ---------- 三欄（DESIGN.md 2.11） ----------
+     寬度 ≥1200px：nav／頁首固定高度，.columns 吃掉剩下的視窗高度，三欄各自在欄內捲動──
+     第②欄店家多的時候只有②自己變長，不會把整頁往下推，第③欄路線永遠留在看得到的範圍。
+     寬度 <1200px：退回正常文件流（頁面本身捲動），三欄直接疊起來，不做固定高度裁切。 */
+  body { display: flex; flex-direction: column; }
+  .columns {
+    display: flex; flex-direction: column;
+  }
+  .col { border-right: 1px solid var(--sr-line); border-bottom: 1px solid var(--sr-line); }
+  .col:last-child { border-right: none; border-bottom: none; }
+  .col-1 { background: var(--sr-bg-subtle); }
+  .col-body { padding: var(--sr-space-7); }
+
+  @media (min-width: 1200px) {
+    html, body { height: 100%; }
+    body { height: 100vh; overflow: hidden; }
+    .columns {
+      display: grid;
+      grid-template-columns: minmax(var(--sr-col-min), 1fr) minmax(var(--sr-col-min), 1.3fr) minmax(var(--sr-col-min), 1fr);
+      flex: 1; min-height: 0; overflow: hidden;
+    }
+    .col { border-bottom: none; height: 100%; overflow-y: auto; }
+  }
+
+  /* ---------- 步驟標題（DESIGN.md 2.6） ---------- */
+  .step-title { display: flex; align-items: center; gap: var(--sr-space-4); margin-bottom: var(--sr-space-6); }
+  .step-num {
+    width: var(--sr-step-size); height: var(--sr-step-size); border-radius: 50%;
+    background: var(--sr-ink); color: var(--sr-on-dark);
+    display: flex; align-items: center; justify-content: center;
+    font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); flex-shrink: 0;
+  }
+  .step-label { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+
+  /* ---------- 篩選膠囊（DESIGN.md 2.4） ---------- */
+  .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
+  .filter-pill {
+    height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+    font-size: var(--sr-text-xs); background: var(--sr-bg); border: 1px solid var(--sr-line);
+    color: var(--sr-ink-2); cursor: pointer; font-family: var(--sr-font);
+  }
+  .filter-pill.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
+  .filter-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+  .rec-section-title { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); margin: var(--sr-space-6) 0 var(--sr-space-4); }
+  .rec-section-title:first-of-type { margin-top: 0; }
+
+  /* ---------- 推薦列（DESIGN.md 2.8） ---------- */
+  .rec-row {
+    display: grid; grid-template-columns: 24px 1fr 120px; gap: var(--sr-space-5);
+    align-items: start; padding: var(--sr-space-5); margin-bottom: var(--sr-space-3);
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); background: var(--sr-bg);
+  }
+  .rec-row.selected { border-color: var(--sr-ink); background: var(--sr-bg-selected); }
+  .rec-row.blocked { border: 1px dashed var(--sr-danger); opacity: 0.55; }
+  .rec-check { width: 18px; height: 18px; margin-top: 2px; }
+  .rec-name-line { display: flex; align-items: baseline; gap: var(--sr-space-3); flex-wrap: wrap; }
+  .rec-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); color: var(--sr-ink); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-family: var(--sr-font); }
+  .rec-dist { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .rec-badges { display: flex; gap: var(--sr-space-2); flex-wrap: wrap; margin: 4px 0; }
+  .badge-tier { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .badge-alert { background: var(--sr-danger-tint); color: var(--sr-danger); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .badge-consignment { background: var(--sr-bg-muted); color: var(--sr-ink-2); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .badge-consignment.due { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .rec-reason { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+  .rec-rule { font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); color: var(--sr-danger); margin-top: 2px; }
+  .rec-bars { display: flex; flex-direction: column; gap: 4px; }
+  .rec-bar-label { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+  .rec-bar-track { height: 6px; background: var(--sr-bg-track); border-radius: 3px; overflow: hidden; }
+  .rec-bar-fill { height: 100%; background: var(--sr-ink); }
+
+  /* ---------- 兩週小日曆（DESIGN.md 2.10，先只做日期格＋今天外框，件數標記留待之後） ---------- */
+  .mini-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: var(--sr-space-7); }
+  .mini-cal-cell {
+    height: 40px; border-radius: var(--sr-radius-sm); background: var(--sr-bg);
+    display: flex; align-items: center; justify-content: center; font-size: var(--sr-text-xs);
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .mini-cal-cell.today { border: 2px solid var(--sr-primary); font-weight: var(--sr-weight-bold); }
+  .mini-cal-cell.selected { background: var(--sr-primary-tint); }
+  .mini-cal-cell:hover { background: var(--sr-bg-selected); }
+
+  /* ---------- 錨點卡（DESIGN.md 2.7） ---------- */
+  .anchor-card {
+    background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-5) var(--sr-space-6); margin-bottom: var(--sr-space-3); position: relative;
+  }
+  /* 右邊留 36px 給 ✕ 按鈕，類型標籤不會被疊到 */
+  .anchor-line1 { display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-3); padding-right: 36px; }
+  .anchor-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); }
+  .anchor-type { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-xs); padding: 1px 8px; border-radius: var(--sr-radius-sm); flex-shrink: 0; }
+  .anchor-line2 { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: 2px; }
+  .anchor-line3 { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .anchor-remove {
+    position: absolute; top: 4px; right: 4px; width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: var(--sr-ink-3); cursor: pointer; font-size: 14px; font-family: var(--sr-font);
+  }
+  .anchor-remove:hover { background: var(--sr-bg-subtle); border-radius: var(--sr-radius-sm); }
+
+  /* ---------- 建議加入（寄賣/對帳，可收合） ---------- */
+  .suggest-block { border-top: 1px solid var(--sr-line-soft); padding-top: var(--sr-space-6); margin-top: var(--sr-space-6); }
+  .suggest-title { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); margin-bottom: var(--sr-space-4); }
+  .suggest-card {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-4);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-4) var(--sr-space-5); margin-bottom: var(--sr-space-3);
+  }
+  .suggest-info { font-size: var(--sr-text-sm); }
+  .suggest-name { font-weight: var(--sr-weight-bold); }
+  .suggest-detail { font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .btn-add-anchor {
+    height: 28px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md);
+    border: 1px solid var(--sr-ink); background: var(--sr-bg); font-size: var(--sr-text-xs);
+    font-weight: var(--sr-weight-bold); cursor: pointer; flex-shrink: 0; font-family: var(--sr-font);
+  }
+  .btn-add-anchor:hover { background: var(--sr-bg-subtle); }
+  .suggest-more-link { font-size: var(--sr-text-sm); color: var(--sr-primary); cursor: pointer; background: none; border: none; padding: 0; font-family: var(--sr-font); }
+
+  /* ---------- 手動搜尋加入 ---------- */
+  .manual-add-block { border-top: 1px solid var(--sr-line-soft); padding-top: var(--sr-space-6); margin-top: var(--sr-space-6); }
+  .manual-add-input {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-5); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+  }
+  .manual-add-results { margin-top: var(--sr-space-3); max-height: 220px; overflow-y: auto; }
+  .manual-add-result-row {
+    display: flex; align-items: center; justify-content: space-between; padding: var(--sr-space-3) var(--sr-space-4);
+    border-bottom: 1px solid var(--sr-line-row); font-size: var(--sr-text-sm); cursor: pointer;
+  }
+  .manual-add-result-row:hover { background: var(--sr-bg-subtle); }
+  .manual-add-tag { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+
+  /* ---------- 第③欄按鈕（DESIGN.md 2.3） ---------- */
+  .btn-calc-route, .btn-confirm-route {
+    width: 100%; border-radius: var(--sr-radius-md); font-weight: var(--sr-weight-bold);
+    font-family: var(--sr-font); cursor: pointer;
+  }
+  .btn-calc-route { height: var(--sr-btn-h); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .btn-calc-route:hover { background: var(--sr-bg-subtle); }
+  .btn-calc-route:disabled { opacity: 0.5; cursor: default; }
+  .btn-confirm-route { height: var(--sr-btn-h-lg); background: var(--sr-primary); border: none; color: var(--sr-on-dark); margin-top: var(--sr-space-6); }
+  .btn-confirm-route:hover { background: var(--sr-primary-hover); }
+
+  /* ---------- 路線清單（DESIGN.md 2.9） ---------- */
+  .route-stop-row { display: flex; align-items: center; gap: var(--sr-space-4); padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); }
+  .route-stop-time { width: 44px; font-size: var(--sr-text-sm); color: var(--sr-ink-2); flex-shrink: 0; }
+  .route-stop-name { flex: 1; font-size: var(--sr-text-base); }
+  .route-stop-name.anchor { font-weight: var(--sr-weight-bold); }
+  .route-stop-tag { font-size: var(--sr-text-2xs); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 1px 6px; color: var(--sr-ink-2); }
+  .route-summary { margin-top: var(--sr-space-6); font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+
+  .sr-toast-planner {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999;
+    background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-sm);
+    padding: 10px 20px; border-radius: var(--sr-radius-md); font-family: var(--sr-font);
+  }
+
+  /* <1200px：三欄疊起來，頁面正常捲動（上面 .col 的預設樣式已經是 border-bottom 疊法，這裡不用再寫） */
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">SmartRoute</span>
+  <div class="nav-tabs">
+    <a class="nav-tab active" href="planner.html">今天</a>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本週</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本月</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">客戶<span id="badge-customers" class="nav-badge" hidden></span></span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">新店開發</span>
+    <div class="nav-divider"></div>
+    <span class="nav-manage-label">管理</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">店家規則</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">待追蹤<span id="badge-followups" class="nav-badge" hidden></span></span>
+  </div>
+  <div class="nav-right">
+    <input type="date" id="plan-date-input" class="plan-date-input">
+    <input type="text" id="find-pharmacy-input" class="find-pharmacy-input" placeholder="找藥局" disabled title="店家檔案抽屜做好後開放">
+    <a class="nav-manage-link" href="index.html" title="切回舊版月曆/今日清單畫面">切回舊版</a>
+  </div>
+</nav>
+
+<div class="page-header">
+  <span class="page-header-date" id="page-header-date">10/27（二）</span>
+  <span class="page-header-route-points">汐止出發 → 內湖收工</span>
+  <span class="page-header-placeholder" title="排在之後的階段才做">🌤️ 天氣</span>
+  <span class="page-header-placeholder" title="排在之後的階段才做">假日</span>
+  <div class="view-toggle">
+    <button class="view-toggle-btn active" title="目前只有清單模式，地圖排在之後的階段才做">清單</button>
+    <button class="view-toggle-btn" disabled title="排在之後的階段才做">地圖</button>
+  </div>
+  <div class="finish-time-block">
+    <div class="finish-time-label">預估收工時間</div>
+    <div class="finish-time-value" id="finish-time-value">—</div>
+  </div>
+</div>
+
+<div class="columns">
+  <div class="col col-1">
+    <div class="col-body">
+      <div class="step-title"><span class="step-num">①</span><span class="step-label">今天一定要去</span></div>
+      <div id="mini-cal-root" class="mini-cal"></div>
+      <div id="anchors-root"><div class="empty-hint">還沒有錨點，先輸入今天一定要去的店</div></div>
+      <div id="suggest-root" class="suggest-block"></div>
+      <div class="manual-add-block">
+        <input type="text" id="manual-add-input" class="manual-add-input" placeholder="搜尋店名加入今天（含老爸／新竹／不拜訪的店）" autocomplete="off">
+        <div id="manual-add-results" class="manual-add-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col col-2">
+    <div class="col-body">
+      <div class="step-title"><span class="step-num">②</span><span class="step-label">順路可以補</span></div>
+      <div id="recommend-root"><div class="empty-hint">載入中…</div></div>
+    </div>
+  </div>
+
+  <div class="col col-3">
+    <div class="col-body">
+      <div class="step-title"><span class="step-num">③</span><span class="step-label">順序與時間</span></div>
+      <button class="btn-calc-route" id="btn-calc-route" onclick="calcRoute()">計算路線</button>
+      <div id="route-root" style="margin-top:14px"><div class="empty-hint">在第①②欄選好店家後，按上面「計算路線」</div></div>
+      <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmRoute()">確定，送到手機外勤模式</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// 本機開發（localhost/127.0.0.1，或直接用 file:// 開檔）自動指向 wrangler dev；
+// 其他環境（正式網站）一律用正式 Worker，跟 index.html 一致，不用手動切換、也不會部署時忘了改回來。
+const WORKER = (['localhost', '127.0.0.1', ''].includes(location.hostname))
+  ? 'http://127.0.0.1:8787'
+  : 'https://still-meadow-0efd.bh06211301.workers.dev';
+
+function fmtHeaderDate(d) {
+  const wd = ['日','一','二','三','四','五','六'][d.getDay()];
+  return `${d.getMonth() + 1}/${d.getDate()}（${wd}）`;
+}
+function fmtDs(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function getPlanDate() {
+  const url = new URL(location.href);
+  const qs = url.searchParams.get('date');
+  const input = document.getElementById('plan-date-input').value;
+  const ds = input || qs || fmtDs(new Date());
+  return ds;
+}
+
+function initHeader() {
+  const url = new URL(location.href);
+  const qs = url.searchParams.get('date');
+  const initial = qs || fmtDs(new Date());
+  document.getElementById('plan-date-input').value = initial;
+  document.getElementById('page-header-date').textContent = fmtHeaderDate(new Date(initial.replace(/-/g, '/')));
+  document.getElementById('plan-date-input').addEventListener('change', () => {
+    const ds = document.getElementById('plan-date-input').value;
+    const url2 = new URL(location.href);
+    url2.searchParams.set('date', ds);
+    location.href = url2.toString();
+  });
+}
+
+async function get(path) {
+  const r = await fetch(WORKER + path);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function post(path, body) {
+  const r = await fetch(WORKER + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    let msg = t || ('HTTP ' + r.status);
+    try { const j = JSON.parse(t); if (j?.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+initHeader();
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 2026-10-28：任何會寫入資料的按鈕都要經過這裡——按下立刻 disabled + 改文字，避免使用者看不到反應
+// 連點好幾次（實測踩到：A8 新增待追蹤連點5次，因為按鈕沒變化，以為沒反應，結果建了5筆一樣的資料）。
+async function withBusy(btn, busyLabel, fn) {
+  if (!btn || btn.disabled) return;
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyLabel;
+  try {
+    await fn();
+  } catch (e) {
+    alert('失敗：' + e.message);
+  } finally {
+    // 成功或失敗都還原：大部分呼叫端會整個重繪把這顆按鈕換掉（還原一個已經不在畫面上的
+    // 元素沒有影響），但像「確定，送到手機外勤模式」這種固定不重繪的按鈕，不還原就會卡死。
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'sr-toast-planner';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+// ══════════════════════════════
+// 事件委派：所有動態產生的列表（推薦列、錨點卡、建議加入、手動搜尋結果、小日曆）一律用
+// data-action + data-id，不要用 onclick="fn(${JSON.stringify(id)})" 這種字串拼接組 inline onclick
+// ——店名、備註等欄位只要含雙引號，塞進雙引號包住的 onclick 屬性裡就會把屬性截斷，瀏覽器 console
+// 會丟 SyntaxError，整個按鈕失效（2026-10-28 實測踩到：C133 這類店名或代號組出來的 onclick 壞掉）。
+// 監聽掛在 document.body 上，列表重新整理（innerHTML 整個換掉）後不用重新綁定，天然就是委派模式。
+// ══════════════════════════════
+document.body.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const action = t.dataset.action;
+  const id = t.dataset.id;
+  if (action === 'open-drawer') openStoreDrawer(id);
+  else if (action === 'remove-anchor') withBusy(t, '移除中…', () => removeAnchor(id));
+  else if (action === 'toggle-group') toggleGroupExpand(t.dataset.group);
+  else if (action === 'set-filter-mode') setFilterMode(t.dataset.mode);
+  else if (action === 'goto-date') goToDate(t.dataset.date);
+  else if (action === 'toggle-suggest-expand') toggleSuggestExpand();
+  else if (action === 'add-suggested-anchor') {
+    const item = (planData?.recommended || []).find(x => x.id === id);
+    if (item) {
+      const cb = consignmentBadge(item);
+      withBusy(t, '加入中…', () => addAnchor({ id: item.id, name: item.name, source: cb.label, item: cb.detail, deadline: null }));
+    }
+  } else if (action === 'pick-manual-add') {
+    const p = (allPharmaciesCache || []).find(x => x.id === id);
+    if (p) withBusy(t, '加入中…', () => pickManualAdd(p));
+  }
+});
+document.body.addEventListener('change', (e) => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  if (t.dataset.action === 'toggle-col2') toggleCol2(t.dataset.id);
+});
+
+// ══════════════════════════════
+// 全域狀態
+// ══════════════════════════════
+let planData = null;       // /api/plan 的完整回應
+let anchors = [];          // 第①欄目前的錨點清單（系統自動＋手動加入的，含寄賣/對帳「加入今天」移過來的）
+let selectedCol2Ids = new Set(); // 第②欄目前勾選、要排進路線的店家 id
+
+function anchorIds() { return new Set(anchors.map(a => a.id)); }
+
+// 主選單紅色數字徽章（DESIGN.md 2.1）：數字來自 /api/plan 回傳的 badges，0 時不顯示。
+function renderNavBadges() {
+  const b = planData?.badges || {};
+  [['badge-customers', b.customers], ['badge-followups', b.followupsDueSoon]].forEach(([elId, n]) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
+  });
+}
+
+// ══════════════════════════════
+// 第②欄：順路可以補
+// ══════════════════════════════
+function tierBadgeHtml(tier) {
+  return `<span class="badge-tier">${tier}</span>`;
+}
+function alertBadgeHtml(alert) {
+  return alert ? `<span class="badge-alert">${alert}</span>` : '';
+}
+// 寄賣/簽約徽章：不是後端算好的單一欄位，用 isContracted/contractAmount/consignmentAllTotal/
+// consignmentStaleCount 這幾個現成欄位在前端判斷該顯示哪種狀態（跟 handlePlannerPlan 組 reason 文字用的
+// 判斷條件完全一致，只是這裡額外需要一個「有沒有觸發」的布林值，給收合的建議加入清單排序用）。
+function consignmentBadge(item) {
+  if (item.isContracted) {
+    const triggered = item.consignmentAllTotal >= item.contractAmount * 1.4;
+    if (!triggered) return { html: '', triggered: false, sortValue: 0 };
+    return {
+      html: `<span class="badge-consignment due">該對帳：寄賣中 $${item.consignmentAllTotal.toLocaleString()} / 切口 $${item.contractAmount.toLocaleString()}</span>`,
+      triggered: true, sortValue: 2, label: '該對帳', detail: `寄賣中 $${item.consignmentAllTotal.toLocaleString()} / 切口 $${item.contractAmount.toLocaleString()}`,
+    };
+  }
+  if (item.consignmentStaleCount > 0) {
+    return {
+      html: `<span class="badge-consignment due">寄賣${item.consignmentStaleCount}張待整理，最久${item.consignmentStaleMaxMonths}個月</span>`,
+      triggered: true, sortValue: 1, staleTotal: item.consignmentStaleTotal,
+      label: '寄賣待整理', detail: `${item.consignmentStaleCount}張，最久${item.consignmentStaleMaxMonths}個月，共 $${item.consignmentStaleTotal.toLocaleString()}`,
+    };
+  }
+  return { html: '', triggered: false, sortValue: 0 };
+}
+
+function barHtml(label, ratio, max) {
+  const pct = Math.max(0, Math.min(100, (ratio / max) * 100));
+  return `<div class="rec-bars-item"><div class="rec-bar-label">${label}</div>
+    <div class="rec-bar-track"><div class="rec-bar-fill" style="width:${pct}%"></div></div></div>`;
+}
+
+const RADIUS_KM = 2;
+let filterMode = 'all'; // 'all' | 'radius'
+const groupExpanded = { customer: false, newStore: false }; // 「還不急」收合狀態，兩區各自獨立
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = x => x * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+// 錨點 2 公里內：用目前錨點清單裡每一家的座標（從 /pharmacies 查），算店家到「最近一個錨點」的距離。
+// 錨點或店家查不到座標的那一組就跳過不比較（視為距離無限遠），不強行猜座標。
+function withinAnchorRadius(itemId) {
+  if (!allPharmaciesCache) return true; // 座標還沒載入完成前，先不過濾，避免閃爍成空清單
+  const byId = {}; allPharmaciesCache.forEach(p => { byId[p.id] = p; });
+  const target = byId[itemId];
+  if (!target?.lat || !target?.lng) return false;
+  return anchors.some(a => {
+    const ph = byId[a.id];
+    if (!ph?.lat || !ph?.lng) return false;
+    return haversineKm(target.lat, target.lng, ph.lat, ph.lng) <= RADIUS_KM;
+  });
+}
+
+function recRowHtml(item) {
+  const blocked = item.ruleStatus?.status === '擋住';
+  const selected = selectedCol2Ids.has(item.id);
+  // 新店開發（藥局每日異動追蹤篩選分頁，type==='new-store'）跟正式客戶（type==='customer'）
+  // 是 handlePlannerPlan 裡兩條完全獨立的邏輯分支，欄位長得不一樣：新店沒有 tier/alert/isContracted
+  // 這些分級欄位，只有 stage/interval。兩種要分開渲染，不能共用同一套徽章邏輯。
+  const isNewStore = item.type === 'new-store';
+  const badgesHtml = isNewStore
+    ? `<span class="badge-tier">${escapeHtml(item.stage)}</span>`
+    : `${tierBadgeHtml(item.tier)}${alertBadgeHtml(item.alert)}${consignmentBadge(item).html}`;
+  const ruleLine = (item.ruleStatus?.rules?.length)
+    ? `<div class="rec-rule">規則：${escapeHtml(item.ruleStatus.rules.join('、'))}</div>` : '';
+  return `<div class="rec-row ${selected ? 'selected' : ''} ${blocked ? 'blocked' : ''}" data-id="${escapeHtml(item.id)}">
+    <input type="checkbox" class="rec-check" data-action="toggle-col2" data-id="${escapeHtml(item.id)}"
+      ${selected ? 'checked' : ''} ${blocked ? 'disabled title="規則擋住，無法加入"' : ''}>
+    <div>
+      <div class="rec-name-line">
+        <button class="rec-name" data-action="open-drawer" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>
+      </div>
+      <div class="rec-badges">${badgesHtml}</div>
+      <div class="rec-reason">${escapeHtml(item.reason)}</div>
+      ${ruleLine}
+    </div>
+    <div class="rec-bars">
+      ${barHtml('倍數 ' + item.ratio + '×', item.ratio, 2)}
+      ${!isNewStore && item.followupMultiplier > 1 ? barHtml('待追蹤', 1, 1) : barHtml('待追蹤', 0, 1)}
+    </div>
+  </div>`;
+}
+
+// 一組（正式客戶或新店開發）的渲染：倍數≥1 直接列出，<1 收在「還不急（N家）」，點了才展開。
+function groupHtml(items, groupKey, sectionTitle) {
+  if (!items.length) return '';
+  const due = items.filter(x => x.ratio >= 1);
+  const notYet = items.filter(x => x.ratio < 1);
+  const expanded = groupExpanded[groupKey];
+  return `<div class="rec-section-title">${sectionTitle}</div>` +
+    due.map(recRowHtml).join('') +
+    (notYet.length
+      ? `<button class="suggest-more-link" data-action="toggle-group" data-group="${groupKey}">${expanded ? '收起' : '還不急（' + notYet.length + ' 家）'}</button>` +
+        (expanded ? notYet.map(recRowHtml).join('') : '')
+      : '');
+}
+function toggleGroupExpand(groupKey) {
+  groupExpanded[groupKey] = !groupExpanded[groupKey];
+  renderRecommend();
+}
+
+function setFilterMode(mode) {
+  if (mode === 'radius' && !anchors.length) return; // 沒有錨點時這顆膠囊是灰的，點了也不動作
+  filterMode = mode;
+  renderRecommend();
+}
+
+function renderRecommend() {
+  const root = document.getElementById('recommend-root');
+  if (!planData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
+  const excludeIds = anchorIds();
+  let list = (planData.recommended || []).filter(item => !excludeIds.has(item.id));
+  if (filterMode === 'radius') list = list.filter(item => withinAnchorRadius(item.id));
+
+  const pillsHtml = `<div class="filter-pills">
+    <button class="filter-pill ${filterMode === 'all' ? 'active' : ''}" data-action="set-filter-mode" data-mode="all">全部</button>
+    <button class="filter-pill ${filterMode === 'radius' ? 'active' : ''}" ${anchors.length ? '' : 'disabled'} data-action="set-filter-mode" data-mode="radius">錨點 ${RADIUS_KM} 公里內</button>
+  </div>`;
+
+  if (!list.length) { root.innerHTML = pillsHtml + '<div class="empty-hint">沒有符合條件的推薦店家</div>'; return; }
+
+  const customerList = list.filter(x => x.type === 'customer');
+  const newStoreList = list.filter(x => x.type === 'new-store');
+
+  root.innerHTML = pillsHtml +
+    groupHtml(customerList, 'customer', '正式客戶') +
+    groupHtml(newStoreList, 'newStore', '新店開發');
+}
+
+function toggleCol2(id) {
+  if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
+  renderRecommend();
+}
+
+function openStoreDrawer(id) {
+  // 步驟 6（store-drawer.js）接上之前，先用提示頂著，確認點擊有觸發到正確的 id。
+  if (window.StoreDrawer) { window.StoreDrawer.open(id); return; }
+  alert('藥局檔案抽屜還沒接上（步驟 6），點到的店家代號：' + id);
+}
+
+// ══════════════════════════════
+// 第①欄：今天一定要去
+// ══════════════════════════════
+let allPharmaciesCache = null;
+
+function renderMiniCal() {
+  const root = document.getElementById('mini-cal-root');
+  const selectedDs = getPlanDate();
+  const todayDs = fmtDs(new Date());
+  const start = new Date(selectedDs.replace(/-/g, '/'));
+  start.setDate(start.getDate() - start.getDay() - 7); // 往前抓到上週的週日，湊滿兩週
+  let html = '';
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const ds = fmtDs(d);
+    const cls = ['mini-cal-cell'];
+    if (ds === todayDs) cls.push('today');
+    if (ds === selectedDs) cls.push('selected');
+    html += `<div class="${cls.join(' ')}" data-action="goto-date" data-date="${ds}">${d.getDate()}</div>`;
+  }
+  root.innerHTML = html;
+}
+function goToDate(ds) {
+  const url = new URL(location.href);
+  url.searchParams.set('date', ds);
+  location.href = url.toString();
+}
+
+function anchorTypeLabel(a) {
+  return a.source === '待追蹤' ? '待追蹤' : a.source === '送貨' ? '送貨' : a.source || '手動';
+}
+
+// 第二行要顯示的是「這家店」本身的區域/備註，不是這筆錨點的事項文字——
+// 事項文字（手動加入／業務親送訂單／待追蹤事項…）移到第三行的「來源」。
+function anchorAreaNote(a) {
+  const ph = (allPharmaciesCache || []).find(p => p.id === a.id);
+  if (!ph) return '';
+  const area = ph.district || ph.city || '';
+  const note = ph.profileNote || '';
+  return [area, note].filter(Boolean).join('　');
+}
+
+function renderAnchors() {
+  const root = document.getElementById('anchors-root');
+  if (!anchors.length) { root.innerHTML = '<div class="empty-hint">還沒有錨點，先輸入今天一定要去的店</div>'; return; }
+  root.innerHTML = anchors.map(a => `
+    <div class="anchor-card">
+      <button class="anchor-remove" title="移除這個錨點" data-action="remove-anchor" data-id="${escapeHtml(a.id)}">✕</button>
+      <div class="anchor-line1">
+        <span class="anchor-name">${escapeHtml(a.name)}</span>
+        <span class="anchor-type">${escapeHtml(anchorTypeLabel(a))}</span>
+      </div>
+      <div class="anchor-line2">${escapeHtml(anchorAreaNote(a))}${a.deadline ? '　期限：' + escapeHtml(a.deadline) : ''}</div>
+      <div class="anchor-line3">來源：${escapeHtml(a.item || a.source || '手動')}</div>
+    </div>`).join('');
+}
+
+// 用店家 id 找，不是陣列 index——index 在清單重新排序/篩選後會對不上，id 才穩定（見2026-10-28事件委派改版）。
+// async＋await savePlanState：store-drawer.js 的「加入今天」會 await window.addAnchor(...)，
+// 要等真的存檔完成（或失敗）才能讓它的按鈕解除忙碌狀態。
+async function removeAnchor(id) {
+  const i = anchors.findIndex(a => a.id === id);
+  if (i < 0) return;
+  anchors.splice(i, 1);
+  renderAnchors();
+  renderRecommend();
+  renderSuggest();
+  await savePlanState();
+  toast('已移除');
+}
+
+async function addAnchor(a) {
+  if (anchors.some(x => x.id === a.id)) return; // 同一天同一家店不重複加
+  anchors.push(a);
+  renderAnchors();
+  renderRecommend();
+  renderSuggest();
+  await savePlanState();
+  toast('已加入今天');
+}
+
+// 寄賣待整理／該對帳：不自動進錨點，這裡只收合顯示建議，按「加入今天」才真的移入第①欄（見批准的計畫）。
+function renderSuggest() {
+  const root = document.getElementById('suggest-root');
+  if (!planData) { root.innerHTML = ''; return; }
+  const excludeIds = anchorIds();
+  const candidates = (planData.recommended || [])
+    .filter(item => !excludeIds.has(item.id))
+    .map(item => ({ item, cb: consignmentBadge(item) }))
+    .filter(x => x.cb.triggered)
+    .sort((a, b) => (b.cb.sortValue - a.cb.sortValue) || ((b.cb.staleTotal || 0) - (a.cb.staleTotal || 0)));
+
+  if (!candidates.length) { root.innerHTML = ''; return; }
+
+  const expanded = root.dataset.expanded === '1';
+  const shown = expanded ? candidates : candidates.slice(0, 3);
+
+  root.innerHTML = `<div class="suggest-title">建議加入（寄賣待整理／該對帳，共 ${candidates.length} 家）</div>` +
+    shown.map(({ item, cb }) => `
+      <div class="suggest-card">
+        <div class="suggest-info">
+          <div class="suggest-name">${escapeHtml(item.name)}</div>
+          <div class="suggest-detail">${escapeHtml(cb.detail)}</div>
+        </div>
+        <button class="btn-add-anchor" data-action="add-suggested-anchor" data-id="${escapeHtml(item.id)}">加入今天</button>
+      </div>`).join('') +
+    (candidates.length > 3
+      ? `<button class="suggest-more-link" data-action="toggle-suggest-expand">${expanded ? '收起' : '看全部 ' + candidates.length + ' 家'}</button>`
+      : '');
+}
+function toggleSuggestExpand() {
+  const root = document.getElementById('suggest-root');
+  root.dataset.expanded = root.dataset.expanded === '1' ? '0' : '1';
+  renderSuggest();
+}
+
+async function loadAllPharmacies() {
+  if (allPharmaciesCache) return allPharmaciesCache;
+  const d = await get('/pharmacies');
+  allPharmaciesCache = d.pharmacies || [];
+  return allPharmaciesCache;
+}
+
+function excludeReasonOf(p) {
+  if (p.deadReason) return '死客戶';
+  if (p.owner === '老爸') return '老爸';
+  if (p.status === '不拜訪') return '不拜訪';
+  return null;
+}
+
+async function onManualAddInput() {
+  const q = document.getElementById('manual-add-input').value.trim();
+  const resultsEl = document.getElementById('manual-add-results');
+  if (!q) { resultsEl.innerHTML = ''; return; }
+  const list = await loadAllPharmacies();
+  const matched = list.filter(p => p.name.includes(q) || p.id.includes(q)).slice(0, 15);
+  if (!matched.length) { resultsEl.innerHTML = '<div class="empty-hint">找不到符合的店</div>'; return; }
+  resultsEl.innerHTML = matched.map(p => {
+    const reason = excludeReasonOf(p);
+    return `<div class="manual-add-result-row" data-action="pick-manual-add" data-id="${escapeHtml(p.id)}">
+      <span>${escapeHtml(p.name)}（${escapeHtml(p.id)}）</span>
+      <span class="manual-add-tag">${reason ? escapeHtml(reason) : ''}</span>
+    </div>`;
+  }).join('');
+}
+async function pickManualAdd(p) {
+  await addAnchor({ id: p.id, name: p.name, source: '送貨', item: '手動加入', deadline: null });
+  document.getElementById('manual-add-input').value = '';
+  document.getElementById('manual-add-results').innerHTML = '';
+}
+
+// ══════════════════════════════
+// 存檔（KV）：anchors 或 route 任何變動都存一次，重新整理頁面能恢復
+// ══════════════════════════════
+let savingPlan = false;
+let savePending = false; // 存檔中又有新的變動進來時，不要默默丟掉——記下來，這次存完立刻再存一次最新狀態
+async function savePlanState() {
+  if (savingPlan) { savePending = true; return; }
+  savingPlan = true;
+  try {
+    await post('/api/plan', { date: getPlanDate(), anchors, route: window._confirmedRoute || null });
+  } catch (e) {
+    console.error('存檔失敗', e);
+    throw e;
+  } finally {
+    savingPlan = false;
+  }
+  if (savePending) {
+    savePending = false;
+    await savePlanState();
+  }
+}
+
+async function loadPlan() {
+  try {
+    const [plan] = await Promise.all([get('/api/plan?date=' + getPlanDate()), loadAllPharmacies()]);
+    planData = plan;
+    anchors = planData.anchors || [];
+    renderNavBadges();
+    renderMiniCal();
+    renderAnchors();
+    renderRecommend();
+    renderSuggest();
+  } catch (e) {
+    document.getElementById('recommend-root').innerHTML =
+      `<div class="empty-hint">載入失敗：${e.message}</div>`;
+  }
+}
+document.getElementById('manual-add-input').addEventListener('input', onManualAddInput);
+renderMiniCal();
+loadPlan();
+
+// ══════════════════════════════
+// 第③欄：順序與時間
+// port 自 index.html 的 runSchedule()（今天剛修過索引對不齊的bug），差異：
+//   1. 拿掉油費估算（SPEC 1「拿掉油費估算，改成顯示預估收工時間」）
+//   2. 起點時間改成 13:30（SPEC 5.2「汐止辦公室出發（約13:30）」），不是舊版的 8:30
+//      ——這兩個頁面描述的是不同的使用情境（SmartRoute 是早餐規劃全天一條路線，
+//      index.html 舊版今日清單可能是另一種假設），不是同一份邏輯照搬數字。
+// ══════════════════════════════
+const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 index.html 目前用的同一個前端 Maps key
+const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
+const DEST_ADDR = '台北市內湖區新民街422號';
+const START_MIN = 13 * 60 + 30;
+
+function fmtMin(min) {
+  const h = Math.floor(min / 60) % 24, m = Math.round(min % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+async function geocodeStore_(query) {
+  const bounds = '24.9,121.4|25.2,121.75';
+  const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query + ' 台灣')}&bounds=${bounds}&region=TW&key=${GMAPS_KEY}`);
+  const d = await r.json();
+  if (d.results?.length) {
+    const { lat, lng } = d.results[0].geometry.location;
+    return { location: { latLng: { latitude: lat, longitude: lng } } };
+  }
+  return { address: query + ' 台灣' };
+}
+
+async function calcRoute() {
+  const btn = document.getElementById('btn-calc-route');
+  const resultEl = document.getElementById('route-root');
+  const stops = [...anchors.map(a => ({ id: a.id, name: a.name, isAnchor: true })),
+    ...(planData?.recommended || []).filter(item => selectedCol2Ids.has(item.id)).map(item => ({ id: item.id, name: item.name, isAnchor: false }))];
+  if (!stops.length) { alert('第①②欄還沒有選任何店家'); return; }
+
+  btn.disabled = true; btn.textContent = '計算中…';
+  resultEl.innerHTML = '<div class="empty-hint">計算中…</div>';
+  document.getElementById('btn-confirm-route').style.display = 'none';
+  try {
+    const pharmaciesList = await loadAllPharmacies();
+    const byId = {}; pharmaciesList.forEach(p => { byId[p.id] = p; });
+
+    const intermediates = await Promise.all(stops.map(s => {
+      const ph = byId[s.id];
+      if (ph?.lat && ph?.lng) return Promise.resolve({ location: { latLng: { latitude: ph.lat, longitude: ph.lng } } });
+      if (ph?.address) return Promise.resolve({ address: ph.address });
+      return geocodeStore_(s.name);
+    }));
+
+    const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GMAPS_KEY,
+        'X-Goog-FieldMask': 'routes.polyline,routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex',
+      },
+      body: JSON.stringify({
+        origin: { address: ORIGIN_ADDR }, destination: { address: DEST_ADDR },
+        intermediates, travelMode: 'DRIVE', optimizeWaypointOrder: true,
+      }),
+    });
+    if (!routeResp.ok) {
+      const errData = await routeResp.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `HTTP ${routeResp.status}`);
+    }
+    const routeData = await routeResp.json();
+    if (!routeData.routes?.length) throw new Error('找不到路線');
+    const route0 = routeData.routes[0];
+    const orderRaw = route0.optimizedIntermediateWaypointIndex;
+    const order = (Array.isArray(orderRaw) && orderRaw.length === stops.length) ? orderRaw : stops.map((_, i) => i);
+    const legs = route0.legs;
+    const reordered = order.map(i => stops[i]).filter(Boolean);
+
+    let totalMeters = 0;
+    const arrivalTimes = [];
+    let cumMin = START_MIN;
+    legs.forEach((leg, i) => {
+      totalMeters += leg.distanceMeters;
+      cumMin += parseInt(leg.duration) / 60;
+      if (i < reordered.length) { arrivalTimes.push(Math.round(cumMin)); cumMin += 30; }
+    });
+    const totalKm = Math.round(totalMeters / 1000);
+    const lastLegMin = legs.length ? parseInt(legs[legs.length - 1]?.duration || '0') / 60 : 0;
+    const homeArrival = arrivalTimes.length ? arrivalTimes[arrivalTimes.length - 1] + 30 + Math.round(lastLegMin) : cumMin;
+
+    window._confirmedRoute = reordered.map((s, i) => ({ id: s.id, name: s.name, isAnchor: s.isAnchor, seq: i + 1, arrival: arrivalTimes[i] || null }));
+
+    resultEl.innerHTML = reordered.map((s, i) => `
+      <div class="route-stop-row">
+        <span class="route-stop-time">${arrivalTimes[i] ? fmtMin(arrivalTimes[i]) : ''}</span>
+        <span class="route-stop-name ${s.isAnchor ? 'anchor' : ''}">${s.name}</span>
+        ${s.isAnchor ? '<span class="route-stop-tag">錨點</span>' : ''}
+      </div>`).join('') +
+      `<div class="route-summary">共 ${reordered.length} 站・${totalKm} km</div>`;
+
+    const finishEl = document.getElementById('finish-time-value');
+    finishEl.textContent = fmtMin(homeArrival);
+    finishEl.classList.toggle('late', homeArrival > 17 * 60 + 30);
+
+    document.getElementById('btn-confirm-route').style.display = '';
+  } catch (e) {
+    resultEl.innerHTML = `<div class="empty-hint">路線計算失敗：${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '計算路線';
+  }
+}
+
+async function confirmRoute() {
+  if (!window._confirmedRoute) return;
+  const btn = document.getElementById('btn-confirm-route');
+  await withBusy(btn, '存檔中…', async () => {
+    await savePlanState();
+    toast('已存檔（手機外勤模式讀取這份路線的部分之後會另外接）');
+  });
+}
+</script>
+<script src="store-drawer.js"></script>
+
+</body>
+</html>
