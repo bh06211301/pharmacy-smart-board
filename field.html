@@ -1849,7 +1849,7 @@ async function submitVisitRecord() {
   btn.textContent = '送出中...';
 
   try {
-    await fetch(WORKER + '/add-visit', {
+    const res = await fetch(WORKER + '/add-visit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1862,6 +1862,11 @@ async function submitVisitRecord() {
         content: content,
       })
     });
+    // 2026-10-31 修正：之前完全沒讀回應內容，GAS 拒絕寫入（success:false）時也會顯示「已儲存」。
+    // 照 pharmacy-visit-app 的做法明確檢查 success，失敗就丟出去讓下面的 catch 處理
+    // （catch 本來就會顯示「紀錄儲存失敗，但打卡成功」，行為不用再另外設計）。
+    const data = await res.json();
+    if (data.success === false) throw new Error(data.error || '存檔失敗');
     showToast('✅ 拜訪紀錄已儲存！');
 
     // ── 自動建立老爸聯絡事項（與 index.html 的 submitNewVisit 邏輯保持一致）──

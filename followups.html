@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜待追蹤</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A3 待追蹤。導覽列跟 planner.html／store-rules.html 同一套樣式（刻意複製，見 docs/SPEC.md 待辦）。 */
+  * { box-sizing: border-box; }
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); overflow-x: auto; }
+
+  .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
+  .filter-pill {
+    height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+    font-size: var(--sr-text-xs); background: var(--sr-bg); border: 1px solid var(--sr-line);
+    color: var(--sr-ink-2); cursor: pointer; font-family: var(--sr-font);
+  }
+  .filter-pill.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+
+  /* 768px 以下不能水平捲動（SPEC 共通要求）：表格本身在自己的容器內捲動，不是整頁捲動 */
+  .table-scroll { overflow-x: auto; min-width: 0; }
+  table.followup-table { width: 100%; border-collapse: collapse; font-size: var(--sr-text-sm); min-width: 920px; }
+  table.followup-table th {
+    text-align: left; font-size: var(--sr-text-xs); color: var(--sr-ink-3); font-weight: var(--sr-weight-regular);
+    padding: var(--sr-space-3) var(--sr-space-4); border-bottom: 1px solid var(--sr-line);
+  }
+  table.followup-table td { padding: var(--sr-space-4); border-bottom: 1px solid var(--sr-line-row); vertical-align: top; }
+  table.followup-table tr.done td { color: var(--sr-ink-3); }
+  .store-link { background: none; border: none; padding: 0; color: var(--sr-ink); font-weight: var(--sr-weight-bold); text-decoration: underline; cursor: pointer; font-family: var(--sr-font); font-size: var(--sr-text-sm); }
+  .due-soon { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .impact-text { font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .row-actions { display: flex; gap: var(--sr-space-2); white-space: nowrap; }
+  .sr-btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-4); border-radius: var(--sr-radius-md); font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .sr-btn-sm:hover { background: var(--sr-bg-subtle); }
+
+  /* 隨手新增列 */
+  .quick-add-row { display: grid; grid-template-columns: 1.4fr 1.6fr 0.8fr 0.9fr 0.9fr auto; gap: var(--sr-space-3); align-items: start; margin-bottom: var(--sr-space-6); position: relative; }
+  @media (max-width: 1024px) { .quick-add-row { grid-template-columns: 1fr; } }
+  .quick-add-row input, .quick-add-row select {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+  }
+  .quick-add-results {
+    position: absolute; top: 46px; left: 0; width: 100%; max-height: 220px; overflow-y: auto;
+    background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); z-index: 5;
+  }
+  .quick-add-result-row { padding: var(--sr-space-3) var(--sr-space-4); font-size: var(--sr-text-sm); cursor: pointer; border-bottom: 1px solid var(--sr-line-row); }
+  .quick-add-result-row:hover { background: var(--sr-bg-subtle); }
+  .quick-add-picked { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .btn-quick-add { height: var(--sr-input-h); padding: 0 var(--sr-space-6); border-radius: var(--sr-radius-md); background: var(--sr-primary); border: none; color: var(--sr-on-dark); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); }
+
+  /* 編輯用的行內表單（取代那一列） */
+  .edit-form-row td { padding: var(--sr-space-4); }
+  .edit-form { display: grid; grid-template-columns: 1.6fr 0.9fr 0.9fr auto auto; gap: var(--sr-space-3); align-items: center; }
+  .edit-form input, .edit-form select { height: var(--sr-btn-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-3); font-size: var(--sr-text-sm); font-family: var(--sr-font); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">SmartRoute</span>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="planner.html">今天</a>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本週</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本月</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">客戶</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">新店開發</span>
+    <div class="nav-divider"></div>
+    <span class="nav-manage-label">管理</span>
+    <a class="nav-tab" href="store-rules.html">店家規則</a>
+    <a class="nav-tab active" href="followups.html">待追蹤<span id="badge-followups" class="nav-badge" hidden></span></a>
+  </div>
+  <div class="nav-right"></div>
+</nav>
+
+<div class="page-header">
+  <span class="page-header-title">待追蹤</span>
+</div>
+
+<div class="page-body">
+  <div class="filter-pills" id="status-filter-pills">
+    <button class="filter-pill active" data-filter="pending">未完成</button>
+    <button class="filter-pill" data-filter="has-deadline">有期限</button>
+    <button class="filter-pill" data-filter="next-visit">下次經過</button>
+    <button class="filter-pill" data-filter="done">已完成</button>
+  </div>
+
+  <div class="quick-add-row">
+    <div>
+      <input type="text" id="qa-store-input" placeholder="搜尋藥局（含開發中新店）" autocomplete="off">
+      <div id="qa-store-results" class="quick-add-results" hidden></div>
+      <div id="qa-store-picked" class="quick-add-picked"></div>
+    </div>
+    <input type="text" id="qa-item" placeholder="事項">
+    <select id="qa-who"><option>我</option><option>老爸</option><option>藥師</option><option>帳務</option><option>篩選器</option></select>
+    <select id="qa-deadline-type"><option>下次經過</option><option>指定日期前</option></select>
+    <input type="date" id="qa-deadline" disabled>
+    <button class="btn-quick-add" id="qa-submit">新增</button>
+  </div>
+
+  <div id="table-root"><div class="empty-hint">載入中…</div></div>
+</div>
+
+<script src="planner-shared.js"></script>
+<script src="store-drawer.js"></script>
+<script>
+const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+
+let allData = null;    // /api/followups 的完整回應
+let statusFilter = 'pending';
+let pickedStore = null; // { id, name, type }
+let editingId = null;
+
+async function loadAll() {
+  try {
+    allData = await get('/api/followups');
+    renderTable();
+    renderBadge();
+  } catch (e) {
+    document.getElementById('table-root').innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderBadge() {
+  const el = document.getElementById('badge-followups');
+  const n = allData?.badges?.followupsDueSoon || 0;
+  if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
+}
+
+document.getElementById('status-filter-pills').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  statusFilter = btn.dataset.filter;
+  document.querySelectorAll('#status-filter-pills .filter-pill').forEach(b => b.classList.toggle('active', b === btn));
+  editingId = null;
+  renderTable();
+});
+
+// 篩選：未完成(預設，全部未完成)／有期限(未完成+指定日期前)／下次經過(未完成+下次經過)／已完成
+// 2026-10-31 使用者確認：「有期限」「下次經過」都只顯示未完成的，不含已完成。
+function filteredFollowups() {
+  const list = allData?.followups || [];
+  if (statusFilter === 'done') return list.filter(f => f.status === '已完成');
+  if (statusFilter === 'has-deadline') return list.filter(f => f.status === '未完成' && f.deadlineType === '指定日期前');
+  if (statusFilter === 'next-visit') return list.filter(f => f.status === '未完成' && f.deadlineType === '下次經過');
+  return list.filter(f => f.status === '未完成');
+}
+
+function rowHtml(f) {
+  if (editingId === f.followupId) return editRowHtml(f);
+  const deadlineText = f.deadlineType === '指定日期前' && f.deadline ? f.deadline : '下次經過';
+  const isDueSoon = f.status === '未完成' && f.deadlineType === '指定日期前' && f.deadline && (-daysBetweenClient(f.deadline) <= 3);
+  const lastContactText = f.lastContactDate
+    ? `${f.lastContactDate}${f.daysSinceLastContact !== null ? '（' + f.daysSinceLastContact + '天前）' : ''}`
+    : '—';
+  return `<tr class="${f.status === '已完成' ? 'done' : ''}" data-id="${escapeHtml(f.followupId)}">
+    <td><button class="store-link" data-action="open-drawer" data-id="${escapeHtml(f.storeId)}">${escapeHtml(f.storeName)}</button></td>
+    <td>${escapeHtml(f.item)}</td>
+    <td>${escapeHtml(f.who)}</td>
+    <td class="${isDueSoon ? 'due-soon' : ''}">${escapeHtml(deadlineText)}</td>
+    <td>${escapeHtml(lastContactText)}</td>
+    <td class="impact-text">${escapeHtml(f.impact)}</td>
+    <td>
+      <div class="row-actions">
+        ${f.status === '未完成' ? `<button class="sr-btn-sm" data-action="resolve" data-id="${escapeHtml(f.followupId)}">結案</button>` : ''}
+        <button class="sr-btn-sm" data-action="edit" data-id="${escapeHtml(f.followupId)}">編輯</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function daysBetweenClient(deadlineStr) {
+  const d = new Date(String(deadlineStr).replace(/\//g, '-'));
+  if (isNaN(d)) return 0;
+  const now = new Date();
+  return Math.floor((now - d) / 86400000);
+}
+
+function editRowHtml(f) {
+  return `<tr class="edit-form-row" data-id="${escapeHtml(f.followupId)}">
+    <td colspan="7">
+      <div class="edit-form">
+        <input type="text" id="ef-item" value="${escapeHtml(f.item)}">
+        <select id="ef-who">${['我','老爸','藥師','帳務','篩選器'].map(w => `<option ${w === f.who ? 'selected' : ''}>${w}</option>`).join('')}</select>
+        <select id="ef-deadline-type">${['下次經過','指定日期前'].map(w => `<option ${w === f.deadlineType ? 'selected' : ''}>${w}</option>`).join('')}</select>
+        <input type="date" id="ef-deadline" value="${escapeHtml(f.deadline || '')}" ${f.deadlineType === '指定日期前' ? '' : 'disabled'}>
+        <div style="display:flex;gap:6px">
+          <button class="sr-btn-sm" data-action="save-edit" data-id="${escapeHtml(f.followupId)}">儲存</button>
+          <button class="sr-btn-sm" data-action="cancel-edit">取消</button>
+        </div>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function renderTable() {
+  const root = document.getElementById('table-root');
+  const rows = filteredFollowups();
+  if (!rows.length) { root.innerHTML = '<div class="empty-hint">沒有符合條件的待追蹤事項</div>'; return; }
+  root.innerHTML = `<div class="table-scroll"><table class="followup-table">
+    <thead><tr>
+      <th>藥局</th><th>事項</th><th>誰交代</th><th>期限</th><th>距上次接觸</th><th>對排程的影響</th><th></th>
+    </tr></thead>
+    <tbody>${rows.map(rowHtml).join('')}</tbody>
+  </table></div>`;
+
+  root.querySelectorAll('[data-action="open-drawer"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (window.StoreDrawer) window.StoreDrawer.open(btn.dataset.id);
+    });
+  });
+  root.querySelectorAll('[data-action="resolve"]').forEach(btn => {
+    btn.addEventListener('click', () => resolveFollowup(btn, btn.dataset.id));
+  });
+  root.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', () => { editingId = btn.dataset.id; renderTable(); });
+  });
+  root.querySelectorAll('[data-action="cancel-edit"]').forEach(btn => {
+    btn.addEventListener('click', () => { editingId = null; renderTable(); });
+  });
+  root.querySelectorAll('[data-action="save-edit"]').forEach(btn => {
+    btn.addEventListener('click', () => saveEdit(btn, btn.dataset.id));
+  });
+  const dtSel = root.querySelector('#ef-deadline-type');
+  if (dtSel) {
+    dtSel.addEventListener('change', () => {
+      document.getElementById('ef-deadline').disabled = dtSel.value !== '指定日期前';
+    });
+  }
+}
+
+async function resolveFollowup(btn, followupId) {
+  await withBusy(btn, '結案中…', async () => {
+    await post('/api/followups', { resolve: true, followupId, resolvedFrom: 'A3待追蹤頁手動結案' });
+    toast('已結案');
+    await loadAll();
+  });
+}
+
+// 2026-10-31：明確帶 action:'update'，不要讓後端用「有沒有 followupId」去猜是新增還是修改
+async function saveEdit(btn, followupId) {
+  const item = document.getElementById('ef-item').value.trim();
+  if (!item) { alert('事項不能空白'); return; }
+  const who = document.getElementById('ef-who').value;
+  const deadlineType = document.getElementById('ef-deadline-type').value;
+  const deadline = deadlineType === '指定日期前' ? document.getElementById('ef-deadline').value : '';
+  await withBusy(btn, '儲存中…', async () => {
+    await post('/api/followups', { action: 'update', followupId, patch: { item, who, deadlineType, deadline } });
+    toast('已儲存');
+    editingId = null;
+    await loadAll();
+  });
+}
+
+// ---------- 隨手新增 ----------
+function onStoreInput() {
+  const q = document.getElementById('qa-store-input').value.trim();
+  const resultsEl = document.getElementById('qa-store-results');
+  pickedStore = null;
+  document.getElementById('qa-store-picked').textContent = '';
+  if (!q || !allData) { resultsEl.hidden = true; return; }
+  const matched = (allData.addableStores || []).filter(s => s.name.includes(q) || s.id.includes(q)).slice(0, 15);
+  if (!matched.length) { resultsEl.hidden = true; return; }
+  resultsEl.hidden = false;
+  resultsEl.innerHTML = matched.map(s => `<div class="quick-add-result-row" data-id="${escapeHtml(s.id)}">
+    ${escapeHtml(s.name)}（${escapeHtml(s.id)}）${s.type === 'new-store' ? '　<span style="color:var(--sr-ink-3)">開發中</span>' : ''}
+  </div>`).join('');
+  resultsEl.querySelectorAll('[data-id]').forEach(row => {
+    row.addEventListener('click', () => {
+      const s = matched.find(x => x.id === row.dataset.id);
+      pickedStore = s;
+      document.getElementById('qa-store-input').value = s.name;
+      document.getElementById('qa-store-picked').textContent = `已選：${s.name}（${s.id}）`;
+      resultsEl.hidden = true;
+    });
+  });
+}
+document.getElementById('qa-store-input').addEventListener('input', onStoreInput);
+document.getElementById('qa-deadline-type').addEventListener('change', () => {
+  document.getElementById('qa-deadline').disabled = document.getElementById('qa-deadline-type').value !== '指定日期前';
+});
+
+async function submitQuickAdd() {
+  const btn = document.getElementById('qa-submit');
+  if (!pickedStore) { alert('請先從清單選一家店'); return; }
+  const item = document.getElementById('qa-item').value.trim();
+  if (!item) { alert('事項不能空白'); return; }
+  const who = document.getElementById('qa-who').value;
+  const deadlineType = document.getElementById('qa-deadline-type').value;
+  const deadline = deadlineType === '指定日期前' ? document.getElementById('qa-deadline').value : '';
+  await withBusy(btn, '新增中…', async () => {
+    await post('/api/followups', { storeId: pickedStore.id, item, who, deadlineType, deadline, requestId: genRequestId() });
+    toast('已新增');
+    pickedStore = null;
+    document.getElementById('qa-store-input').value = '';
+    document.getElementById('qa-item').value = '';
+    document.getElementById('qa-store-picked').textContent = '';
+    await loadAll();
+  });
+}
+document.getElementById('qa-submit').addEventListener('click', submitQuickAdd);
+
+loadAll();
+</script>
+</body>
+</html>

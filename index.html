@@ -2894,7 +2894,7 @@ async function submitNewVisit(ds) {
   if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
   try {
     const visitId = 'V_' + Date.now();
-    await post('/add-visit', {
+    const addVisitResp = await post('/add-visit', {
       action:       'addVisit',
       visitId,
       pharmacyName: phName,
@@ -2903,6 +2903,9 @@ async function submitNewVisit(ds) {
       purpose:      purpose || '例行拜訪',
       content,
     });
+    // 2026-10-31 修正：post() 只有在 HTTP 狀態非 2xx 時才 throw，GAS 拒絕寫入時 Worker 仍回 200，
+    // 之前完全沒檢查回傳的 success，一律顯示「已儲存」。照 pharmacy-visit-app 的做法明確檢查。
+    if (addVisitResp?.success === false) throw new Error(addVisitResp.error || '存檔失敗');
     toast('✅ 拜訪紀錄已儲存！');
     document.getElementById('new-visit-content').value = '';
 

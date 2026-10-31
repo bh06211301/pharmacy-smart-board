@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜店家規則</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A2 店家規則。導覽列跟 planner.html 同一套樣式（故意複製，不是共用元件——這個專案目前每頁各自
+     寫自己的 <style>，見 docs/SPEC.md 待辦）。 */
+  * { box-sizing: border-box; }
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+
+  .columns { display: flex; }
+  @media (max-width: 1024px) { .columns { flex-direction: column; } }
+  .col-left { width: 320px; flex-shrink: 0; border-right: 1px solid var(--sr-line); background: var(--sr-bg-subtle); min-height: calc(100vh - var(--sr-nav-h) - 57px); }
+  @media (max-width: 1024px) { .col-left { width: 100%; border-right: none; border-bottom: 1px solid var(--sr-line); min-height: auto; } }
+  .col-right { flex: 1; min-width: 0; }
+  .col-body { padding: var(--sr-space-7); }
+
+  .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
+  .filter-pill {
+    height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+    font-size: var(--sr-text-xs); background: var(--sr-bg); border: 1px solid var(--sr-line);
+    color: var(--sr-ink-2); cursor: pointer; font-family: var(--sr-font);
+  }
+  .filter-pill.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
+
+  .store-list-item {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-3);
+    padding: var(--sr-space-4) var(--sr-space-5); border-radius: var(--sr-radius-md); cursor: pointer;
+    font-size: var(--sr-text-sm); margin-bottom: 2px;
+  }
+  .store-list-item:hover { background: var(--sr-bg-selected); }
+  .store-list-item.selected { background: var(--sr-bg); border: 1px solid var(--sr-ink); font-weight: var(--sr-weight-bold); }
+  .store-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .store-list-count { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; }
+  .store-list-owner { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+
+  .sr-section { padding: var(--sr-space-7) var(--sr-space-8); border-bottom: 1px solid var(--sr-line-soft); }
+  .sr-section-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); display: flex; align-items: center; justify-content: space-between; }
+  .sr-store-name { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .sr-store-meta { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: var(--sr-space-2); }
+
+  .sr-btn { height: var(--sr-btn-h); padding: 0 var(--sr-space-6); border-radius: var(--sr-radius-md); font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); }
+  .sr-btn-primary { background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
+  .sr-btn-primary:hover { background: var(--sr-primary-hover); }
+  .sr-btn-tertiary { background: var(--sr-bg); border: 1px solid var(--sr-line); color: var(--sr-ink-2); }
+  .sr-btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .sr-btn-sm:hover { background: var(--sr-bg-subtle); }
+
+  .rule-card { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: var(--sr-space-5) var(--sr-space-6); margin-bottom: var(--sr-space-4); }
+  .rule-card.disabled { opacity: 0.55; border-style: dashed; }
+  .rule-card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-4); }
+  .rule-type-badge { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-xs); padding: 2px 9px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .rule-action-badge { font-size: var(--sr-text-xs); color: var(--sr-ink-2); border: 1px solid var(--sr-line); padding: 1px 8px; border-radius: var(--sr-radius-sm); }
+  .rule-status-badge { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+  .rule-card-detail { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: var(--sr-space-3); }
+  .rule-card-note { font-size: var(--sr-text-sm); margin-top: 2px; }
+  .rule-card-actions { display: flex; gap: var(--sr-space-3); margin-top: var(--sr-space-4); }
+
+  .sr-form { border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); margin-top: var(--sr-space-4); display: flex; flex-direction: column; gap: var(--sr-space-4); }
+  .sr-form label { font-size: var(--sr-text-xs); color: var(--sr-ink-2); display: block; margin-bottom: 2px; }
+  .sr-form input, .sr-form select { width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box; }
+  .sr-form-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sr-space-4); }
+  .sr-form-actions { display: flex; gap: var(--sr-space-3); }
+  .weekday-cb-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .weekday-cb-group label { display: flex; align-items: center; gap: 2px; width: auto; font-size: var(--sr-text-xs); }
+  .weekday-cb-group input { width: auto; height: auto; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">SmartRoute</span>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="planner.html">今天</a>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本週</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">本月</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">客戶</span>
+    <span class="nav-tab disabled" title="排在之後的階段才做">新店開發</span>
+    <div class="nav-divider"></div>
+    <span class="nav-manage-label">管理</span>
+    <a class="nav-tab active" href="store-rules.html">店家規則</a>
+    <a class="nav-tab" href="followups.html">待追蹤<span id="badge-followups" class="nav-badge" hidden></span></a>
+  </div>
+  <div class="nav-right"></div>
+</nav>
+
+<div class="page-header">
+  <span class="page-header-title">店家規則</span>
+</div>
+
+<div class="columns">
+  <div class="col-left">
+    <div class="col-body">
+      <div class="filter-pills" id="store-filter-pills">
+        <button class="filter-pill active" data-filter="has-rule">有規則</button>
+        <button class="filter-pill" data-filter="all">全部</button>
+        <button class="filter-pill" data-filter="unconfirmed">待確認</button>
+      </div>
+      <div id="store-list-root"><div class="empty-hint">載入中…</div></div>
+    </div>
+  </div>
+  <div class="col-right">
+    <div id="detail-root"><div class="col-body"><div class="empty-hint">從左側選一家店查看規則</div></div></div>
+  </div>
+</div>
+
+<script src="planner-shared.js"></script>
+<script>
+const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+
+const RULE_TYPES = ['不拜訪日', '在店時段', '請款規則', '拜訪前先做', '其他提醒'];
+const RULE_ACTIONS = ['擋住', '提醒', '自動調整'];
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+// SPEC 5.10：「排程處理」依類型給預設值，可以改
+const DEFAULT_ACTION_BY_TYPE = { 不拜訪日: '擋住', 在店時段: '自動調整', 請款規則: '提醒', 拜訪前先做: '提醒', 其他提醒: '提醒' };
+
+let allData = null;      // /api/rules 的完整回應
+let storeFilter = 'has-rule';
+let selectedStoreId = null;
+
+async function loadAll() {
+  try {
+    allData = await get('/api/rules');
+    renderStoreList();
+    if (selectedStoreId) renderDetail(selectedStoreId);
+  } catch (e) {
+    document.getElementById('store-list-root').innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function setStoreFilter(f) {
+  storeFilter = f;
+  document.querySelectorAll('#store-filter-pills .filter-pill').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  renderStoreList();
+}
+document.getElementById('store-filter-pills').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-filter]');
+  if (btn) setStoreFilter(btn.dataset.filter);
+});
+
+function renderStoreList() {
+  const root = document.getElementById('store-list-root');
+  if (!allData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
+
+  if (storeFilter === 'unconfirmed') {
+    root.innerHTML = '<div class="empty-hint">之後由 AI 掃描拜訪紀錄與語音筆記產生，這裡先留空</div>';
+    return;
+  }
+
+  const stores = storeFilter === 'has-rule' ? allData.stores.filter(s => s.ruleCount > 0) : allData.stores;
+  if (!stores.length) { root.innerHTML = '<div class="empty-hint">沒有符合條件的店家</div>'; return; }
+
+  root.innerHTML = stores
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+    .map(s => `<div class="store-list-item ${s.id === selectedStoreId ? 'selected' : ''}" data-store-id="${escapeHtml(s.id)}">
+      <span class="store-list-name">${escapeHtml(s.name)}</span>
+      <span class="store-list-count">${s.ruleCount > 0 ? s.ruleCount + ' 條' : ''}</span>
+    </div>`).join('');
+
+  root.querySelectorAll('.store-list-item').forEach(el => {
+    el.addEventListener('click', () => {
+      selectedStoreId = el.dataset.storeId;
+      renderStoreList();
+      renderDetail(selectedStoreId);
+    });
+  });
+}
+
+function fieldsVisibilityFor(ruleType) {
+  return {
+    weekdays: ruleType === '不拜訪日',
+    monthDays: ruleType === '不拜訪日' || ruleType === '請款規則',
+    time: ruleType === '在店時段',
+  };
+}
+
+function ruleCardHtml(r) {
+  const parts = [];
+  if (r.weekdays) parts.push('星期：' + r.weekdays);
+  if (r.monthDays) parts.push('每月：' + r.monthDays);
+  if (r.timeFrom || r.timeTo) parts.push(`時段：${r.timeFrom || '—'} ~ ${r.timeTo || '—'}`);
+  return `<div class="rule-card ${r.status === '停用' ? 'disabled' : ''}" data-rule-id="${escapeHtml(r.ruleId)}">
+    <div class="rule-card-top">
+      <div>
+        <span class="rule-type-badge">${escapeHtml(r.ruleType)}</span>
+        <span class="rule-action-badge">${escapeHtml(r.action)}</span>
+      </div>
+      <span class="rule-status-badge">${r.status === '停用' ? '已停用' : '有效'}</span>
+    </div>
+    ${parts.length ? `<div class="rule-card-detail">${escapeHtml(parts.join('　'))}</div>` : ''}
+    ${r.note ? `<div class="rule-card-note">${escapeHtml(r.note)}</div>` : ''}
+    <div class="rule-card-actions">
+      <button class="sr-btn-sm" data-action="edit-rule" data-rule-id="${escapeHtml(r.ruleId)}">編輯</button>
+      <button class="sr-btn-sm" data-action="toggle-rule-status" data-rule-id="${escapeHtml(r.ruleId)}" data-next-status="${r.status === '停用' ? '有效' : '停用'}">${r.status === '停用' ? '啟用' : '停用'}</button>
+    </div>
+  </div>`;
+}
+
+function ruleFormHtml(existing) {
+  const r = existing || {};
+  const type = r.ruleType || RULE_TYPES[0];
+  const vis = fieldsVisibilityFor(type);
+  const checkedDays = (r.weekdays || '').split(/[、,]/).map(s => s.trim());
+  return `<div class="sr-form" id="rule-form">
+    <input type="hidden" id="rf-rule-id" value="${escapeHtml(r.ruleId || '')}">
+    <div class="sr-form-row2">
+      <div><label>規則類型</label><select id="rf-type">${RULE_TYPES.map(t => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div><label>排程處理</label><select id="rf-action">${RULE_ACTIONS.map(a => `<option ${a === (r.action || DEFAULT_ACTION_BY_TYPE[type]) ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+    </div>
+    <div id="rf-weekdays-row" style="display:${vis.weekdays ? '' : 'none'}">
+      <label>星期（可複選）</label>
+      <div class="weekday-cb-group">${WEEKDAYS.map(w => `<label><input type="checkbox" value="${w}" class="rf-weekday-cb" ${checkedDays.includes(w) ? 'checked' : ''}>${w}</label>`).join('')}</div>
+    </div>
+    <div id="rf-monthdays-row" style="display:${vis.monthDays ? '' : 'none'}">
+      <label>每月日期（格式 起-迄，例如 28-31）</label>
+      <input id="rf-monthdays" type="text" placeholder="28-31" value="${escapeHtml(r.monthDays || '')}">
+    </div>
+    <div id="rf-time-row" class="sr-form-row2" style="display:${vis.time ? '' : 'none'}">
+      <div><label>時段起</label><input id="rf-timefrom" type="time" value="${escapeHtml(r.timeFrom || '')}"></div>
+      <div><label>時段迄</label><input id="rf-timeto" type="time" value="${escapeHtml(r.timeTo || '')}"></div>
+    </div>
+    <div><label>說明</label><input id="rf-note" type="text" placeholder="例：林藥師週一公休" value="${escapeHtml(r.note || '')}"></div>
+    <div class="sr-form-actions">
+      <button class="sr-btn sr-btn-primary" data-action="submit-rule-form">${existing ? '儲存' : '新增'}</button>
+      <button class="sr-btn sr-btn-tertiary" data-action="cancel-rule-form">取消</button>
+    </div>
+  </div>`;
+}
+
+function bindRuleFormEvents() {
+  const typeSel = document.getElementById('rf-type');
+  const actionSel = document.getElementById('rf-action');
+  if (!typeSel) return;
+  let actionManuallyChanged = false;
+  actionSel.addEventListener('change', () => { actionManuallyChanged = true; });
+  typeSel.addEventListener('change', () => {
+    const type = typeSel.value;
+    const vis = fieldsVisibilityFor(type);
+    document.getElementById('rf-weekdays-row').style.display = vis.weekdays ? '' : 'none';
+    document.getElementById('rf-monthdays-row').style.display = vis.monthDays ? '' : 'none';
+    document.getElementById('rf-time-row').style.display = vis.time ? '' : 'none';
+    if (!actionManuallyChanged) actionSel.value = DEFAULT_ACTION_BY_TYPE[type];
+  });
+}
+
+// 2026-10-31：送出的「排程處理」欄位叫 scheduleAction，不能叫 action——那會跟 Worker 轉送 GAS 時
+// 用來選路由的 action（'addRule'/'updateRule'）撞名，蓋掉之後 GAS 收到的排程處理值就變成路由字串，
+// 驗證失敗（已實測踩到，GAS 端 handleAddRule_/handleUpdateRule_ 同步改成讀 scheduleAction）。
+async function submitRuleForm(btn, storeId) {
+  const ruleId = document.getElementById('rf-rule-id').value || null;
+  const ruleType = document.getElementById('rf-type').value;
+  const scheduleAction = document.getElementById('rf-action').value;
+  const weekdays = [...document.querySelectorAll('.rf-weekday-cb:checked')].map(c => c.value).join('、');
+  const monthDays = document.getElementById('rf-monthdays').value.trim();
+  const timeFrom = document.getElementById('rf-timefrom').value;
+  const timeTo = document.getElementById('rf-timeto').value;
+  const note = document.getElementById('rf-note').value.trim();
+
+  await withBusy(btn, ruleId ? '儲存中…' : '新增中…', async () => {
+    if (ruleId) {
+      await post('/api/rules', { ruleId, patch: { ruleType, weekdays, monthDays, timeFrom, timeTo, note, scheduleAction } });
+    } else {
+      await post('/api/rules', { storeId, ruleType, weekdays, monthDays, timeFrom, timeTo, note, scheduleAction, source: '自己', requestId: genRequestId() });
+    }
+    toast(ruleId ? '已儲存' : '已新增');
+    await loadAll();
+  });
+}
+
+async function toggleRuleStatus(btn, ruleId, nextStatus) {
+  await withBusy(btn, nextStatus === '停用' ? '停用中…' : '啟用中…', async () => {
+    await post('/api/rules', { ruleId, patch: { status: nextStatus } });
+    toast(nextStatus === '停用' ? '已停用' : '已啟用');
+    await loadAll();
+  });
+}
+
+function renderDetail(storeId) {
+  const root = document.getElementById('detail-root');
+  const store = allData.stores.find(s => s.id === storeId);
+  if (!store) { root.innerHTML = '<div class="col-body"><div class="empty-hint">找不到這家店</div></div>'; return; }
+  const rules = allData.rules.filter(r => r.storeId === storeId);
+
+  root.innerHTML = `
+    <div class="sr-section">
+      <div class="sr-store-name">${escapeHtml(store.name)}</div>
+      <div class="sr-store-meta">${escapeHtml(store.id)}</div>
+    </div>
+    <div class="sr-section" style="border-bottom:none">
+      <div class="sr-section-title">規則<button class="sr-btn-sm" data-action="new-rule">＋新增</button></div>
+      <div id="rules-list">${rules.length ? rules.map(ruleCardHtml).join('') : '<div class="empty-hint">目前沒有店家規則</div>'}</div>
+      <div id="rule-form-root"></div>
+    </div>
+  `;
+
+  root.querySelectorAll('[data-action="edit-rule"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const r = rules.find(x => x.ruleId === btn.dataset.ruleId);
+      document.getElementById('rule-form-root').innerHTML = ruleFormHtml(r);
+      bindRuleFormEvents();
+      document.getElementById('rule-form-root').querySelector('[data-action="submit-rule-form"]')
+        .addEventListener('click', (e) => submitRuleForm(e.target, storeId));
+      document.getElementById('rule-form-root').querySelector('[data-action="cancel-rule-form"]')
+        .addEventListener('click', () => { document.getElementById('rule-form-root').innerHTML = ''; });
+    });
+  });
+  root.querySelectorAll('[data-action="toggle-rule-status"]').forEach(btn => {
+    btn.addEventListener('click', () => toggleRuleStatus(btn, btn.dataset.ruleId, btn.dataset.nextStatus));
+  });
+  root.querySelector('[data-action="new-rule"]').addEventListener('click', (e) => {
+    document.getElementById('rule-form-root').innerHTML = ruleFormHtml(null);
+    bindRuleFormEvents();
+    document.getElementById('rule-form-root').querySelector('[data-action="submit-rule-form"]')
+      .addEventListener('click', (ev) => submitRuleForm(ev.target, storeId));
+    document.getElementById('rule-form-root').querySelector('[data-action="cancel-rule-form"]')
+      .addEventListener('click', () => { document.getElementById('rule-form-root').innerHTML = ''; });
+  });
+}
+
+// 主選單「待追蹤」徽章：跟 planner.html／followups.html 用同一支 /api/followups 算出來的數字
+async function loadBadge() {
+  try {
+    const d = await get('/api/followups');
+    const el = document.getElementById('badge-followups');
+    const n = d.badges?.followupsDueSoon || 0;
+    if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
+  } catch (e) { /* 徽章載入失敗不影響主要功能，安靜失敗即可 */ }
+}
+
+loadAll();
+loadBadge();
+</script>
+</body>
+</html>

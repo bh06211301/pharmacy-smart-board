@@ -361,7 +361,10 @@
   }
   async function submitRule(btn) {
     const ruleType = document.getElementById('sr-r-type').value;
-    const action = document.getElementById('sr-r-action').value;
+    // 2026-10-31 修正：這個欄位（排程處理）原本送出時叫 action，跟 Worker 轉送 GAS 時用來選路由
+    // 的 action（'addRule'）撞名，會被蓋掉送到 GAS 變成「排程處理不合法：addRule」而新增失敗
+    // （實測踩到，已確認 GAS 端同步改成讀 scheduleAction，兩邊要一起改才會生效）。
+    const scheduleAction = document.getElementById('sr-r-action').value;
     const weekdays = [...document.querySelectorAll('.sr-r-weekday-cb:checked')].map(c => c.value).join('');
     const monthDaysEl = document.getElementById('sr-r-monthdays');
     const monthDays = monthDaysEl ? monthDaysEl.value.trim() : '';
@@ -372,7 +375,7 @@
     const note = document.getElementById('sr-r-note').value.trim();
     const requestId = genRequestId_();
     await withBusy(btn, '新增中…', async () => {
-      await post('/api/rules', { storeId: currentId, ruleType, action, weekdays, monthDays, timeFrom, timeTo, note, source: '自己', requestId });
+      await post('/api/rules', { storeId: currentId, ruleType, scheduleAction, weekdays, monthDays, timeFrom, timeTo, note, source: '自己', requestId });
       toast('已新增');
       await refresh();
     });

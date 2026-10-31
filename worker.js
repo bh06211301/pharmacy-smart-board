@@ -241,12 +241,22 @@ export default {
         return await handleCustomerTiers(env);
       }
 
+      // ★ A2 店家規則管理頁：全部店家＋全部規則（含店名）
+      if (path === '/api/rules' && request.method === 'GET') {
+        return await handleListPlannerRules(env);
+      }
+
       // ★ 店家規則（代理到 GAS 的 addRule/updateRule）
       if (path === '/api/rules' && request.method === 'POST') {
         return await handlePlannerRules(request, env);
       }
 
-      // ★ 待追蹤（代理到 GAS 的 addFollowup/resolveFollowup）
+      // ★ A3 待追蹤管理頁：全部待追蹤（含店名、距上次接觸、對排程的影響）
+      if (path === '/api/followups' && request.method === 'GET') {
+        return await handleListPlannerFollowups(env);
+      }
+
+      // ★ 待追蹤（代理到 GAS 的 addFollowup/resolveFollowup/updateFollowup）
       if (path === '/api/followups' && request.method === 'POST') {
         return await handlePlannerFollowups(request, env);
       }
@@ -399,20 +409,12 @@ async function handleOptimizeRoute(request, env) {
 // ============================================================
 // 3. 藥局清單
 // ============================================================
+// 2026-10-31：改走 fetchGvizSheet() 的既有 KV 快取（60秒 TTL，跟退貨單/客戶合約同一套機制，
+// 不是新發明的）。這支幾乎每個 SmartRoute 端點（/api/plan、/api/store、/api/rules、/api/followups）
+// 都會呼叫，客戶資料變動頻率遠低於60秒一次，快取值得做；只在 wrangler dev 驗證過。
 async function handleGetPharmacies(request, env) {
-  const sheetId = env.SHEET_PHARMACY;
   const sheetName = '新客戶資料表_AppSheet';
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-
-  const res = await fetch(url);
-  const text = await res.text();
-  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
-  const data = JSON.parse(jsonStr);
-
-  const rows = data?.table?.rows || [];
-  const cols = data?.table?.cols || [];
-  const colMap = {};
-  cols.forEach((c, i) => { colMap[c.label] = i; });
+  const { rows, colMap } = await fetchGvizSheet(env.SHEET_PHARMACY, sheetName, env);
 
   const pharmacies = rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';
@@ -1269,19 +1271,11 @@ function needsInvoicing(orderDateStr, now) {
 }
 
 // 共用：讀取訂單主檔所有列
+// 2026-10-31：改走 fetchGvizSheet() 的既有 KV 快取（60秒 TTL，理由同 handleGetPharmacies）——
+// 這是算分數用的大表，/api/plan、/api/store、/api/followups 都會整批讀一次。
 async function fetchOrderMasterRows(env) {
-  const sheetId = env.SHEET_ORDER_MASTER;
-  if (!sheetId) throw new Error('未設定 SHEET_ORDER_MASTER');
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-  const res = await fetch(url);
-  const text = await res.text();
-  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
-  const data = JSON.parse(jsonStr);
-  const rows = data?.table?.rows || [];
-  const cols = data?.table?.cols || [];
-  const colMap = {};
-  cols.forEach((c, i) => { colMap[c.label] = i; });
-  return { rows, colMap };
+  if (!env.SHEET_ORDER_MASTER) throw new Error('未設定 SHEET_ORDER_MASTER');
+  return fetchGvizSheet(env.SHEET_ORDER_MASTER, null, env);
 }
 
 // ============================================================
@@ -1815,9 +1809,15 @@ async function fetchGvizRows(sheetId, sheetName) {
   });
 }
 
+// 2026-10-31 修正：呼叫端常常直接傳 fetchGvizRows() 的 f.get('期限') 這種原始 gviz 格式
+// （例如 "Date(2026,10,2)"），new Date(...) 對這種字串會解析失敗變成 Invalid Date，
+// 回傳 null。但呼叫端幾乎都寫成 `-daysBetween(...)`，JS 對 null 取負號會轉型成 -0（也就是 0），
+// 不會維持 null，造成「只要有填期限，天數差一律被當成 0」——新店待追蹤分數因此永遠落在
+// 「剩3天內」這個最高分級、正式客戶的到期判斷永遠觸發、主選單待追蹤徽章永遠多算。
+// 這裡先用既有的 parseGvizDate() 正規化（它對已經是一般日期字串的輸入是no-op，不影響其他呼叫端）。
 function daysBetween(fromDateStr, toDate) {
   if (!fromDateStr) return null;
-  const from = new Date(String(fromDateStr).replace(/\//g, '-'));
+  const from = new Date(String(parseGvizDate(fromDateStr)).replace(/\//g, '-'));
   if (isNaN(from)) return null;
   return Math.floor((toDate - from) / 86400000);
 }
@@ -2124,6 +2124,21 @@ function scoreFollowups(followupRows, storeId, planDate) {
   return { score: Math.min(score, PLANNER_CONFIG.followupScoreCap), items };
 }
 
+// 主選單「待追蹤」紅色數字徽章＝3天內到期（含逾期）的未完成待追蹤件數，不含「下次經過」這種沒有
+// 具體日期的（算不出「幾天內」）。handlePlannerPlan（A1）跟 handleListPlannerFollowups（A3）都要用
+// 同一個數字，2026-10-31 抽成共用函式，不要兩邊各寫一次同樣的算法。
+function computeFollowupsDueSoonBadge_(followupRows) {
+  const now = new Date();
+  return followupRows.filter(f => {
+    if ((f.get('狀態') || '未完成') !== '未完成') return false;
+    if ((f.get('期限類型') || '下次經過') !== '指定日期前') return false;
+    const deadline = f.get('期限');
+    if (!deadline) return false;
+    const daysUntil = -daysBetween(deadline, now);
+    return daysUntil <= 3;
+  }).length;
+}
+
 async function handlePlannerPlan(request, env) {
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date');
@@ -2356,16 +2371,8 @@ async function handlePlannerPlan(request, env) {
   // Phase 2：主選單紅色數字徽章用的全站統計（跟目前看的規劃日無關，一律以「現在」為準）——
   // 客戶＝倍數≥1.0的家數（DESIGN.md 2.1），待追蹤＝3天內到期件數（含逾期，不含「下次經過」這種沒有
   // 具體日期的，因為算不出「幾天內」）。徽章數字為0時前端不顯示。
-  const now_ = new Date();
   const badgeCustomers = list.filter(item => item.type === 'customer' && item.ratio >= 1).length;
-  const badgeFollowupsDueSoon = followupRows.filter(f => {
-    if ((f.get('狀態') || '未完成') !== '未完成') return false;
-    if ((f.get('期限類型') || '下次經過') !== '指定日期前') return false;
-    const deadline = f.get('期限');
-    if (!deadline) return false;
-    const daysUntil = -daysBetween(deadline, now_);
-    return daysUntil <= 3;
-  }).length;
+  const badgeFollowupsDueSoon = computeFollowupsDueSoonBadge_(followupRows);
 
   return json({
     ok: true,
@@ -2567,6 +2574,141 @@ async function handleStoreDetail(request, env) {
 // wrangler secret（env.PLANNER_API_TOKEN）讀，由 Worker 代填——planner.html／store-drawer.js
 // 只打這支 Worker 端點，永遠不會看到密鑰，也不會直接打 GAS。`{ ...body, action, token }`
 // 故意把 action/token 放在展開之後，就算前端自己塞了同名欄位也會被這裡蓋掉，不是前端說了算。
+// ============================================================
+// A2 店家規則管理頁：全部店家＋全部規則（含店名），左側清單／右側規則卡只讀這一支就夠
+// 2026-10-31：店家清單排除「停用」(死客戶) 跟新竹縣市，但保留「負責人=老爸」的店——老爸的店有固定
+// 提醒規則（送貨還帳單、請款交錢），跟 isEligibleForTiering_（評分用，老爸也排除）不是同一條規則，
+// 不能直接共用那個函式，這裡另外寫一個比較窄的排除條件（使用者 2026-10-31 明確要求保留老爸）。
+// ============================================================
+function visibleForRuleManagement_(p) {
+  if (p.deadReason) return false;
+  if (PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0) return false;
+  return true;
+}
+
+async function handleListPlannerRules(env) {
+  const [pharmaciesRes, ruleRows] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則') : Promise.resolve([]),
+  ]);
+
+  const allPharmacies = (pharmaciesRes.pharmacies || []).filter(visibleForRuleManagement_);
+  const nameById = {}; allPharmacies.forEach(p => { nameById[p.id] = p.name; });
+
+  const rules = ruleRows
+    .filter(r => nameById[r.get('店家代號')]) // 排除掉的店（停用/新竹）連帶不顯示它的規則
+    .map(r => ({
+      ruleId: r.get('規則ID'), storeId: r.get('店家代號'), storeName: nameById[r.get('店家代號')],
+      ruleType: r.get('規則類型'), weekdays: r.get('星期'), monthDays: r.get('每月日期'),
+      timeFrom: r.get('時段起'), timeTo: r.get('時段迄'), note: r.get('說明'),
+      action: r.get('排程處理'), source: r.get('來源'), status: r.get('狀態') || '有效',
+      createdDate: r.get('建立日期') || null,
+    }));
+
+  // 「有規則」篩選只算「有效」規則——停用的規則不代表這家店現在真的有規則在影響排程
+  const ruleCountByStore = {};
+  rules.forEach(r => { if (r.status === '有效') ruleCountByStore[r.storeId] = (ruleCountByStore[r.storeId] || 0) + 1; });
+
+  const stores = allPharmacies.map(p => ({ id: p.id, name: p.name, ruleCount: ruleCountByStore[p.id] || 0 }));
+
+  return json({ ok: true, stores, rules });
+}
+
+// ============================================================
+// A3 待追蹤管理頁：全部待追蹤（不分規劃日），含店名解析、距上次接觸、對排程的影響
+// 2026-10-31：「對排程的影響」刻意不發明新公式——忠實呈現 handlePlannerPlan 已經在用的兩套既有機制的
+// 文字版（使用者確認過方向）：
+//   新店開發：scoreFollowups 的逐筆期限分級點數（加總/封頂之前的中間值，不是另一套公式）
+//   正式客戶：沒有逐筆分數，只有「整店 ×followupMultiplier」或「已到期，列入今天」兩種狀態文字
+// ============================================================
+function resolveFollowupStore_(storeId, pharmacyById, screeningById) {
+  const p = pharmacyById[storeId];
+  if (p) return { storeName: p.name, storeType: 'customer' };
+  const s = screeningById[storeId];
+  if (s) return { storeName: s.name, storeType: 'new-store' };
+  return { storeName: storeId, storeType: 'unknown' };
+}
+
+function followupImpactText_(storeType, deadlineType, deadline, now) {
+  if (storeType === 'new-store') {
+    if ((deadlineType || '下次經過') === '下次經過') {
+      return `+${PLANNER_CONFIG.followupScore.nextVisit}（下次經過）`;
+    }
+    const daysUntil = deadline ? -daysBetween(deadline, now) : null;
+    if (daysUntil === null) return `+${PLANNER_CONFIG.followupScore.dueLater}（期限缺資料）`;
+    if (daysUntil <= 3) return `+${PLANNER_CONFIG.followupScore.dueWithin3Days}（剩${daysUntil}天${daysUntil < 0 ? '，已逾期' : ''}）`;
+    if (daysUntil <= 7) return `+${PLANNER_CONFIG.followupScore.dueWithin7Days}（剩${daysUntil}天）`;
+    return `+${PLANNER_CONFIG.followupScore.dueLater}（剩${daysUntil}天）`;
+  }
+  // 正式客戶（含找不到店家類型時一併保守用這套）：沒有逐筆分數，只有到期/未到期兩種狀態
+  if ((deadlineType || '下次經過') === '指定日期前' && deadline) {
+    const daysUntil = -daysBetween(deadline, now);
+    if (daysUntil <= 0) return '已到期，列入今天';
+  }
+  return `整店 ×${PLANNER_CONFIG.followupMultiplier}`;
+}
+
+async function handleListPlannerFollowups(env) {
+  const now = new Date();
+  const [pharmaciesRes, visitsRes, screeningRows, followupRows, orderData, returnOrderData] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    handleVisitsSummary(env).then(r => r.json()),
+    env.SCREENING_API_TOKEN
+      ? fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json()).then(d => d.rows || [])
+      : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const pharmacyById = {}; allPharmacies.forEach(p => { pharmacyById[p.id] = p; });
+  const screeningById = {}; screeningRows.forEach(r => { screeningById[r.id] = r; });
+  const visitMap = visitsRes.summary || {};
+
+  // 「距上次接觸」要適用所有有待追蹤的店，不只 isEligibleForTiering_ 篩過的子集——
+  // 老爸/新竹/死客戶/不拜訪的店一樣可能掛著待追蹤事項，所以這裡傳全部客戶去建統計，不是 eligible 子集。
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, allPharmacies, now);
+
+  const followups = followupRows.map(f => {
+    const storeId = f.get('店家代號');
+    const { storeName, storeType } = resolveFollowupStore_(storeId, pharmacyById, screeningById);
+    const status = f.get('狀態') || '未完成';
+    const deadlineType = f.get('期限類型') || '下次經過';
+    const deadline = f.get('期限') || null;
+    const visitDate = (visitMap[storeId] || {}).lastDate || '';
+    const orderDate = (statsById[storeId] && statsById[storeId].hasOrders) ? statsById[storeId].lastOrderDate : '';
+    const lastContactDate = laterDateOrNull_(visitDate, orderDate);
+    return {
+      followupId: f.get('待追蹤ID'), storeId, storeName, storeType,
+      item: f.get('事項'), who: f.get('誰交代') || '我',
+      deadlineType, deadline,
+      createdDate: f.get('建立日期') || null,
+      status,
+      resolvedDate: f.get('完成日期') || null,
+      resolvedFrom: f.get('完成來源') || null,
+      lastContactDate: lastContactDate || null,
+      daysSinceLastContact: lastContactDate ? daysBetween(lastContactDate, now) : null,
+      impact: status === '未完成' ? followupImpactText_(storeType, deadlineType, deadline, now) : '—',
+    };
+  });
+
+  // 隨手新增的店名搜尋清單：正式客戶全部（含老爸/新竹/不拜訪，跟 A1 手動加入同一個精神——
+  // 管理頁不該讓這些店連「加一筆待追蹤」都做不到）＋開發中的新店（階段不是「放棄」「轉正式」的）。
+  const addableStores = [
+    ...allPharmacies.map(p => ({ id: p.id, name: p.name, type: 'customer' })),
+    ...screeningRows.filter(r => r.stage && r.stage !== '放棄' && r.stage !== '轉正式')
+      .map(r => ({ id: r.id, name: r.name, type: 'new-store' })),
+  ];
+
+  return json({
+    ok: true,
+    followups,
+    addableStores,
+    badges: { followupsDueSoon: computeFollowupsDueSoonBadge_(followupRows) },
+  });
+}
+
 async function handlePlannerRules(request, env) {
   const body = await request.json();
   const action = body.delete ? 'deleteRule' : (body.ruleId ? 'updateRule' : 'addRule');
@@ -2580,11 +2722,16 @@ async function handlePlannerRules(request, env) {
   return json({ ok: !!data.success, ...data });
 }
 
-// 待追蹤：新增/結案/刪除都轉送 GAS（gas-backend 的 addFollowup/resolveFollowup/deleteFollowup action），
-// token 代填的理由同上。
+// 待追蹤：新增/結案/刪除/修改都轉送 GAS（gas-backend 的 addFollowup/resolveFollowup/deleteFollowup/
+// updateFollowup action），token 代填的理由同上。
+// 2026-10-31：A3「編輯」用明確的 body.action === 'update'（不是用 followupId 存在與否去推斷，
+// 跟 handlePlannerRules 的 ruleId 推斷寫法不一樣——使用者要求這裡要明確，避免未來改欄位時推斷邏輯誤判）。
 async function handlePlannerFollowups(request, env) {
   const body = await request.json();
-  const action = body.delete ? 'deleteFollowup' : (body.resolve ? 'resolveFollowup' : 'addFollowup');
+  const action = body.delete ? 'deleteFollowup'
+    : body.resolve ? 'resolveFollowup'
+    : body.action === 'update' ? 'updateFollowup'
+    : 'addFollowup';
   const res = await fetch(GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
