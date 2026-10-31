@@ -5,11 +5,11 @@
 // 不用重寫。跟主頁面的整合點（「加入今天」按鈕）用 duck typing 偵測 window.addAnchor／
 // window.toggleCol2 是否存在，不存在就顯示提示文字，不會因為掛在別的頁面而整個壞掉。
 //
-// Phase 2 本機測試用：指向 wrangler dev 本機伺服器，不是正式網站。
-// 部署前要改回 'https://still-meadow-0efd.bh06211301.workers.dev'（跟 planner.html／index.html 一致）。
+// WORKER 網址判斷集中在 worker-url.js（window.SR_WORKER_URL），引用這個檔案的頁面都要先載入
+// <script src="worker-url.js"></script>，本機/正式環境會自動判斷，不用手動改。
 // ============================================================
 (function () {
-  const DRAWER_WORKER = 'http://127.0.0.1:8787';
+  const DRAWER_WORKER = window.SR_WORKER_URL;
 
   const RULE_TYPES = ['不拜訪日', '在店時段', '請款規則', '拜訪前先做', '其他提醒'];
   const RULE_ACTIONS = ['擋住', '提醒', '自動調整'];

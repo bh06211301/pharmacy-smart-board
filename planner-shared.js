@@ -2,9 +2,9 @@
 // SmartRoute 規劃流程 v2 — A2/A3 共用的 fetch 函式（docs/SPEC.md 7.1：資料邏輯跟畫面分開，
 // 頁面只負責顯示，不要各自寫一份 fetch）。
 //
-// 2026-10-31：WORKER 網址跟 planner.html／store-drawer.js 在 feature/planner-token 分支上
-// 已經改成的值同一個來源（直接抄同樣的字串，不是另外發明一套環境判斷邏輯）——目前是本機測試用的
-// 固定值，部署前要跟那兩個檔案一起改回正式網址（CLAUDE.md 待辦已經記過這件事）。
+// WORKER 網址判斷集中在 worker-url.js（window.SR_WORKER_URL），引用這個檔案的頁面都要先載入
+// <script src="worker-url.js"></script>，本機/正式環境會自動判斷，不用手動改、也不用三個檔案
+// 各寫一份判斷邏輯。
 // 密鑰（PLANNER_API_TOKEN）完全不在前端出現：寫入一律打這支 Worker 自己的端點（/api/rules、
 // /api/followups），Worker 收到後才會代填 token 轉送給 GAS，前端的 post() 不用、也不會碰到密鑰。
 //
@@ -13,7 +13,7 @@
 // docs/SPEC.md 第11節），之後要合併時這三份都要一起看。
 // ============================================================
 (function () {
-  const WORKER = 'http://127.0.0.1:8787';
+  const WORKER = window.SR_WORKER_URL;
 
   function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

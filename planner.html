@@ -300,10 +300,9 @@
   </div>
 </div>
 
+<script src="worker-url.js"></script>
 <script>
-// Phase 2 本機測試用：指向 wrangler dev 本機伺服器，不是正式網站。
-// 部署前要改回 'https://still-meadow-0efd.bh06211301.workers.dev'（跟 index.html 一致）。
-const WORKER = 'http://127.0.0.1:8787';
+const WORKER = window.SR_WORKER_URL;
 
 function fmtHeaderDate(d) {
   const wd = ['日','一','二','三','四','五','六'][d.getDay()];
