@@ -43,6 +43,11 @@
   .col-right { flex: 1; min-width: 0; }
   .col-body { padding: var(--sr-space-7); }
 
+  .store-search-input {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+    margin-bottom: var(--sr-space-4);
+  }
   .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
   .filter-pill {
     height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
@@ -98,6 +103,21 @@
   .weekday-cb-group { display: flex; gap: 6px; flex-wrap: wrap; }
   .weekday-cb-group label { display: flex; align-items: center; gap: 2px; width: auto; font-size: var(--sr-text-xs); }
   .weekday-cb-group input { width: auto; height: auto; }
+
+  /* 頁頂「＋新增規則」：搜尋店家＋規則表單，跟 followups.html 隨手新增同一套搜尋外觀（class名故意一樣） */
+  .quick-add-rule-panel { padding: var(--sr-space-6) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); background: var(--sr-bg-subtle); }
+  .quick-add-rule-search { position: relative; max-width: 360px; }
+  .quick-add-rule-search input {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+  }
+  .quick-add-results {
+    position: absolute; top: 46px; left: 0; width: 100%; max-height: 220px; overflow-y: auto;
+    background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); z-index: 5;
+  }
+  .quick-add-result-row { padding: var(--sr-space-3) var(--sr-space-4); font-size: var(--sr-text-sm); cursor: pointer; border-bottom: 1px solid var(--sr-line-row); }
+  .quick-add-result-row:hover { background: var(--sr-bg-subtle); }
+  .quick-add-picked { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -120,11 +140,22 @@
 
 <div class="page-header">
   <span class="page-header-title">店家規則</span>
+  <button class="sr-btn-sm" id="btn-toggle-new-rule" style="margin-left:auto">＋新增規則</button>
+</div>
+
+<div class="quick-add-rule-panel" id="quick-add-rule-panel" hidden>
+  <div class="quick-add-rule-search">
+    <input type="text" id="qnr-store-input" placeholder="搜尋店家（店名或代號）" autocomplete="off">
+    <div id="qnr-store-results" class="quick-add-results" hidden></div>
+    <div id="qnr-store-picked" class="quick-add-picked"></div>
+  </div>
+  <div id="qnr-form-root"></div>
 </div>
 
 <div class="columns">
   <div class="col-left">
     <div class="col-body">
+      <input type="text" id="store-search-input" class="store-search-input" placeholder="搜尋店名或代號" autocomplete="off">
       <div class="filter-pills" id="store-filter-pills">
         <button class="filter-pill active" data-filter="has-rule">有規則</button>
         <button class="filter-pill" data-filter="all">全部</button>
@@ -141,7 +172,7 @@
 <script src="worker-url.js"></script>
 <script src="planner-shared.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch } = window.PlannerAPI;
 
 const RULE_TYPES = ['不拜訪日', '在店時段', '請款規則', '拜訪前先做', '其他提醒'];
 const RULE_ACTIONS = ['擋住', '提醒', '自動調整'];
@@ -152,6 +183,8 @@ const DEFAULT_ACTION_BY_TYPE = { 不拜訪日: '擋住', 在店時段: '自動�
 let allData = null;      // /api/rules 的完整回應
 let storeFilter = 'has-rule';
 let selectedStoreId = null;
+let storeSearchQuery = '';   // 2026-11-01：左側清單搜尋框，切換篩選膠囊時不清空
+let newRulePickedStore = null; // 2026-11-01：頁頂「＋新增規則」目前選到的店
 
 async function loadAll() {
   try {
@@ -173,6 +206,13 @@ document.getElementById('store-filter-pills').addEventListener('click', (e) => {
   if (btn) setStoreFilter(btn.dataset.filter);
 });
 
+// 2026-11-01：搜尋框跟篩選膠囊各自獨立——切「有規則/全部」膠囊時不清空搜尋文字，搜尋框本身
+// 也不放在 renderStoreList() 重繪的範圍內（它在 #store-list-root 外面），所以天生就不會被清掉。
+document.getElementById('store-search-input').addEventListener('input', (e) => {
+  storeSearchQuery = e.target.value.trim();
+  renderStoreList();
+});
+
 function renderStoreList() {
   const root = document.getElementById('store-list-root');
   if (!allData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
@@ -182,7 +222,8 @@ function renderStoreList() {
     return;
   }
 
-  const stores = storeFilter === 'has-rule' ? allData.stores.filter(s => s.ruleCount > 0) : allData.stores;
+  let stores = storeFilter === 'has-rule' ? allData.stores.filter(s => s.ruleCount > 0) : allData.stores;
+  if (storeSearchQuery) stores = stores.filter(s => s.name.includes(storeSearchQuery) || s.id.includes(storeSearchQuery));
   if (!stores.length) { root.innerHTML = '<div class="empty-hint">沒有符合條件的店家</div>'; return; }
 
   root.innerHTML = stores
@@ -282,7 +323,10 @@ function bindRuleFormEvents() {
 // 2026-10-31：送出的「排程處理」欄位叫 scheduleAction，不能叫 action——那會跟 Worker 轉送 GAS 時
 // 用來選路由的 action（'addRule'/'updateRule'）撞名，蓋掉之後 GAS 收到的排程處理值就變成路由字串，
 // 驗證失敗（已實測踩到，GAS 端 handleAddRule_/handleUpdateRule_ 同步改成讀 scheduleAction）。
-async function submitRuleForm(btn, storeId) {
+// 2026-11-01：加第3個參數 onSuccess（選填），只在真的送出成功（post沒丟錯）時呼叫——頁頂「＋新增規則」
+// 要在成功後關閉搜尋面板，但失敗時要讓表單留著讓使用者修正重試，不能無條件關掉。左側既有的
+// 編輯/新增規則呼叫端不傳這個參數，行為跟原來一樣不受影響。
+async function submitRuleForm(btn, storeId, onSuccess) {
   const ruleId = document.getElementById('rf-rule-id').value || null;
   const ruleType = document.getElementById('rf-type').value;
   const scheduleAction = document.getElementById('rf-action').value;
@@ -300,6 +344,7 @@ async function submitRuleForm(btn, storeId) {
     }
     toast(ruleId ? '已儲存' : '已新增');
     await loadAll();
+    if (onSuccess) onSuccess();
   });
 }
 
@@ -362,6 +407,52 @@ async function loadBadge() {
     if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
   } catch (e) { /* 徽章載入失敗不影響主要功能，安靜失敗即可 */ }
 }
+
+// ---------- 頁頂「＋新增規則」----------
+// 2026-11-01：搜尋範圍只限左側清單已經載入的正式客戶（allData.stores），不含開發中新店——
+// 原因記在 docs/SPEC.md：新店轉正式後代號會從篩選分頁列ID換成正式客戶代號，掛在列ID上的規則會
+// 脫鉤，之後真的要開放要連同「轉正式時搬移規則」一起設計，這次先不做。
+function resetNewRulePanel() {
+  newRulePickedStore = null;
+  document.getElementById('qnr-store-input').value = '';
+  document.getElementById('qnr-store-picked').textContent = '';
+  document.getElementById('qnr-form-root').innerHTML = '';
+  document.getElementById('qnr-store-results').hidden = true;
+}
+
+document.getElementById('btn-toggle-new-rule').addEventListener('click', () => {
+  const panel = document.getElementById('quick-add-rule-panel');
+  panel.hidden = !panel.hidden;
+  if (panel.hidden) resetNewRulePanel();
+});
+
+bindStoreSearch({
+  input: document.getElementById('qnr-store-input'),
+  results: document.getElementById('qnr-store-results'),
+  getStores: () => allData?.stores || [],
+  onPick: (s) => {
+    newRulePickedStore = s;
+    const formRoot = document.getElementById('qnr-form-root');
+    formRoot.innerHTML = '';
+    if (!s) { document.getElementById('qnr-store-picked').textContent = ''; return; }
+    document.getElementById('qnr-store-picked').textContent = `已選：${s.name}（${s.id}）`;
+    document.getElementById('qnr-store-input').value = s.name;
+    formRoot.innerHTML = ruleFormHtml(null);
+    bindRuleFormEvents();
+    formRoot.querySelector('[data-action="submit-rule-form"]').addEventListener('click', (e) => {
+      submitRuleForm(e.target, s.id, () => {
+        selectedStoreId = s.id;
+        renderStoreList();
+        renderDetail(s.id);
+        document.getElementById('quick-add-rule-panel').hidden = true;
+        resetNewRulePanel();
+      });
+    });
+    formRoot.querySelector('[data-action="cancel-rule-form"]').addEventListener('click', () => {
+      formRoot.innerHTML = '';
+    });
+  },
+});
 
 loadAll();
 loadBadge();

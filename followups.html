@@ -139,7 +139,7 @@
 <script src="planner-shared.js"></script>
 <script src="store-drawer.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch } = window.PlannerAPI;
 
 let allData = null;    // /api/followups 的完整回應
 let statusFilter = 'pending';
@@ -288,29 +288,19 @@ async function saveEdit(btn, followupId) {
 }
 
 // ---------- 隨手新增 ----------
-function onStoreInput() {
-  const q = document.getElementById('qa-store-input').value.trim();
-  const resultsEl = document.getElementById('qa-store-results');
-  pickedStore = null;
-  document.getElementById('qa-store-picked').textContent = '';
-  if (!q || !allData) { resultsEl.hidden = true; return; }
-  const matched = (allData.addableStores || []).filter(s => s.name.includes(q) || s.id.includes(q)).slice(0, 15);
-  if (!matched.length) { resultsEl.hidden = true; return; }
-  resultsEl.hidden = false;
-  resultsEl.innerHTML = matched.map(s => `<div class="quick-add-result-row" data-id="${escapeHtml(s.id)}">
-    ${escapeHtml(s.name)}（${escapeHtml(s.id)}）${s.type === 'new-store' ? '　<span style="color:var(--sr-ink-3)">開發中</span>' : ''}
-  </div>`).join('');
-  resultsEl.querySelectorAll('[data-id]').forEach(row => {
-    row.addEventListener('click', () => {
-      const s = matched.find(x => x.id === row.dataset.id);
-      pickedStore = s;
-      document.getElementById('qa-store-input').value = s.name;
-      document.getElementById('qa-store-picked').textContent = `已選：${s.name}（${s.id}）`;
-      resultsEl.hidden = true;
-    });
-  });
-}
-document.getElementById('qa-store-input').addEventListener('input', onStoreInput);
+// 2026-11-01：店名搜尋的過濾/下拉/點選邏輯搬到 planner-shared.js 的 bindStoreSearch()，
+// 跟 store-rules.html「＋新增規則」共用同一份，這裡只負責資料來源（含開發中新店）跟選到後的狀態更新。
+bindStoreSearch({
+  input: document.getElementById('qa-store-input'),
+  results: document.getElementById('qa-store-results'),
+  getStores: () => allData?.addableStores || [],
+  renderLabel: s => `${escapeHtml(s.name)}（${escapeHtml(s.id)}）${s.type === 'new-store' ? '　<span style="color:var(--sr-ink-3)">開發中</span>' : ''}`,
+  onPick: (s) => {
+    pickedStore = s;
+    document.getElementById('qa-store-picked').textContent = s ? `已選：${s.name}（${s.id}）` : '';
+    if (s) document.getElementById('qa-store-input').value = s.name;
+  },
+});
 document.getElementById('qa-deadline-type').addEventListener('change', () => {
   document.getElementById('qa-deadline').disabled = document.getElementById('qa-deadline-type').value !== '指定日期前';
 });

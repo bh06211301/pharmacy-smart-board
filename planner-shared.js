@@ -64,6 +64,36 @@
     return 'r' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
   }
 
+  // 2026-11-01：店名搜尋下拉元件，從 followups.html 原本的 onStoreInput() 抽出來——
+  // store-rules.html「＋新增規則」跟 followups.html「隨手新增」都是同一種互動（文字輸入→過濾→
+  // 下拉候選→點選），資料來源不同（A2 只搜正式客戶，A3 含開發中新店），所以用 getStores() 由呼叫端
+  // 決定要搜哪份清單，比對/渲染/點選這段共用一份。
+  // 每次輸入都先呼叫 onPick(null)，讓呼叫端清掉上次選到的店（跟原本 onStoreInput() 行為一致：
+  // 使用者一旦又開始打字，先前選到的店就該視為失效，不能讓舊的 pickedStore 殘留）。
+  function bindStoreSearch({ input, results, getStores, onPick, renderLabel }) {
+    function defaultLabel(s) { return `${escapeHtml(s.name)}（${escapeHtml(s.id)}）`; }
+    function onInput() {
+      const q = input.value.trim();
+      onPick(null);
+      if (!q) { results.hidden = true; results.innerHTML = ''; return; }
+      const stores = getStores() || [];
+      const matched = stores.filter(s => s.name.includes(q) || s.id.includes(q)).slice(0, 15);
+      if (!matched.length) { results.hidden = true; results.innerHTML = ''; return; }
+      results.hidden = false;
+      results.innerHTML = matched.map(s => `<div class="quick-add-result-row" data-id="${escapeHtml(s.id)}">
+        ${renderLabel ? renderLabel(s) : defaultLabel(s)}
+      </div>`).join('');
+      results.querySelectorAll('[data-id]').forEach(row => {
+        row.addEventListener('click', () => {
+          const s = matched.find(x => x.id === row.dataset.id);
+          results.hidden = true;
+          onPick(s);
+        });
+      });
+    }
+    input.addEventListener('input', onInput);
+  }
+
   // toast 的樣式獨立注入一次，不靠頁面自己的 <style> 區塊（A2/A3 都會用到）
   const style = document.createElement('style');
   style.textContent = `
@@ -75,5 +105,5 @@
   `;
   document.head.appendChild(style);
 
-  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId };
+  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch };
 })();
