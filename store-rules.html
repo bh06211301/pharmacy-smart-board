@@ -48,6 +48,11 @@
     padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
     margin-bottom: var(--sr-space-4);
   }
+  .region-filter-select {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+    margin-bottom: var(--sr-space-4); background: var(--sr-bg);
+  }
   .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
   .filter-pill {
     height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
@@ -66,6 +71,24 @@
   .store-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .store-list-count { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; }
   .store-list-owner { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; }
+
+  /* 2026-11-01：市/區兩層分組，兩層都可以各自收合（localStorage 記住收合狀態） */
+  .region-group { margin-bottom: var(--sr-space-3); }
+  .region-group-header {
+    display: flex; align-items: center; gap: var(--sr-space-3); cursor: pointer; user-select: none;
+    padding: var(--sr-space-3) var(--sr-space-2); font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold);
+  }
+  .region-group-header:hover { background: var(--sr-bg-selected); border-radius: var(--sr-radius-sm); }
+  .region-toggle-icon { width: 12px; flex-shrink: 0; color: var(--sr-ink-3); font-size: var(--sr-text-2xs); }
+  .region-group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .region-group-count { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; }
+  .region-group-body { padding-left: var(--sr-space-5); }
+  .district-group-header {
+    display: flex; align-items: center; gap: var(--sr-space-3); cursor: pointer; user-select: none;
+    padding: var(--sr-space-2) var(--sr-space-2); font-size: var(--sr-text-xs); color: var(--sr-ink-2);
+  }
+  .district-group-header:hover { background: var(--sr-bg-selected); border-radius: var(--sr-radius-sm); }
+  .district-group-body { padding-left: var(--sr-space-4); }
 
   .empty-hint {
     font-size: var(--sr-text-sm); color: var(--sr-ink-3);
@@ -142,6 +165,9 @@
   <div class="col-left">
     <div class="col-body">
       <input type="text" id="store-search-input" class="store-search-input" placeholder="搜尋店名或代號" autocomplete="off">
+      <select id="region-filter-select" class="region-filter-select">
+        <option value="all">全部地區</option>
+      </select>
       <div class="filter-pills" id="store-filter-pills">
         <button class="filter-pill active" data-filter="has-rule">有規則</button>
         <button class="filter-pill" data-filter="all">全部</button>
@@ -159,7 +185,7 @@
 <script src="planner-shared.js"></script>
 <script src="planner-nav.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch } = window.PlannerAPI;
+const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch, groupStoresByRegion } = window.PlannerAPI;
 window.SRNav.render({ active: 'rules' });
 
 const RULE_TYPES = ['不拜訪日', '在店時段', '請款規則', '拜訪前先做', '其他提醒'];
@@ -172,11 +198,27 @@ let allData = null;      // /api/rules 的完整回應
 let storeFilter = 'has-rule';
 let selectedStoreId = null;
 let storeSearchQuery = '';   // 2026-11-01：左側清單搜尋框，切換篩選膠囊時不清空
+let regionFilter = 'all';    // 2026-11-01：'all' | city | 'city|district'，三個篩選條件互不清除
 let newRulePickedStore = null; // 2026-11-01：頁頂「＋新增規則」目前選到的店
+
+// 2026-11-01：分組收合狀態存 localStorage，讀寫都包 try/catch——讀不到（無痕視窗/被擋）就當全部展開，
+// 不要讓存取失敗變成白畫面。key 是 city（市層）或 city+'|'+district（區層）。
+const COLLAPSE_STORAGE_KEY = 'sr-store-rules-collapsed-regions';
+function loadCollapsedGroups() {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) { return new Set(); }
+}
+function saveCollapsedGroups() {
+  try { localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...collapsedGroups])); } catch (e) {}
+}
+let collapsedGroups = loadCollapsedGroups();
 
 async function loadAll() {
   try {
     allData = await get('/api/rules');
+    renderRegionOptions();
     renderStoreList();
     if (selectedStoreId) renderDetail(selectedStoreId);
   } catch (e) {
@@ -201,6 +243,73 @@ document.getElementById('store-search-input').addEventListener('input', (e) => {
   renderStoreList();
 });
 
+// 2026-11-01：區域下拉選單，選項用「全部正式客戶」（不受搜尋/篩選膠囊影響）建立，按市分 optgroup，
+// 每個市第一個選項是「市（全部）」可以選整個市，底下接各區可以只選某一區。
+function renderRegionOptions() {
+  const sel = document.getElementById('region-filter-select');
+  if (!allData) return;
+  const grouped = groupStoresByRegion(allData.stores);
+  sel.innerHTML = '<option value="all">全部地區</option>' + grouped.map(g => `
+    <optgroup label="${escapeHtml(g.city)}">
+      <option value="${escapeHtml(g.city)}">${escapeHtml(g.city)}（全部）</option>
+      ${g.districts.map(d => `<option value="${escapeHtml(g.city)}|${escapeHtml(d.district)}">${escapeHtml(d.district)}</option>`).join('')}
+    </optgroup>
+  `).join('');
+  sel.value = regionFilter;
+  if (sel.value !== regionFilter) { regionFilter = 'all'; sel.value = 'all'; } // 選到的地區資料消失了（例如店被刪）就退回全部
+}
+document.getElementById('region-filter-select').addEventListener('change', (e) => {
+  regionFilter = e.target.value;
+  renderStoreList();
+});
+
+function matchesRegion(s) {
+  if (regionFilter === 'all') return true;
+  const [city, district] = regionFilter.split('|');
+  const normalizedCity = String(s.city || '').replace(/臺/g, '台').trim();
+  if (normalizedCity !== city) return false;
+  if (district && String(s.district || '').trim() !== district) return false;
+  return true;
+}
+
+function storeItemHtml(s) {
+  return `<div class="store-list-item ${s.id === selectedStoreId ? 'selected' : ''}" data-store-id="${escapeHtml(s.id)}">
+    <span class="store-list-name">${escapeHtml(s.name)}</span>
+    <span class="store-list-count">${s.ruleCount > 0 ? s.ruleCount + ' 條' : ''}</span>
+  </div>`;
+}
+
+function regionGroupsHtml(grouped) {
+  return grouped.map(g => {
+    const cityCollapsed = collapsedGroups.has(g.city);
+    return `<div class="region-group">
+      <div class="region-group-header" data-toggle-key="${escapeHtml(g.city)}">
+        <span class="region-toggle-icon">${cityCollapsed ? '▸' : '▾'}</span>
+        <span class="region-group-title">${escapeHtml(g.city)}</span>
+        <span class="region-group-count">${g.count} 家</span>
+      </div>
+      <div class="region-group-body" ${cityCollapsed ? 'hidden' : ''}>
+        ${g.districts.map(d => {
+          const districtKey = g.city + '|' + d.district;
+          const districtCollapsed = collapsedGroups.has(districtKey);
+          return `<div class="district-group">
+            <div class="district-group-header" data-toggle-key="${escapeHtml(districtKey)}">
+              <span class="region-toggle-icon">${districtCollapsed ? '▸' : '▾'}</span>
+              <span class="region-group-title">${escapeHtml(d.district)}</span>
+              <span class="region-group-count">${d.count} 家</span>
+            </div>
+            <div class="district-group-body" ${districtCollapsed ? 'hidden' : ''}>
+              ${d.stores.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).map(storeItemHtml).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// 2026-11-01：搜尋／篩選膠囊／區域三個條件同時 AND 套用，過濾完才分組顯示——三者互不清除，
+// 各自存在自己的變數（storeSearchQuery／storeFilter／regionFilter），互相切換不會動到對方。
 function renderStoreList() {
   const root = document.getElementById('store-list-root');
   if (!allData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
@@ -212,16 +321,19 @@ function renderStoreList() {
 
   let stores = storeFilter === 'has-rule' ? allData.stores.filter(s => s.ruleCount > 0) : allData.stores;
   if (storeSearchQuery) stores = stores.filter(s => s.name.includes(storeSearchQuery) || s.id.includes(storeSearchQuery));
+  stores = stores.filter(matchesRegion);
   if (!stores.length) { root.innerHTML = '<div class="empty-hint">沒有符合條件的店家</div>'; return; }
 
-  root.innerHTML = stores
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
-    .map(s => `<div class="store-list-item ${s.id === selectedStoreId ? 'selected' : ''}" data-store-id="${escapeHtml(s.id)}">
-      <span class="store-list-name">${escapeHtml(s.name)}</span>
-      <span class="store-list-count">${s.ruleCount > 0 ? s.ruleCount + ' 條' : ''}</span>
-    </div>`).join('');
+  root.innerHTML = regionGroupsHtml(groupStoresByRegion(stores));
 
+  root.querySelectorAll('[data-toggle-key]').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.dataset.toggleKey;
+      if (collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
+      saveCollapsedGroups();
+      renderStoreList();
+    });
+  });
   root.querySelectorAll('.store-list-item').forEach(el => {
     el.addEventListener('click', () => {
       selectedStoreId = el.dataset.storeId;

@@ -2613,7 +2613,9 @@ async function handleListPlannerRules(env) {
   const ruleCountByStore = {};
   rules.forEach(r => { if (r.status === '有效') ruleCountByStore[r.storeId] = (ruleCountByStore[r.storeId] || 0) + 1; });
 
-  const stores = allPharmacies.map(p => ({ id: p.id, name: p.name, ruleCount: ruleCountByStore[p.id] || 0 }));
+  // 2026-11-01：加 city/district 給 A2 左側清單的「市→區」分組用（store-rules.html），正規化
+  // （臺→台）交給前端 planner-shared.js 的 groupStoresByRegion() 做，這裡維持原始欄位值。
+  const stores = allPharmacies.map(p => ({ id: p.id, name: p.name, ruleCount: ruleCountByStore[p.id] || 0, city: p.city, district: p.district }));
 
   return json({ ok: true, stores, rules });
 }

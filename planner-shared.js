@@ -94,6 +94,39 @@
     input.addEventListener('input', onInput);
   }
 
+  // 2026-11-01：店家依「市→區」分組，A2 左側清單在用，之後 A7 客戶總覽也要用，所以放這裡共用，
+  // 不是只給 A2 用的一次性函式。只正規化「臺→台」——查過正式客戶資料表136家店，縣市/行政區兩欄
+  // 都沒有空白（不用處理「缺區域」的例外），但「台北市」有29家、「臺北市」有2家（C129大鳥藥局、
+  // C132天蓮藥局）混用同一個字的繁簡寫法，其他縣市沒有這個問題。這裡沿用 gas-backend/
+  // VisitAppWebhook.js 的 normKey_() 已經在用的同一個正規化規則（臺→台），不是另外發明一套；
+  // 原始資料本身使用者會自己去 AppSheet 改掉，這裡的正規化只是前端分組顯示用的防呆，長期都留著。
+  function normalizeCity(city) {
+    return String(city || '').replace(/臺/g, '台').trim();
+  }
+
+  // 回傳依「市→區」兩層分組的結構，市/區都依字母排序：
+  // [{ city, count, districts: [{ district, count, stores }] }]
+  function groupStoresByRegion(stores) {
+    const cityMap = new Map();
+    (stores || []).forEach(s => {
+      const city = normalizeCity(s.city) || '（未分類）';
+      const district = String(s.district || '').trim() || '（未分類）';
+      if (!cityMap.has(city)) cityMap.set(city, new Map());
+      const districtMap = cityMap.get(city);
+      if (!districtMap.has(district)) districtMap.set(district, []);
+      districtMap.get(district).push(s);
+    });
+    return [...cityMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'))
+      .map(([city, districtMap]) => {
+        const districts = [...districtMap.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'))
+          .map(([district, list]) => ({ district, count: list.length, stores: list }));
+        const count = districts.reduce((sum, d) => sum + d.count, 0);
+        return { city, count, districts };
+      });
+  }
+
   // toast 的樣式獨立注入一次，不靠頁面自己的 <style> 區塊（A2/A3 都會用到）
   const style = document.createElement('style');
   style.textContent = `
@@ -105,5 +138,5 @@
   `;
   document.head.appendChild(style);
 
-  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch };
+  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch, normalizeCity, groupStoresByRegion };
 })();
