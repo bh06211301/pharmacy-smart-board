@@ -235,25 +235,7 @@
 </head>
 <body>
 
-<nav class="nav">
-  <span class="nav-brand">SmartRoute</span>
-  <div class="nav-tabs">
-    <a class="nav-tab active" href="planner.html">今天</a>
-    <span class="nav-tab disabled" title="排在之後的階段才做">本週</span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">本月</span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">客戶<span id="badge-customers" class="nav-badge" hidden></span></span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">新店開發</span>
-    <div class="nav-divider"></div>
-    <span class="nav-manage-label">管理</span>
-    <a class="nav-tab" href="store-rules.html">店家規則</a>
-    <a class="nav-tab" href="followups.html">待追蹤<span id="badge-followups" class="nav-badge" hidden></span></a>
-  </div>
-  <div class="nav-right">
-    <input type="date" id="plan-date-input" class="plan-date-input">
-    <input type="text" id="find-pharmacy-input" class="find-pharmacy-input" placeholder="找藥局" disabled title="店家檔案抽屜做好後開放">
-    <a class="nav-manage-link" href="index.html" title="切回舊版月曆/今日清單畫面">切回舊版</a>
-  </div>
-</nav>
+<nav class="nav" id="app-nav"></nav>
 
 <div class="page-header">
   <span class="page-header-date" id="page-header-date">10/27（二）</span>
@@ -302,8 +284,19 @@
 </div>
 
 <script src="worker-url.js"></script>
+<script src="planner-nav.js"></script>
 <script>
 const WORKER = window.SR_WORKER_URL;
+
+// 2026-11-01：主選單改共用元件（planner-nav.js），extraRight 放這頁才有的規劃日期選擇器／找藥局框，
+// 要在 initHeader() 用到 #plan-date-input 之前先把 nav 灌進去，不然抓不到元素。
+window.SRNav.render({
+  active: 'today',
+  extraRight: `
+    <input type="date" id="plan-date-input" class="plan-date-input">
+    <input type="text" id="find-pharmacy-input" class="find-pharmacy-input" placeholder="找藥局" disabled title="店家檔案抽屜做好後開放">
+  `,
+});
 
 function fmtHeaderDate(d) {
   const wd = ['日','一','二','三','四','五','六'][d.getDay()];
@@ -428,16 +421,6 @@ let anchors = [];          // 第①欄目前的錨點清單（系統自動＋�
 let selectedCol2Ids = new Set(); // 第②欄目前勾選、要排進路線的店家 id
 
 function anchorIds() { return new Set(anchors.map(a => a.id)); }
-
-// 主選單紅色數字徽章（DESIGN.md 2.1）：數字來自 /api/plan 回傳的 badges，0 時不顯示。
-function renderNavBadges() {
-  const b = planData?.badges || {};
-  [['badge-customers', b.customers], ['badge-followups', b.followupsDueSoon]].forEach(([elId, n]) => {
-    const el = document.getElementById(elId);
-    if (!el) return;
-    if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
-  });
-}
 
 // ══════════════════════════════
 // 第②欄：順路可以補
@@ -766,7 +749,6 @@ async function loadPlan() {
     const [plan] = await Promise.all([get('/api/plan?date=' + getPlanDate()), loadAllPharmacies()]);
     planData = plan;
     anchors = planData.anchors || [];
-    renderNavBadges();
     renderMiniCal();
     renderAnchors();
     renderRecommend();
@@ -779,6 +761,7 @@ async function loadPlan() {
 document.getElementById('manual-add-input').addEventListener('input', onManualAddInput);
 renderMiniCal();
 loadPlan();
+window.SRNav.loadBadges();
 
 // ══════════════════════════════
 // 第③欄：順序與時間

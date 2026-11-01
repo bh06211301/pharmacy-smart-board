@@ -91,21 +91,7 @@
 </head>
 <body>
 
-<nav class="nav">
-  <span class="nav-brand">SmartRoute</span>
-  <div class="nav-tabs">
-    <a class="nav-tab" href="planner.html">今天</a>
-    <span class="nav-tab disabled" title="排在之後的階段才做">本週</span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">本月</span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">客戶</span>
-    <span class="nav-tab disabled" title="排在之後的階段才做">新店開發</span>
-    <div class="nav-divider"></div>
-    <span class="nav-manage-label">管理</span>
-    <a class="nav-tab" href="store-rules.html">店家規則</a>
-    <a class="nav-tab active" href="followups.html">待追蹤<span id="badge-followups" class="nav-badge" hidden></span></a>
-  </div>
-  <div class="nav-right"></div>
-</nav>
+<nav class="nav" id="app-nav"></nav>
 
 <div class="page-header">
   <span class="page-header-title">待追蹤</span>
@@ -137,9 +123,11 @@
 
 <script src="worker-url.js"></script>
 <script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
 <script src="store-drawer.js"></script>
 <script>
 const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch } = window.PlannerAPI;
+window.SRNav.render({ active: 'followups' });
 
 let allData = null;    // /api/followups 的完整回應
 let statusFilter = 'pending';
@@ -150,16 +138,9 @@ async function loadAll() {
   try {
     allData = await get('/api/followups');
     renderTable();
-    renderBadge();
   } catch (e) {
     document.getElementById('table-root').innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
   }
-}
-
-function renderBadge() {
-  const el = document.getElementById('badge-followups');
-  const n = allData?.badges?.followupsDueSoon || 0;
-  if (n > 0) { el.textContent = n; el.hidden = false; } else { el.hidden = true; }
 }
 
 document.getElementById('status-filter-pills').addEventListener('click', (e) => {
@@ -326,6 +307,7 @@ async function submitQuickAdd() {
 document.getElementById('qa-submit').addEventListener('click', submitQuickAdd);
 
 loadAll();
+window.SRNav.loadBadges();
 </script>
 </body>
 </html>

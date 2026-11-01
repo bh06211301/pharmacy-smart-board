@@ -2371,7 +2371,11 @@ async function handlePlannerPlan(request, env) {
   // Phase 2：主選單紅色數字徽章用的全站統計（跟目前看的規劃日無關，一律以「現在」為準）——
   // 客戶＝倍數≥1.0的家數（DESIGN.md 2.1），待追蹤＝3天內到期件數（含逾期，不含「下次經過」這種沒有
   // 具體日期的，因為算不出「幾天內」）。徽章數字為0時前端不顯示。
+  // 2026-11-01：新加「新店開發」徽章（SPEC 6.1「卡住家數」，原本這份規格從沒定義過公式，程式碼裡
+  // 也沒有「卡住」的既有實作）——使用者確認比照「客戶」徽章同一套標準：新店（type==='new-store'）
+  // 倍數≥1.0（代表已經超過該階段的建議間隔天數，進度卡住了），不是另外發明一套門檻。
   const badgeCustomers = list.filter(item => item.type === 'customer' && item.ratio >= 1).length;
+  const badgeNewStoreStuck = list.filter(item => item.type === 'new-store' && item.ratio >= 1).length;
   const badgeFollowupsDueSoon = computeFollowupsDueSoonBadge_(followupRows);
 
   return json({
@@ -2379,7 +2383,7 @@ async function handlePlannerPlan(request, env) {
     date: dateKey,
     recommended: list,
     anchors, route,
-    badges: { customers: badgeCustomers, followupsDueSoon: badgeFollowupsDueSoon },
+    badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
     note: '2026-10-27 第二版：倍數改用「最後接觸日」(拜訪或叫貨取較近)，兩者都沒有固定倍數1.0；分級決定間隔；倍數≥1用倍數×月均排序不設上限；到期待追蹤移入 anchors 不參加排名，未到期的乘上 followupMultiplier；還沒套用 2 公里錨點半徑篩選；老爸/新竹縣市/狀態=不拜訪 已排除在推薦外，要在 A1 手動加成送貨錨點（等 A1 錨點 UI 做出來再接）。Phase 2：anchors/route 若當天已存檔會蓋掉系統預設值，見 /api/plan POST',
   });
