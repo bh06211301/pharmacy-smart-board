@@ -1841,11 +1841,18 @@ function ratioTierOf(ratio) {
 //   - F 欄「縣市」在 PLANNER_CONFIG.excludedCities（新竹縣/新竹市）：C130 艾美藥局縣市欄本來就是新竹縣，
 //     這條規則已經會抓到它，不用另開例外清單。
 //   - C 欄「狀態」＝不拜訪：手動標記（目前 C135、C047 已填），取代原本叫「其他通路」的名字。
+// 2026-11-01：「不拜訪」特別通路排除（例：C135政治大學選舉研究中心、C047——SPEC.md 4.5 記過的
+// 手動標記），A1 評分跟 A2 店家規則清單都要排除，且這條判斷優先於「負責人=老爸保留」：不拜訪的店
+// 即使負責人不是老爸也要排除，老爸的店只有在「不是不拜訪」時才保留在 A2。兩邊共用這支，不要各寫一次。
+function isMarkedDoNotVisit_(p) {
+  return p.status === '不拜訪';
+}
+
 function isEligibleForTiering_(p) {
   if (p.deadReason) return false;
+  if (isMarkedDoNotVisit_(p)) return false;
   if (p.owner === '老爸') return false;
   if (PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0) return false;
-  if (p.status === '不拜訪') return false;
   return true;
 }
 
@@ -2583,9 +2590,13 @@ async function handleStoreDetail(request, env) {
 // 2026-10-31：店家清單排除「停用」(死客戶) 跟新竹縣市，但保留「負責人=老爸」的店——老爸的店有固定
 // 提醒規則（送貨還帳單、請款交錢），跟 isEligibleForTiering_（評分用，老爸也排除）不是同一條規則，
 // 不能直接共用那個函式，這裡另外寫一個比較窄的排除條件（使用者 2026-10-31 明確要求保留老爸）。
+// 2026-11-01 補：「不拜訪」特別通路（例：C135政治大學選舉研究中心）優先於「老爸保留」排除——
+// 不拜訪的店就算負責人是老爸也不留在 A2；負責人是老爸、但狀態不是不拜訪的店照舊保留。這條判斷
+// 跟 isEligibleForTiering_ 共用 isMarkedDoNotVisit_()，不是另外寫一次。
 // ============================================================
 function visibleForRuleManagement_(p) {
   if (p.deadReason) return false;
+  if (isMarkedDoNotVisit_(p)) return false;
   if (PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0) return false;
   return true;
 }
