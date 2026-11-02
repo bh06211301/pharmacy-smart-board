@@ -2156,6 +2156,78 @@ function computeFollowupsDueSoonBadge_(followupRows) {
   }).length;
 }
 
+// A1「今天可以跑的區」（2026-11-02）。分區表／座標都在 planner-config.js，這裡只有計算邏輯。
+function haversineKm_(a, b) {
+  const toRad = x => x * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+// 直線距離換算大概車程分鐘數：近距離市區車速慢、遠距離有國道可以快，分兩段估，乘 1.3 修正直線
+// 距離跟實際路網的落差——這是粗估，不是真實路網距離，前端要清楚標示「約」，不能當精確預估。
+function estimateDriveMinutes_(km) {
+  const roadKm = km * 1.3;
+  const speedKmh = km <= 20 ? 28 : 50;
+  return Math.round(roadKm / speedKmh * 60);
+}
+// 哪個區屬於哪一類分區：基隆/新竹用縣市比對（原公式就是這樣，因為有些區名跟台北的區同名），
+// 其餘用行政區名稱比對，都比對不到就是 regionFallbackLabel。
+function regionGroupOf_(city, district) {
+  for (const g of PLANNER_CONFIG.regionGroups) {
+    if (g.cities && g.cities.indexOf(city) >= 0) return g;
+    if (g.districts && g.districts.indexOf(district) >= 0) return g;
+  }
+  return null;
+}
+// 每類分區的代表車程：區內各行政區車程分鐘數的平均（區跨好幾個行政區，車程本來就是模糊的大概值，
+// 不是精確到單一店家的距離）。基隆/新竹用縣市層級代表座標（districtCoords 裡那個城市名當 key）。
+function regionMinutesOf_(group) {
+  const keys = [...(group.cities || []), ...(group.districts || [])];
+  const mins = keys
+    .map(k => PLANNER_CONFIG.districtCoords[k])
+    .filter(Boolean)
+    .map(coord => estimateDriveMinutes_(haversineKm_(PLANNER_CONFIG.regionHomeBase, coord)));
+  if (!mins.length) return null;
+  return Math.round(mins.reduce((a, b) => a + b, 0) / mins.length);
+}
+// 彙整每類分區的今天可以跑的區概況：新店家數/最高倍數、客戶該去家數（倍數≥1）、送貨家數
+// （anchors 裡 source==='送貨' 的，已經是當天的，不用再篩日期）、大概車程。
+// allPharmacies 用全部正式客戶（不是排除規則篩過的 list）查送貨錨點的區域——送貨錨點本來就
+//「不管店家是不是排除規則篩過的名單內（老爸/新竹的送貨單也要列出來）」，查區域也要用同一份全量名單，
+// 不然老爸的店的送貨會因為不在 list 裡被誤判成「其他」。
+function buildTodayRegions_(list, anchors, allPharmacies) {
+  const byGroupKey = {};
+  PLANNER_CONFIG.regionGroups.forEach(g => { byGroupKey[g.key] = { key: g.key, label: g.label, newStoreCount: 0, maxRatio: 0, customerDueCount: 0, deliveryCount: 0 }; });
+  const fallback = { key: 'other', label: PLANNER_CONFIG.regionFallbackLabel, newStoreCount: 0, maxRatio: 0, customerDueCount: 0, deliveryCount: 0 };
+  function bucketOf(city, district) {
+    const g = regionGroupOf_(city, district);
+    return g ? byGroupKey[g.key] : fallback;
+  }
+  list.forEach(item => {
+    const b = bucketOf(item.city, item.district);
+    if (item.type === 'new-store') {
+      b.newStoreCount += 1;
+      if (item.ratio !== null && item.ratio > b.maxRatio) b.maxRatio = item.ratio;
+    } else if (item.type === 'customer' && item.ratio >= 1) {
+      b.customerDueCount += 1;
+    }
+  });
+  const pharmacyById = {};
+  allPharmacies.forEach(p => { pharmacyById[p.id] = p; });
+  const screeningById = {};
+  list.filter(item => item.type === 'new-store').forEach(item => { screeningById[item.id] = item; });
+  anchors.forEach(a => {
+    if (a.source !== '送貨') return;
+    const p = pharmacyById[a.id] || screeningById[a.id];
+    const b = p ? bucketOf(p.city, p.district) : fallback;
+    b.deliveryCount += 1;
+  });
+  const groups = PLANNER_CONFIG.regionGroups.map(g => ({ ...byGroupKey[g.key], estimateMinutes: regionMinutesOf_(g) }));
+  if (fallback.newStoreCount || fallback.customerDueCount || fallback.deliveryCount) groups.push({ ...fallback, estimateMinutes: null });
+  return groups;
+}
+
 async function handlePlannerPlan(request, env) {
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date');
@@ -2315,6 +2387,7 @@ async function handlePlannerPlan(request, env) {
     const score = Math.round(rankScore);
     list.push({
       id: p.id, name: p.name, type: 'customer', stage: '正式客戶', tier, intervalDays,
+      city: p.city, district: p.district,
       daysSince, ratio: Math.round(ratio * 100) / 100, rawRatio: Math.round(rawRatio * 100) / 100, ratioCapped, avgMonthly,
       score, rankScore: Math.round(rankScore), followupMultiplier, followupItems: notDueItems, ruleStatus, alert,
       isContracted, contractAmount: isContracted ? contractAmount : null,
@@ -2373,6 +2446,13 @@ async function handlePlannerPlan(request, env) {
     });
   });
 
+  // 每個項目標上屬於哪一類分區（A1「今天可以跑的區」用，2026-11-02）：前端「選這區」要知道
+  // 這個區的新店有哪幾家，直接讀這個欄位去篩，不用在前端另外複製一份分區比對邏輯。
+  list.forEach(item => {
+    const g = regionGroupOf_(item.city, item.district);
+    item.region = g ? g.key : 'other';
+  });
+
   // 排序：倍數≥1（該去了）＞ 倍數<1（還沒到）；組內用 score（＝倍數×月均叫貨×待追蹤倍率）遞減排序，
   // 不設上限；同分再用月均決勝。
   function bucketOf(item) { return item.ratio >= 1 ? 1 : 0; }
@@ -2403,12 +2483,14 @@ async function handlePlannerPlan(request, env) {
   const badgeCustomers = list.filter(item => item.type === 'customer' && item.ratio >= 1).length;
   const badgeNewStoreStuck = list.filter(item => item.type === 'new-store' && item.ratio >= 1).length;
   const badgeFollowupsDueSoon = computeFollowupsDueSoonBadge_(followupRows);
+  const todayRegions = buildTodayRegions_(list, anchors, allPharmacies);
 
   return json({
     ok: true,
     date: dateKey,
     recommended: list,
     anchors, route,
+    todayRegions,
     badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
     note: '2026-10-27 第二版：倍數改用「最後接觸日」(拜訪或叫貨取較近)，兩者都沒有固定倍數1.0；分級決定間隔；倍數≥1用倍數×月均排序不設上限；到期待追蹤移入 anchors 不參加排名，未到期的乘上 followupMultiplier；還沒套用 2 公里錨點半徑篩選；老爸/新竹縣市/狀態=不拜訪 已排除在推薦外，要在 A1 手動加成送貨錨點（等 A1 錨點 UI 做出來再接）。Phase 2：anchors/route 若當天已存檔會蓋掉系統預設值，見 /api/plan POST',

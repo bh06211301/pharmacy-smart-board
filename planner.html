@@ -113,6 +113,26 @@
     padding: var(--sr-space-6); text-align: center;
   }
 
+  /* ---------- 今天可以跑的區（2026-11-02，放在①上方） ---------- */
+  .region-overview { margin-bottom: var(--sr-space-7); }
+  .region-overview-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
+  .region-card {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); background: var(--sr-bg);
+    padding: var(--sr-space-4) var(--sr-space-5); margin-bottom: var(--sr-space-3);
+    display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-4);
+  }
+  .region-card-main { min-width: 0; }
+  .region-card-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
+  .region-card-stats { font-size: var(--sr-text-xs); color: var(--sr-ink-2); margin-top: 2px; }
+  .region-card-minutes { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .region-card-btn {
+    height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md);
+    font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font);
+    background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); flex-shrink: 0;
+  }
+  .region-card-btn:hover { background: var(--sr-bg-subtle); }
+  .region-card.empty { opacity: 0.5; }
+
   /* ---------- 篩選膠囊（DESIGN.md 2.4） ---------- */
   .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
   .filter-pill {
@@ -267,6 +287,10 @@
 <div class="columns">
   <div class="col col-1">
     <div class="col-body">
+      <div class="region-overview">
+        <div class="region-overview-title">今天可以跑的區</div>
+        <div id="region-overview-root"><div class="empty-hint">載入中…</div></div>
+      </div>
       <div class="step-title"><span class="step-num">①</span><span class="step-label">今天一定要去</span></div>
       <div id="mini-cal-root" class="mini-cal"></div>
       <div id="anchors-root"><div class="empty-hint">還沒有錨點，先輸入今天一定要去的店</div></div>
@@ -417,6 +441,8 @@ document.body.addEventListener('click', (e) => {
   } else if (action === 'pick-manual-add') {
     const p = (allPharmaciesCache || []).find(x => x.id === id);
     if (p) withBusy(t, '加入中…', () => pickManualAdd(p));
+  } else if (action === 'pick-region') {
+    withBusy(t, '加入中…', () => pickRegion(t.dataset.key));
   }
 });
 document.body.addEventListener('change', (e) => {
@@ -575,6 +601,39 @@ function renderRecommend() {
   root.innerHTML = pillsHtml +
     groupHtml(newStoreList, 'newStore', '新店開發') +
     groupHtml(customerList, 'customer', '正式客戶');
+}
+
+// ══════════════════════════════
+// 今天可以跑的區（2026-11-02，SPEC/docs/PROPOSAL-today-region.md）
+// 系統不自動選區、不決定日期，純粹幫忙快速看完每區概況，由使用者自己判斷選哪一區。
+// ══════════════════════════════
+function renderRegionOverview() {
+  const root = document.getElementById('region-overview-root');
+  if (!planData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
+  const groups = planData.todayRegions || [];
+  if (!groups.length) { root.innerHTML = '<div class="empty-hint">沒有資料</div>'; return; }
+  root.innerHTML = groups.map(g => {
+    const isEmpty = !g.newStoreCount && !g.customerDueCount && !g.deliveryCount;
+    const minutesText = g.estimateMinutes === null ? '' : `車程約 ${g.estimateMinutes} 分鐘（直線距離估算，僅供參考）`;
+    return `<div class="region-card ${isEmpty ? 'empty' : ''}">
+      <div class="region-card-main">
+        <div class="region-card-label">${escapeHtml(g.label)}</div>
+        <div class="region-card-stats">新店 ${g.newStoreCount} 家${g.maxRatio ? '（最高倍數 ' + g.maxRatio + '）' : ''}　送貨 ${g.deliveryCount} 家　客戶該去 ${g.customerDueCount} 家</div>
+        <div class="region-card-minutes">${escapeHtml(minutesText)}</div>
+      </div>
+      <button class="region-card-btn" data-action="pick-region" data-key="${escapeHtml(g.key)}" ${g.newStoreCount ? '' : 'disabled title="這區目前沒有新店候選"'}>選這區</button>
+    </div>`;
+  }).join('');
+}
+
+// 「選這區」：把這個分區的新店候選加入今天一定要去（送貨本來就不分區自動加進來了，客戶該去
+// 家數留給使用者自己在②欄挑，不強制整批加入——避免一次塞進太多店）。
+async function pickRegion(key) {
+  const items = (planData.recommended || []).filter(x => x.type === 'new-store' && x.region === key);
+  for (const item of items) {
+    await addAnchor({ id: item.id, name: item.name, source: '今天可以跑的區', item: '新店開發', deadline: null });
+  }
+  toast(`已加入「${key}」的新店候選 ${items.length} 家`);
 }
 
 function toggleCol2(id) {
@@ -782,6 +841,7 @@ async function loadPlan() {
     renderAnchors();
     renderRecommend();
     renderSuggest();
+    renderRegionOverview();
   } catch (e) {
     document.getElementById('recommend-root').innerHTML =
       `<div class="empty-hint">載入失敗：${e.message}</div>`;
