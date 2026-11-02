@@ -129,7 +129,7 @@
 <script src="planner-nav.js"></script>
 <script src="store-drawer.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch } = window.PlannerAPI;
+const { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch, gvizDateToIso } = window.PlannerAPI;
 window.SRNav.render({ active: 'followups' });
 
 let allData = null;    // /api/followups 的完整回應
@@ -167,7 +167,7 @@ function filteredFollowups() {
 
 function rowHtml(f) {
   if (editingId === f.followupId) return editRowHtml(f);
-  const deadlineText = f.deadlineType === '指定日期前' && f.deadline ? f.deadline : '下次經過';
+  const deadlineText = f.deadlineType === '指定日期前' && f.deadline ? (gvizDateToIso(f.deadline) || f.deadline) : '下次經過';
   const isDueSoon = f.status === '未完成' && f.deadlineType === '指定日期前' && f.deadline && (-daysBetweenClient(f.deadline) <= 3);
   const lastContactText = f.lastContactDate
     ? `${f.lastContactDate}${f.daysSinceLastContact !== null ? '（' + f.daysSinceLastContact + '天前）' : ''}`
@@ -189,7 +189,9 @@ function rowHtml(f) {
 }
 
 function daysBetweenClient(deadlineStr) {
-  const d = new Date(String(deadlineStr).replace(/\//g, '-'));
+  const iso = gvizDateToIso(deadlineStr);
+  if (!iso) return 0;
+  const d = new Date(iso + 'T00:00:00');
   if (isNaN(d)) return 0;
   const now = new Date();
   return Math.floor((now - d) / 86400000);
@@ -202,7 +204,7 @@ function editRowHtml(f) {
         <input type="text" id="ef-item" value="${escapeHtml(f.item)}">
         <select id="ef-who">${['我','老爸','藥師','帳務','篩選器'].map(w => `<option ${w === f.who ? 'selected' : ''}>${w}</option>`).join('')}</select>
         <select id="ef-deadline-type">${['下次經過','指定日期前'].map(w => `<option ${w === f.deadlineType ? 'selected' : ''}>${w}</option>`).join('')}</select>
-        <input type="date" id="ef-deadline" value="${escapeHtml(f.deadline || '')}" ${f.deadlineType === '指定日期前' ? '' : 'disabled'}>
+        <input type="date" id="ef-deadline" value="${escapeHtml(gvizDateToIso(f.deadline) || '')}" ${f.deadlineType === '指定日期前' ? '' : 'disabled'}>
         <div style="display:flex;gap:6px">
           <button class="sr-btn-sm" data-action="save-edit" data-id="${escapeHtml(f.followupId)}">儲存</button>
           <button class="sr-btn-sm" data-action="cancel-edit">取消</button>

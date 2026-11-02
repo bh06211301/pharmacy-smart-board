@@ -128,6 +128,62 @@
       .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city, 'zh-Hant'));
   }
 
+  // 待追蹤「期限」從 gviz 讀回來有兩種格式：Google Sheets 把那個欄位存成真正日期型別時是原始
+  // gviz 字面值 "Date(2026,10,16)"（月份從0算，不是一般日期字串）；存成純文字則是一般的
+  // "2026/11/16" 或 "2026-11-16"。worker.js 的 parseGvizDate() 處理過這個問題，但前端一直沒有
+  // 對應的共用函式——2026-11-02 在 weekly.html 抓到這個 bug（右側清單日期排序/分組失敗），同一天
+  // 發現 followups.html（A3）的「期限」欄也一直把 "Date(...)" 原始字串直接顯示給使用者看
+  // （`<input type="date">` 編輯框也因此顯示空白，不是真的壞掉，只是值格式不對無法被 date input
+  // 接受）。這支抽成共用函式，weekly.html／followups.html 都要用這份，不要各自處理一次。
+  function gvizDateToIso(s) {
+    if (!s) return null;
+    const m = String(s).match(/^Date\((\d+),(\d+),(\d+)\)$/);
+    if (m) return `${m[1]}-${String(Number(m[2]) + 1).padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    const d = new Date(String(s).replace(/\//g, '-'));
+    return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  // 寄賣/簽約「該對帳」判斷，跟 planner.html 自己的同名函式邏輯刻意保持一致（故意複製，不是共用
+  // 元件——planner.html 目前沒有載入 planner-shared.js，見檔頭註解「三份重複的 get/post/...」
+  // 同一條待辦，之後整併 helper 時這裡要跟 planner.html 那份一起處理，不要只改一邊）。
+  // weekly.html（A5）用這個算「還沒指定日期的請款」清單跟頂部色帶要不要觸發。
+  function consignmentBadge(item) {
+    if (item.isContracted) {
+      const triggered = item.consignmentAllTotal >= item.contractAmount * 1.4;
+      if (!triggered) return { html: '', triggered: false, sortValue: 0 };
+      return {
+        html: `<span class="badge-consignment due">該對帳：寄賣中 $${item.consignmentAllTotal.toLocaleString()} / 切口 $${item.contractAmount.toLocaleString()}</span>`,
+        triggered: true, sortValue: 2, label: '該對帳', detail: `寄賣中 $${item.consignmentAllTotal.toLocaleString()} / 切口 $${item.contractAmount.toLocaleString()}`,
+      };
+    }
+    if (item.consignmentStaleCount > 0) {
+      return {
+        html: `<span class="badge-consignment due">寄賣${item.consignmentStaleCount}張待整理，最久${item.consignmentStaleMaxMonths}個月</span>`,
+        triggered: true, sortValue: 1, staleTotal: item.consignmentStaleTotal,
+        label: '寄賣待整理', detail: `${item.consignmentStaleCount}張，最久${item.consignmentStaleMaxMonths}個月，共 $${item.consignmentStaleTotal.toLocaleString()}`,
+      };
+    }
+    return { html: '', triggered: false, sortValue: 0 };
+  }
+
+  // 假日資料（holidays-{year}.json，手動年度更新，見 docs/SPEC.md 第11節待辦「每年7~8月更新
+  // holidays JSON」）。多年份合併查詢用，結果快取在記憶體，同一頁重複呼叫不會重複 fetch。
+  // weekly.html（A5）目前唯一的使用者，之後 A6（本月）要用同一份，不要再寫一次。
+  const holidayCache_ = {};
+  async function loadHolidays(years) {
+    const merged = {};
+    await Promise.all((years || []).map(async year => {
+      if (!holidayCache_[year]) {
+        try {
+          const res = await fetch(`holidays-${year}.json`);
+          holidayCache_[year] = res.ok ? await res.json() : {};
+        } catch (e) { holidayCache_[year] = {}; }
+      }
+      Object.assign(merged, holidayCache_[year]);
+    }));
+    return merged;
+  }
+
   // toast 的樣式獨立注入一次，不靠頁面自己的 <style> 區塊（A2/A3 都會用到）
   const style = document.createElement('style');
   style.textContent = `
@@ -139,5 +195,5 @@
   `;
   document.head.appendChild(style);
 
-  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch, normalizeCity, groupStoresByRegion };
+  window.PlannerAPI = { get, post, withBusy, toast, escapeHtml, genRequestId, bindStoreSearch, normalizeCity, groupStoresByRegion, consignmentBadge, loadHolidays, gvizDateToIso };
 })();

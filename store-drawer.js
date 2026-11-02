@@ -25,6 +25,18 @@
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // 待追蹤「期限」從 gviz 讀回來有時是原始字面值 "Date(2026,10,16)"（月份從0算），不是一般日期
+  // 字串，直接顯示會讓使用者看到這段原始格式（2026-11-02 在 weekly.html／followups.html 抓到同一個
+  // bug）。這份跟 planner-shared.js 的 gvizDateToIso() 邏輯刻意保持一致，但是獨立複製一份——
+  // store-drawer.js 會掛在 planner.html（沒有載入 planner-shared.js），不能直接呼叫 window.PlannerAPI。
+  function gvizDateToIso(s) {
+    if (!s) return null;
+    const m = String(s).match(/^Date\((\d+),(\d+),(\d+)\)$/);
+    if (m) return `${m[1]}-${String(Number(m[2]) + 1).padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    const d = new Date(String(s).replace(/\//g, '-'));
+    return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
   // 2026-10-28：任何會寫入資料的按鈕都要經過這裡——按下立刻 disabled + 改文字，避免使用者看不到
   // 反應連點好幾次（實測踩到：新增待追蹤連點5次，因為按鈕沒變化，以為沒反應，結果建了5筆一樣的資料）。
   // disabled 本身就擋住了「同一顆按鈕」的重複點擊；失敗時要把按鈕還原成原狀＋跳錯誤訊息，
@@ -267,7 +279,7 @@
         ? items.map(f => `<div class="sr-list-item">
             <div>
               <div class="sr-list-item-main">${escapeHtml(f.item)}</div>
-              <div class="sr-list-item-sub">誰交代：${escapeHtml(f.who)}　${f.deadlineType === '指定日期前' && f.deadline ? '期限：' + escapeHtml(f.deadline) : '下次經過'}</div>
+              <div class="sr-list-item-sub">誰交代：${escapeHtml(f.who)}　${f.deadlineType === '指定日期前' && f.deadline ? '期限：' + escapeHtml(gvizDateToIso(f.deadline) || f.deadline) : '下次經過'}</div>
             </div>
             <button class="sr-btn-sm" data-action="resolve-followup" data-id="${escapeHtml(f.followupId)}">完成</button>
           </div>`).join('')

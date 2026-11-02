@@ -14,7 +14,7 @@
 (function () {
   const TABS = [
     { id: 'today', label: '今天', href: 'planner.html' },
-    { id: 'week', label: '本週', disabled: true },
+    { id: 'week', label: '本週', href: 'weekly.html' },
     { id: 'month', label: '本月', disabled: true },
     { id: 'customers', label: '客戶', disabled: true, badge: 'badge-customers' },
     { id: 'new-store', label: '新店開發', href: 'funnel.html', badge: 'badge-new-store' },

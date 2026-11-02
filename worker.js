@@ -13,6 +13,7 @@
 // ============================================================
 
 import { PLANNER_CONFIG } from './planner-config.js';
+import { parseIcsEvents_ } from './ics-utils.js';
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_MODEL_PRO = 'gemini-3.5-flash-lite';
@@ -274,6 +275,16 @@ export default {
       // ★ A10「記結果」：advance/drop/keep/confirmed
       if (path === '/api/funnel/result' && request.method === 'POST') {
         return await handleFunnelResult(request, env);
+      }
+
+      // ★ A5 本週：7 天概況（跑哪區/已確定路線/日曆事件）＋這週要做的（逾期客戶/待追蹤/請款待收）
+      if (path === '/api/week' && request.method === 'GET') {
+        return await handleWeekOverview(request, env);
+      }
+
+      // ★ A5 本週：存某一天選定的區（讀取→合併→寫回 plan:{date}，不會洗掉已存的 anchors/route）
+      if (path === '/api/week/day' && request.method === 'POST') {
+        return await handleSaveWeekDay(request, env);
       }
 
       return json({ error: '找不到這個 endpoint' }, 404);
@@ -2156,6 +2167,165 @@ function computeFollowupsDueSoonBadge_(followupRows) {
   }).length;
 }
 
+// 待追蹤拆成「已到期」跟「還沒到期」兩組：已到期的整筆變成 anchors（來源標「待追蹤」），不參加排名；
+// 還沒到期的（含「下次經過」這種沒有具體日期的）留在原地，乘上 followupMultiplier 影響排序分。
+// 期限類型＝下次經過：沒有具體日期可比，一律視為「還沒到期」。
+// 2026-11-02：從 handlePlannerPlan 內部抽成獨立函式，/api/week（buildCustomerOverview_）也要用，
+// 不要兩邊各寫一次同樣的拆分邏輯。
+function splitFollowups_(followupRows, storeId, planDate) {
+  const due = [], notDue = [];
+  followupRows.forEach(f => {
+    if (f.get('店家代號') !== storeId) return;
+    if ((f.get('狀態') || '未完成') !== '未完成') return;
+    const deadlineType = f.get('期限類型') || '下次經過';
+    const item = f.get('事項') || '';
+    if (deadlineType === '指定日期前') {
+      const deadline = f.get('期限');
+      const daysUntil = deadline ? -daysBetween(deadline, planDate) : null;
+      if (daysUntil !== null && daysUntil <= 0) { due.push({ item, deadline }); return; }
+    }
+    notDue.push({ item });
+  });
+  return { due, notDue };
+}
+
+// 「這週要做的」拖放/按鈕指派到某天時，判斷某店是否已經有一筆未完成、事項開頭是 prefix 的待追蹤
+// （目前只有「拜訪：」在用這支嚴格版——判斷「逾期沒去的店」已經排過，見 handleWeekOverview），
+// 避免同一件事在「這週要做的」清單跟日曆上重複出現。「請款」改用下面放寬版的
+// findActiveBillingFollowup_（2026-11-02 松江健保案例，手動建立的舊待追蹤文字不是標準格式，
+// 嚴格比對抓不到）。回傳該筆的期限（可能是 null，表示期限類型是「下次經過」），沒有找到回 null。
+function findActiveFollowupByPrefix_(followupRows, storeId, prefix) {
+  const hit = followupRows.find(f =>
+    f.get('店家代號') === storeId &&
+    (f.get('狀態') || '未完成') === '未完成' &&
+    String(f.get('事項') || '').startsWith(prefix)
+  );
+  return hit ? { followupId: hit.get('待追蹤ID') || null, deadline: hit.get('期限') || null } : null;
+}
+
+// 請款的比對刻意放寬成「事項文字包含『請款』」而不是嚴格比對「請款：」開頭——2026-11-02 實測踩到：
+// 松江健保(C034)已經有一筆手動建立、文字是「請款一半 跨年後一半」（不是本功能產生的標準格式）的
+// 未完成待追蹤，嚴格比對抓不到，導致同一家店同時出現在「有期限的待追蹤」跟「還沒指定日期的請款」
+// 兩份清單。「拜訪」判斷（上面 findActiveFollowupByPrefix_ 的用法）維持嚴格比對「拜訪：」開頭不能
+// 一起放寬——店家規則/待追蹤常見「拜訪前先打電話」這類跟「逾期沒去」完全無關的文字，放寬會誤把
+// 真正逾期的店藏起來，比重複顯示還危險；請款這邊兩個方向都比較安全（頂多少顯示一個本來就該顯示的
+// 提醒，不會讓真正該收的錢憑空消失，金額仍然算在頂部 banner 裡）。
+function findActiveBillingFollowup_(followupRows, storeId) {
+  const hit = followupRows.find(f =>
+    f.get('店家代號') === storeId &&
+    (f.get('狀態') || '未完成') === '未完成' &&
+    String(f.get('事項') || '').includes('請款')
+  );
+  return hit ? { followupId: hit.get('待追蹤ID') || null, deadline: hit.get('期限') || null } : null;
+}
+
+// 店家是否有自己的「請款規則」（店家規則分頁，規則類型＝請款規則，狀態＝有效）——有的話代表這家店
+// 不走通用的 7 個月寄賣整理規則，例如 C014 來福藥局「隔月5號請款（不走寄賣7個月）」（docs/SPEC.md
+// 3.2 記過的決定）。2026-11-02 發現這個決定只記在文件裡，從沒真的寫進計算邏輯，C014 的寄賣訂單
+// 照樣被通用7個月規則判定成「待整理」，出現在 A5「還沒指定日期的請款」清單——跟文件決定矛盾，修正。
+function hasActiveBillingRule_(ruleRows, storeId) {
+  return ruleRows.some(r =>
+    r.get('店家代號') === storeId &&
+    r.get('規則類型') === '請款規則' &&
+    (r.get('狀態') || '有效') === '有效'
+  );
+}
+
+// 寄賣整理彙整：掃排除規則篩過的名單裡「寄賣中(資料夾)」的訂單，算每家店的 allTotal（不管多久）/
+// staleCount/staleMaxMonths/staleTotal（只算 >= consignmentCleanupMonths 個月、且這家店沒有自己
+// 請款規則的）。/api/plan（handlePlannerPlan）跟 /api/week（handleWeekOverview）共用，確保兩邊
+// 「寄賣待整理」判定一致——此前兩邊各自複製一份同樣的迴圈，這次順便併成一份，不然這個 bug 修了
+// 一邊、另一邊會繼續錯。
+function buildConsignmentByStore_(orderRows, orderColMap, eligibleIds, ruleRows, referenceDate) {
+  const byStore = {};
+  orderRows.forEach(row => {
+    const status = String(row.c[orderColMap['紅單實體狀態']]?.v || '').trim();
+    if (status !== '寄賣中(資料夾)') return;
+    const id = String(row.c[orderColMap['店名']]?.v || '').trim();
+    if (!id || !eligibleIds.has(id)) return;
+    const d = parseGvizDate(row.c[orderColMap['訂單日期']]?.v || '');
+    if (!d) return;
+    const orderDate = new Date(String(d).replace(/\//g, '-'));
+    if (isNaN(orderDate)) return;
+    const amount = parseFloat(row.c[orderColMap['總金額']]?.v || 0) || 0;
+    const monthsSince = monthsSinceJs(orderDate, referenceDate);
+    const entry = (byStore[id] = byStore[id] || { allTotal: 0, staleCount: 0, staleMaxMonths: 0, staleTotal: 0 });
+    entry.allTotal += amount;
+    if (monthsSince >= PLANNER_CONFIG.consignmentCleanupMonths && !hasActiveBillingRule_(ruleRows, id)) {
+      entry.staleCount += 1;
+      entry.staleTotal += amount;
+      entry.staleMaxMonths = Math.max(entry.staleMaxMonths, monthsSince);
+    }
+  });
+  return byStore;
+}
+
+// 正式客戶總覽（tier/倍數/合約寄賣狀態），/api/plan（handlePlannerPlan）跟 /api/week
+// （handleWeekOverview）共用，避免兩邊各自算一套倍數/寄賣門檻、長期兜不起來。
+// 回傳陣列不含「到期待追蹤變成錨點」的副作用——那是 handlePlannerPlan 自己按當天規劃日才要做的事，
+// 每筆項目上掛一個 _dueFollowups（到期的待追蹤清單），由呼叫端決定要不要用、用完記得清掉這個內部欄位。
+function buildCustomerOverview_(eligible, statsById, p70AvgMonthly, medianAvgMonthly, ruleRows, visitMap, followupRows, contractByStore, consignmentByStore, planDate) {
+  return eligible.map(p => {
+    const stat = statsById[p.id];
+    const { tier, intervalDays, alert } = classifyTierAndAlert_(stat, p70AvgMonthly, medianAvgMonthly);
+    const avgMonthly = stat.hasOrders ? stat.avgMonthly : 0;
+    const ruleStatus = evalRuleStatus(ruleRows, p.id, planDate);
+    const visitDate = (visitMap[p.id] || {}).lastDate || '';
+    const orderDate = stat.hasOrders ? stat.lastOrderDate : '';
+    const lastContactDate = laterDateOrNull_(visitDate, orderDate);
+
+    const { due, notDue } = splitFollowups_(followupRows, p.id, planDate);
+    const followupMultiplier = notDue.length ? PLANNER_CONFIG.followupMultiplier : 1;
+    const notDueItems = notDue.map(f => f.item).filter(Boolean);
+
+    let daysSince, rawRatio;
+    if (!lastContactDate) {
+      daysSince = null;
+      rawRatio = 1.0; // 從未拜訪也從未叫貨：倍數固定 1.0
+    } else {
+      daysSince = daysBetween(lastContactDate, planDate);
+      rawRatio = daysSince / intervalDays;
+    }
+    const ratioCapForTier = PLANNER_CONFIG.tierRatioCap[tier];
+    const ratio = ratioCapForTier ? Math.min(rawRatio, ratioCapForTier) : rawRatio;
+    const ratioCapped = ratio !== rawRatio;
+
+    const contractAmount = contractByStore[p.id];
+    const isContracted = contractAmount !== undefined;
+    const consignment = consignmentByStore[p.id] || null;
+    let consignmentMultiplier = 1;
+    if (!isContracted && consignment && consignment.staleCount > 0) {
+      consignmentMultiplier = PLANNER_CONFIG.consignmentMultiplier;
+    }
+
+    const rankScoreBase = ratio * avgMonthly;
+    const rankScore = rankScoreBase * followupMultiplier * consignmentMultiplier;
+    const score = Math.round(rankScore);
+
+    return {
+      id: p.id, name: p.name, type: 'customer', stage: '正式客戶', tier, intervalDays,
+      city: p.city, district: p.district,
+      daysSince, ratio: Math.round(ratio * 100) / 100, rawRatio: Math.round(rawRatio * 100) / 100, ratioCapped, avgMonthly,
+      score, rankScore: Math.round(rankScore), followupMultiplier, followupItems: notDueItems, ruleStatus, alert,
+      isContracted, contractAmount: isContracted ? contractAmount : null,
+      consignmentAllTotal: consignment ? Math.round(consignment.allTotal) : 0,
+      consignmentStaleCount: consignment ? consignment.staleCount : 0,
+      consignmentStaleMaxMonths: consignment ? consignment.staleMaxMonths : 0,
+      consignmentStaleTotal: consignment ? Math.round(consignment.staleTotal) : 0,
+      consignmentMultiplier,
+      reason: (daysSince === null
+          ? `從未拜訪也從未叫貨，倍數固定 1.0`
+          : `${daysSince} / ${intervalDays} 天 = ${(Math.round(rawRatio * 100) / 100)} 倍` +
+            (ratioCapped ? `（封頂算 ${ratio}）` : '')) +
+        `・月均 $${Math.round(avgMonthly).toLocaleString()}` +
+        (followupMultiplier !== 1 ? `・待追蹤×${followupMultiplier}` : '') +
+        (consignmentMultiplier !== 1 ? `・寄賣×${consignmentMultiplier}` : '') +
+        (notDueItems.length ? `・${notDueItems.join('、')}` : ''),
+      _dueFollowups: due,
+    };
+  });
+}
+
 // A1「今天可以跑的區」（2026-11-02）。分區表／座標都在 planner-config.js，這裡只有計算邏輯。
 function haversineKm_(a, b) {
   const toRad = x => x * Math.PI / 180;
@@ -2278,28 +2448,10 @@ async function handlePlannerPlan(request, env) {
   const eligibleIds = new Set(eligible.map(p => p.id));
 
   // 第四種提醒「寄賣整理」：只掃排除規則篩過的名單（死客戶/老爸/新竹/不拜訪不檢查，2026-10-27 修正，
-  // 之前版本掃全部客戶，誤把死客戶 C015/C038 列進來）。先彙整每家店目前「寄賣中(資料夾)」的全部訂單
-  // （allTotal 不管多久，staleXxx 只算 >= consignmentCleanupMonths 個月的），下面依有沒有合約分兩種處理。
-  const consignmentByStore = {};
-  orderData.rows.forEach(row => {
-    const status = String(row.c[orderData.colMap['紅單實體狀態']]?.v || '').trim();
-    if (status !== '寄賣中(資料夾)') return;
-    const id = String(row.c[orderData.colMap['店名']]?.v || '').trim();
-    if (!id || !eligibleIds.has(id)) return;
-    const d = parseGvizDate(row.c[orderData.colMap['訂單日期']]?.v || '');
-    if (!d) return;
-    const orderDate = new Date(String(d).replace(/\//g, '-'));
-    if (isNaN(orderDate)) return;
-    const amount = parseFloat(row.c[orderData.colMap['總金額']]?.v || 0) || 0;
-    const monthsSince = monthsSinceJs(orderDate, planDate);
-    const entry = (consignmentByStore[id] = consignmentByStore[id] || { allTotal: 0, staleCount: 0, staleMaxMonths: 0, staleTotal: 0 });
-    entry.allTotal += amount;
-    if (monthsSince >= PLANNER_CONFIG.consignmentCleanupMonths) {
-      entry.staleCount += 1;
-      entry.staleTotal += amount;
-      entry.staleMaxMonths = Math.max(entry.staleMaxMonths, monthsSince);
-    }
-  });
+  // 之前版本掃全部客戶，誤把死客戶 C015/C038 列進來）。彙整每家店目前「寄賣中(資料夾)」的全部訂單
+  // （allTotal 不管多久，staleXxx 只算 >= consignmentCleanupMonths 個月、且這家店沒有自己請款規則
+  // 的，見 buildConsignmentByStore_），下面依有沒有合約分兩種處理。
+  const consignmentByStore = buildConsignmentByStore_(orderData.rows, orderData.colMap, eligibleIds, ruleRows, planDate);
 
   // Phase 2：業務親送的錨點（SPEC 5.2）——訂單主檔「貨運公司」＝業務親送、且「訂單日期」＝規劃日的單，
   // 自動變成 A1 第①欄的錨點（來源「送貨」），不管店家是不是排除規則篩過的名單內（老爸/新竹的送貨單也要列出來）。
@@ -2327,94 +2479,16 @@ async function handlePlannerPlan(request, env) {
     contractByStore[id] = amount;
   });
 
-  // 待追蹤拆成「已到期」跟「還沒到期」兩組：已到期的整筆變成 anchors（來源標「待追蹤」），不參加排名；
-  // 還沒到期的（含「下次經過」這種沒有具體日期的）留在原地，乘上 followupMultiplier 影響排序分。
-  // 期限類型＝下次經過：沒有具體日期可比，一律視為「還沒到期」。
-  function splitFollowups_(storeId) {
-    const due = [], notDue = [];
-    followupRows.forEach(f => {
-      if (f.get('店家代號') !== storeId) return;
-      if ((f.get('狀態') || '未完成') !== '未完成') return;
-      const deadlineType = f.get('期限類型') || '下次經過';
-      const item = f.get('事項') || '';
-      if (deadlineType === '指定日期前') {
-        const deadline = f.get('期限');
-        const daysUntil = deadline ? -daysBetween(deadline, planDate) : null;
-        if (daysUntil !== null && daysUntil <= 0) { due.push({ item, deadline }); return; }
-      }
-      notDue.push({ item });
-    });
-    return { due, notDue };
-  }
-
   // 正式客戶：倍數改用「最後接觸日」＝拜訪日跟叫貨日取比較近的那個（2026-10-27 第二版，拿掉上一版
   // 「只看拜訪日、從未拜訪排最前」的做法）。兩者都沒有時倍數固定 1.0（不特別拉最前也不墊底）。
   // 間隔依分級（大咖/潛力新店/冷淡/一般）決定，見 PLANNER_CONFIG.tierIntervalDays。
-  eligible.forEach(p => {
-    const stat = statsById[p.id];
-    const { tier, intervalDays, alert } = classifyTierAndAlert_(stat, p70AvgMonthly, medianAvgMonthly);
-    const avgMonthly = stat.hasOrders ? stat.avgMonthly : 0;
-    const ruleStatus = evalRuleStatus(ruleRows, p.id, planDate);
-    const visitDate = (visitMap[p.id] || {}).lastDate || '';
-    const orderDate = stat.hasOrders ? stat.lastOrderDate : '';
-    const lastContactDate = laterDateOrNull_(visitDate, orderDate);
-
-    const { due, notDue } = splitFollowups_(p.id);
-    due.forEach(f => anchors.push({ id: p.id, name: p.name, source: '待追蹤', item: f.item, deadline: f.deadline || null }));
-    const followupMultiplier = notDue.length ? PLANNER_CONFIG.followupMultiplier : 1;
-    const notDueItems = notDue.map(f => f.item).filter(Boolean);
-
-    let daysSince, rawRatio;
-    if (!lastContactDate) {
-      daysSince = null;
-      rawRatio = 1.0; // 從未拜訪也從未叫貨：倍數固定 1.0
-    } else {
-      daysSince = daysBetween(lastContactDate, planDate);
-      rawRatio = daysSince / intervalDays;
-    }
-    // 2026-10-27 補：冷淡的店倍數封頂（PLANNER_CONFIG.tierRatioCap），避免很久沒接觸的店單靠天數就衝到排序前段；
-    // 其他級別不設上限。封頂只影響排序分，reason 裡仍會顯示原始倍數讓你知道實際差多久。
-    const ratioCapForTier = PLANNER_CONFIG.tierRatioCap[tier];
-    const ratio = ratioCapForTier ? Math.min(rawRatio, ratioCapForTier) : rawRatio;
-    const ratioCapped = ratio !== rawRatio;
-
-    // 第四種提醒「寄賣整理」：有合約看金額（寄賣中總額 >= 切口金額×倍率），沒合約看天數（維持7個月規則）。
-    // 不寫 anchors，直接影響這家店自己的排序分跟推薦理由。
-    const contractAmount = contractByStore[p.id];
-    const isContracted = contractAmount !== undefined;
-    const consignment = consignmentByStore[p.id] || null;
-    // 寄賣/對帳的狀態文字交給前端用 isContracted/contractAmount/consignmentAllTotal/
-    // consignmentStaleCount 這幾個欄位自己組徽章（跟 reason 分開顯示，不要重複），這裡只需要算出倍率。
-    let consignmentMultiplier = 1;
-    if (!isContracted && consignment && consignment.staleCount > 0) {
-      consignmentMultiplier = PLANNER_CONFIG.consignmentMultiplier;
-    }
-
-    const rankScoreBase = ratio * avgMonthly; // 倍數(已套冷淡封頂)×月均叫貨，不設上限
-    const rankScore = rankScoreBase * followupMultiplier * consignmentMultiplier;
-    const score = Math.round(rankScore);
-    list.push({
-      id: p.id, name: p.name, type: 'customer', stage: '正式客戶', tier, intervalDays,
-      city: p.city, district: p.district,
-      daysSince, ratio: Math.round(ratio * 100) / 100, rawRatio: Math.round(rawRatio * 100) / 100, ratioCapped, avgMonthly,
-      score, rankScore: Math.round(rankScore), followupMultiplier, followupItems: notDueItems, ruleStatus, alert,
-      isContracted, contractAmount: isContracted ? contractAmount : null,
-      consignmentAllTotal: consignment ? Math.round(consignment.allTotal) : 0,
-      consignmentStaleCount: consignment ? consignment.staleCount : 0,
-      consignmentStaleMaxMonths: consignment ? consignment.staleMaxMonths : 0,
-      consignmentStaleTotal: consignment ? Math.round(consignment.staleTotal) : 0,
-      consignmentMultiplier,
-      // 2026-10-28 改：只寫計算過程，不重複分級／提醒文字（畫面上已經用徽章顯示），
-      // 寄賣的倍率（×1.5）保留，因為那是影響排序分的數字，不是單純狀態說明。
-      reason: (daysSince === null
-          ? `從未拜訪也從未叫貨，倍數固定 1.0`
-          : `${daysSince} / ${intervalDays} 天 = ${(Math.round(rawRatio * 100) / 100)} 倍` +
-            (ratioCapped ? `（封頂算 ${ratio}）` : '')) +
-        `・月均 $${Math.round(avgMonthly).toLocaleString()}` +
-        (followupMultiplier !== 1 ? `・待追蹤×${followupMultiplier}` : '') +
-        (consignmentMultiplier !== 1 ? `・寄賣×${consignmentMultiplier}` : '') +
-        (notDueItems.length ? `・${notDueItems.join('、')}` : ''),
-    });
+  // 2026-11-02：計算本體抽到 buildCustomerOverview_()，/api/week 也會呼叫同一份，這裡只處理
+  // 「到期待追蹤變成錨點」這個 handlePlannerPlan 專屬的副作用，然後把 _dueFollowups 清掉再塞進 list。
+  const customerOverview = buildCustomerOverview_(eligible, statsById, p70AvgMonthly, medianAvgMonthly, ruleRows, visitMap, followupRows, contractByStore, consignmentByStore, planDate);
+  customerOverview.forEach(item => {
+    item._dueFollowups.forEach(f => anchors.push({ id: item.id, name: item.name, source: '待追蹤', item: f.item, deadline: f.deadline || null }));
+    delete item._dueFollowups;
+    list.push(item);
   });
 
   // 新店開發（篩選分頁，決定＝要去，階段不是轉正式／放棄）：間隔依階段，倍數公式仍是舊版
@@ -2474,11 +2548,13 @@ async function handlePlannerPlan(request, env) {
   // 讓重新整理頁面時能恢復今天已經決定好的錨點清單與確定路線，不會每次都退回系統剛算出來的預設值。
   const dateKey = planDate.toISOString().slice(0, 10);
   let route = null;
+  let savedRegion = null; // 2026-11-02：A5「本週」存的「這天跑哪區」，讓 A1 開啟那一天時能預先標示
   if (env.TODOS_KV) {
     const saved = await env.TODOS_KV.get(`plan:${dateKey}`, 'json');
     if (saved) {
       if (Array.isArray(saved.anchors)) anchors.length = 0, anchors.push(...saved.anchors);
       if (Array.isArray(saved.route)) route = saved.route;
+      if (saved.region) savedRegion = saved.region;
     }
   }
 
@@ -2497,7 +2573,7 @@ async function handlePlannerPlan(request, env) {
     ok: true,
     date: dateKey,
     recommended: list,
-    anchors, route,
+    anchors, route, savedRegion,
     todayRegions,
     badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
@@ -2513,6 +2589,163 @@ async function handleSavePlan(request, env) {
   if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
   await env.TODOS_KV.put(`plan:${date}`, JSON.stringify({ anchors: anchors || [], route: route || null, savedAt: new Date().toISOString() }));
   return json({ ok: true });
+}
+
+// ============================================================
+// A5 本週（2026-11-02）：/api/week、/api/week/day
+// docs/SPEC.md 5.6、docs/PROPOSAL-A5-weekly.md。
+// ============================================================
+
+// A5「本週」存某一天選的區：對 plan:{date} KV 做讀取→合併→寫回，不是覆蓋——這個 key 平常由
+// handleSavePlan 存 anchors/route，這裡只加/改 region 欄位，不能把既有的 anchors/route 洗掉。
+async function handleSaveWeekDay(request, env) {
+  const body = await request.json();
+  const { date, region } = body;
+  if (!date) return json({ error: '缺少 date' }, 400);
+  if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
+  const existing = (await env.TODOS_KV.get(`plan:${date}`, 'json')) || {};
+  existing.region = region || null;
+  await env.TODOS_KV.put(`plan:${date}`, JSON.stringify(existing));
+  return json({ ok: true });
+}
+
+// Google 主要日曆（唯讀、單一私密 iCal 網址，env.GCAL_ICAL_URL 是 wrangler secret，不進 Git）。
+// 展開好的事件陣列快取在 TODOS_KV（key 'gcal:events'）1 小時，不是存原始 ICS 文字——/api/week
+// 每次呼叫只做陣列篩選，不會每次都重新解析。還沒設定 GCAL_ICAL_URL 時回空陣列，不報錯（天氣/日曆
+// 都是這次「先預留位置」的項目，缺金鑰不該讓整個 /api/week 掛掉）。
+async function fetchGoogleCalendarEvents_(env) {
+  if (!env.GCAL_ICAL_URL) return [];
+  if (env.TODOS_KV) {
+    const cached = await env.TODOS_KV.get('gcal:events', 'json');
+    if (cached && Date.now() - cached.fetchedAt < 3600 * 1000) return cached.events;
+  }
+  const icsText = await fetch(env.GCAL_ICAL_URL).then(r => r.text());
+  const events = parseIcsEvents_(icsText);
+  if (env.TODOS_KV) {
+    await env.TODOS_KV.put('gcal:events', JSON.stringify({ fetchedAt: Date.now(), events }), { expirationTtl: 3600 });
+  }
+  return events;
+}
+
+// GET /api/week?start=YYYY-MM-DD：start 為週一日期，回傳未來 7 天的「跑哪區/已確定路線/日曆事件」
+// ＋「這週要做的」（還沒指定日期的請款／有期限的待追蹤／逾期沒去的店）。
+// 7 天的 region/hasRoute 是原生 KV 讀取（便宜，不跑評分邏輯）；billingDue/overdueCustomers 靠
+// buildCustomerOverview_ 只算一次（不是 7 天各算一次），因為這兩者是「現在」的狀態，不是逐日變化的東西。
+async function handleWeekOverview(request, env) {
+  const url = new URL(request.url);
+  const startParam = url.searchParams.get('start');
+  if (!startParam) return json({ error: '缺少 start' }, 400);
+  const startDate = new Date(startParam);
+  if (isNaN(startDate)) return json({ error: 'start 格式不對，要 YYYY-MM-DD' }, 400);
+
+  const dateKeys = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    dateKeys.push(d.toISOString().slice(0, 10));
+  }
+
+  const now = new Date();
+  const [pharmaciesRes, visitsRes, orderData, returnOrderData, contractData, followupRows, ruleRows, calendarEvents] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    handleVisitsSummary(env).then(r => r.json()),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    env.SHEET_CONTRACT
+      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
+      : Promise.resolve({ rows: [], colMap: {} }),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則') : Promise.resolve([]),
+    fetchGoogleCalendarEvents_(env).catch(() => []),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const visitMap = visitsRes.summary || {};
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, eligible, now);
+  const p70AvgMonthly = avgMonthlyPercentile_(statsById, 0.70);
+  const medianAvgMonthly = avgMonthlyPercentile_(statsById, 0.50);
+
+  // 跟 handlePlannerPlan 同一套寄賣/合約邏輯（只是這裡不分規劃日，用「現在」一次算，見 SPEC 4.5），
+  // 2026-11-02 併成共用函式 buildConsignmentByStore_，順便修好「C014 有自己請款規則卻被通用7個月
+  // 規則誤判」的 bug（見該函式註解）。
+  const eligibleIds = new Set(eligible.map(p => p.id));
+  const consignmentByStore = buildConsignmentByStore_(orderData.rows, orderData.colMap, eligibleIds, ruleRows, now);
+  const contractByStore = {};
+  contractData.rows.forEach(row => {
+    const id = String(row.c[contractData.colMap['Customer_ID']]?.v || '').trim();
+    if (!id) return;
+    const status = String(row.c[contractData.colMap['合約狀態']]?.v || '').trim();
+    if (status === '終止') return;
+    const amount = parseFloat(row.c[contractData.colMap['切口金額']]?.v || 0) || 0;
+    contractByStore[id] = amount;
+  });
+
+  const overview = buildCustomerOverview_(eligible, statsById, p70AvgMonthly, medianAvgMonthly, ruleRows, visitMap, followupRows, contractByStore, consignmentByStore, now);
+
+  // 逾期沒去的店（ratio>=1）：保留全部，已經有「拜訪：」未完成待追蹤的附上 scheduledDate，前端顯示
+  // 「已排 M/D」徽章而不是移除——使用者 2026-11-02 要求跟請款不同，逾期店要留著當參考，只是標示狀態。
+  // 依倍數由高到低排序（2026-11-02 使用者要求：最逾期的排最前面）。
+  const overdueCustomers = overview
+    .filter(c => c.ratio >= 1)
+    .map(c => {
+      const scheduled = findActiveFollowupByPrefix_(followupRows, c.id, '拜訪：');
+      return {
+        id: c.id, name: c.name, ratio: c.ratio, tier: c.tier, avgMonthly: c.avgMonthly,
+        region: (regionGroupOf_(c.city, c.district) || {}).key || 'other',
+        scheduledDate: scheduled ? scheduled.deadline : null,
+        scheduledFollowupId: scheduled ? scheduled.followupId : null,
+      };
+    })
+    .sort((a, b) => b.ratio - a.ratio);
+
+  // 請款待收：banner 永遠是真實合計（不管有沒有已經轉成待追蹤），「還沒指定日期的請款」清單排除
+  // 已經有「請款」相關未完成待追蹤的店（findActiveBillingFollowup_ 用包含比對，不是嚴格比對
+  // 「請款：」開頭，2026-11-02 松江健保案例修正，見該函式註解），避免同一筆錢在清單上重複出現。
+  const billingTriggered = overview.filter(c =>
+    c.isContracted ? c.consignmentAllTotal >= c.contractAmount * PLANNER_CONFIG.consignmentReconcileMultiplier : c.consignmentStaleCount > 0
+  );
+  const billingBanner = {
+    count: billingTriggered.length,
+    amount: billingTriggered.reduce((s, c) => s + c.consignmentAllTotal, 0),
+  };
+  // 這裡要帶齊 consignmentBadge()（planner-shared.js／planner.html 共用的門檻判斷）用到的全部欄位，
+  // 不是只挑看起來會用到的幾個——沒合約分支的 detail 文字一定會算 consignmentStaleTotal.toLocaleString()，
+  // 漏了這欄位會讓整張卡片的渲染直接丟例外（2026-11-02 weekly.html 實測踩到，修正記錄見 CLAUDE.md）。
+  const billingDue = billingTriggered
+    .filter(c => !findActiveBillingFollowup_(followupRows, c.id))
+    .map(c => ({
+      id: c.id, name: c.name, isContracted: c.isContracted, contractAmount: c.contractAmount,
+      consignmentAllTotal: c.consignmentAllTotal, consignmentStaleCount: c.consignmentStaleCount,
+      consignmentStaleMaxMonths: c.consignmentStaleMaxMonths, consignmentStaleTotal: c.consignmentStaleTotal,
+    }))
+    // 依寄賣月數由久到近排序（2026-11-02 使用者要求：拖最久的排最前面）；有合約、靠金額觸發、
+    // 沒有「月數」概念的店 staleMaxMonths 是 0，排在後面，同月數再用寄賣總額決勝。
+    .sort((a, b) => (b.consignmentStaleMaxMonths - a.consignmentStaleMaxMonths) || (b.consignmentAllTotal - a.consignmentAllTotal));
+
+  // 7 天的「跑哪區／已確定路線」：原生讀 plan:{date} KV，不跑 handlePlannerPlan 整套評分（7 天各跑一次
+  // 太貴，且這兩個欄位本來就是 handleSaveWeekDay/handleSavePlan 存的現成資料）。
+  const days = await Promise.all(dateKeys.map(async dateKey => {
+    const saved = env.TODOS_KV ? await env.TODOS_KV.get(`plan:${dateKey}`, 'json') : null;
+    return {
+      date: dateKey,
+      region: saved?.region || null,
+      hasRoute: !!(saved && Array.isArray(saved.route) && saved.route.length),
+      savedAt: saved?.savedAt || null,
+      calendarEvents: calendarEvents.filter(e => e.date === dateKey),
+    };
+  }));
+
+  return json({
+    ok: true,
+    start: dateKeys[0],
+    days,
+    billingBanner,
+    billingDue,
+    overdueCustomers,
+    note: 'billingBanner 是真實合計；billingDue／overdueCustomers 的「已排」判斷靠事項文字開頭' +
+      '「請款：」／「拜訪：」比對未完成待追蹤，跟 /api/plan 共用 buildCustomerOverview_ 保證倍數/寄賣數字一致。',
+  });
 }
 
 // ============================================================
@@ -2604,7 +2837,11 @@ async function handleStoreDetail(request, env) {
       const amount = parseFloat(row.c[orderData.colMap['總金額']]?.v || 0) || 0;
       const monthsSince = monthsSinceJs(orderDateObj, planDate);
       consignment.allTotal += amount;
-      if (monthsSince >= PLANNER_CONFIG.consignmentCleanupMonths) {
+      // 2026-11-02：這家店有自己的「請款規則」（例如 C014 來福「隔月5號請款，不走寄賣7個月」）
+      // 就不計入 staleXxx——跟 buildConsignmentByStore_（/api/plan、/api/week 共用）同一條件，
+      // A8 藥局檔案抽屜這份是第三份複製（單店查詢，結構跟那邊的全店字典不同，沒有直接共用），
+      // 但判斷條件要保持一致，不然這裡跟 A1/A5 看到的「該不該整理」會互相矛盾。
+      if (monthsSince >= PLANNER_CONFIG.consignmentCleanupMonths && !hasActiveBillingRule_(ruleRows, id)) {
         consignment.staleCount += 1;
         consignment.staleTotal += amount;
         consignment.staleMaxMonths = Math.max(consignment.staleMaxMonths, monthsSince);

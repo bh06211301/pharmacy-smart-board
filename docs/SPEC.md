@@ -493,6 +493,8 @@ SmartRoute ｜ 今天・本週・本月・客戶[46]・新店開發[5] ｜ 管�
 | POST | `/api/followups` | 新增或結案待追蹤 |
 | GET | `/api/funnel/overview?period=` | A10 頂部四個數字＋每欄卡片＋每欄轉換率（2026-11-02，period: 30\|90\|ytd） |
 | POST | `/api/funnel/result` | A10 新店記結果：`{storeId,storeName,action,dropReason?,customerId?,requestId}`，`action` 為 `advance\|drop\|keep\|confirmed`。寫階段歷程＋更新篩選分頁階段，**不寫拜訪紀錄**，轉正式不自動建客戶（見 5.9、2026-11-02 改版） |
+| GET | `/api/week?start=YYYY-MM-DD` | A5 本週：7 天的跑哪區/已確定路線/日曆事件＋這週要做的（還沒指定日期的請款／逾期沒去的店，皆靠 `buildCustomerOverview_` 只算一次，不逐日重算；2026-11-02） |
+| POST | `/api/week/day` | A5 本週：存某一天選定的區，對 `plan:{date}` KV 讀取→合併→寫回，不會洗掉既有 anchors/route（2026-11-02） |
 
 ---
 
@@ -554,3 +556,7 @@ SmartRoute ｜ 今天・本週・本月・客戶[46]・新店開發[5] ｜ 管�
 - [ ] **木木好藥局（C137）篩選分頁卡在「初訪後」待補正（2026-11-02 查明原因）**：查過 `new-pharmacy-screening/apps-script/Code.gs` 的 `markMuMuHaoAsConverted()`——這支一次性腳本寫好後從未被執行過（用現有階段推進邏輯回推：沒有任何程式路徑能把已經是「轉正式」的階段改回「初訪後」，而目前實測值是「初訪後」/2026-10-25，跟 `backfillInitialStages()` 的 `PLAN` 陣列寫的值完全吻合，代表那支腳本真的執行過、`markMuMuHaoAsConverted()` 沒有），不是執行後失敗。**不要手動執行 `markMuMuHaoAsConverted()`**——等 A10「確認已建檔」上線後，用正式流程補：篩選分頁 id=`ce73d892dd` 標「轉正式」＋階段歷程補一筆（正式代號＝`C137`），跟之後任何「當場建檔漏標」的店走同一套補正路徑，不要為這一家再開一次性腳本。
 - [ ] **gas-backend、new-pharmacy-screening 兩個 git repo 都沒有遠端備份（2026-11-02 A10 部署時發現並補建）**：A10 部署過程才發現 `gas-backend` 一直以來只有本機 1 個 commit（repo 建立時的初始匯入），`new-pharmacy-screening` 甚至完全沒有 git（連本機都沒有）；部署當天已經補上：`gas-backend` 補 commit 了 11/1（@30）跟這次 A10（@31）兩批並合併回 main，`new-pharmacy-screening` 補了 `git init`＋第一個 commit（對應部署 @4）。**兩個都只在本機，沒有設定遠端**，跟 `pharmacy-smart-board`／`pharmacy-visit-app` 不一樣——本機硬碟故障就會完全遺失版本歷史。之後要評估要不要推到 GitHub 私有 repo，這次不做。
 - [ ] **GMAPS_KEY 每日用量上限還沒設（2026-11-02）**：這次已經處理好 HTTP referrer 限制（只允許 `https://bh06211301.github.io/*`、`http://localhost:3000/*`、`http://127.0.0.1:3000/*`）、API 白名單（只開 Geocoding／Maps JavaScript／Directions／Routes／Maps Embed 五個，原本將近 30 種全開——Routes 跟 Maps Embed 都是測試正式網站時才發現：A1/首頁「計算路線」呼叫 `routes.googleapis.com`，field.html「開始今日導航行程」的嵌入地圖呼叫 Maps Embed API（網域是 `www.google.com/maps/embed/...`，不是一般的 `maps.googleapis.com`，兩次稽核都沒掃到），發現後都立刻補上——Maps Embed 那次還發現 `appsheets-gps` 專案根本沒啟用這個服務，光白名單允許沒用，要另外 `gcloud services enable`）、每月帳單警示（`appsheets-gps` 專案，帳務帳戶幣別是台幣不是美金，US$10 換算成台幣 320 元整數設定，帳單管理員 bh06211301@gmail.com）。**每日用量上限（1,000次/API/天）這次先跳過**，使用者要自己去 GCP Console「API 和服務→配額與系統限制」，篩選 Geocoding API／Maps JavaScript API／Directions API／Routes API／Maps Embed API 五個服務，個別把「每日請求數」改成 1000（調低配額通常不用審核，即時生效）。
+- [x] **A5 本週（2026-11-02 完成，待部署）**：實作細節見 `CLAUDE.md`「A5 本週」一節。
+- [ ] **每年 7～8 月更新 `holidays-{year}.json`**：資料來源 data.gov.tw dataset 14718（行政院人事行政總處辦公日曆表），下載當年＋隔年 CSV（欄位：西元日期/星期/是否放假/備註，是否放假只有 0=上班、2=放假兩種值，沒有獨立補班代碼，補班日要用「週末但 0」反推），轉成 `{date:{type:'holiday'|'makeup_workday',name}}` 格式，只存例外日期（純週末不存，前端自己用 day-of-week 算灰色「休息」）。目前已有 `holidays-2026.json`（22筆）、`holidays-2027.json`（24筆）。
+- [ ] **Google 日曆 iCal 網址還沒設定**：A5 每天格子的「指定日期的事」要讀使用者 Google 主要日曆（唯讀、單一私密 iCal 網址），需要使用者去 Google 日曆設定「整合與匯出」分頁複製私密 `basic.ics` 連結，執行 `npx wrangler secret put GCAL_ICAL_URL` 才會生效；沒設定時 `/api/week` 的 `calendarEvents` 固定回空陣列，不會報錯。
+- [ ] **A5 天氣先佔位，等使用者申請 CWA 授權碼**：中央氣象署開放資料平臺免費註冊、取得「API 授權碼」後告知，才會實作讀取＋`TODOS_KV` 快取 3 小時（使用者 2026-11-02 決定不建 Cloudflare Cron，改成 A5 開啟時由 Worker 即時呼叫＋快取）。

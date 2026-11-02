@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜本週</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A5 本週。導覽列跟其他頁同一套樣式（故意複製，不是共用元件，見 docs/SPEC.md 待辦）。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; }
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); flex-wrap: wrap; }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .week-nav-btn { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .week-nav-btn:hover { background: var(--sr-bg-subtle); }
+  .week-range-label { font-size: var(--sr-text-md); color: var(--sr-ink-2); }
+
+  .band-row { display: flex; gap: var(--sr-space-5); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line-soft); flex-wrap: wrap; }
+  .band-pill {
+    display: inline-flex; align-items: center; gap: var(--sr-space-3); font-size: var(--sr-text-sm);
+    padding: var(--sr-space-2) var(--sr-space-5); border-radius: var(--sr-radius-pill); font-weight: var(--sr-weight-medium);
+  }
+  .band-pill.dispatch { background: var(--sr-primary-tint); color: var(--sr-primary-hover); }
+  .band-pill.billing { background: var(--sr-billing-tint); color: #7A5A17; }
+
+  .error-banner {
+    margin: 0 var(--sr-space-8); padding: var(--sr-space-4) var(--sr-space-5); border-radius: var(--sr-radius-md);
+    background: var(--sr-danger-tint); color: var(--sr-danger); font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold);
+    margin-top: var(--sr-space-4);
+  }
+
+  .week-body { display: flex; }
+  @media (max-width: 1100px) { .week-body { flex-direction: column; } }
+  .week-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--sr-space-4); padding: var(--sr-space-7) var(--sr-space-8); }
+  @media (max-width: 1100px) { .week-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); } }
+
+  .day-cell {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-5);
+    display: flex; flex-direction: column; gap: var(--sr-space-3); min-height: 220px; background: var(--sr-bg);
+  }
+  .day-cell.weekend { background: var(--sr-bg-subtle); }
+  .day-cell.is-today { border-color: var(--sr-primary); box-shadow: 0 0 0 1px var(--sr-primary) inset; }
+  .day-cell.drag-over { border-color: var(--sr-primary); background: var(--sr-primary-tint); }
+  .day-cell.dispatch-day { border-top: 4px solid var(--sr-primary-soft); }
+  .day-cell.billing-day { border-top: 4px solid var(--sr-billing-soft); }
+  .day-cell.dispatch-day.billing-day { border-top: 4px solid var(--sr-primary-soft); box-shadow: inset 0 4px 0 -1px var(--sr-billing-soft); }
+
+  .day-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .day-date { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
+  .day-weekday { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .day-tags { display: flex; gap: var(--sr-space-2); flex-wrap: wrap; }
+  .day-tag { font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .day-tag.holiday { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .day-tag.weekend { background: var(--sr-bg-muted); color: var(--sr-ink-2); }
+  .day-tag.makeup { background: var(--sr-billing-tint); color: #7A5A17; }
+  .day-tag.route { background: var(--sr-ink); color: var(--sr-on-dark); }
+
+  .day-weather { font-size: var(--sr-text-xs); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-sm); padding: var(--sr-space-2) var(--sr-space-3); }
+
+  .region-select { width: 100%; height: 30px; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-3); font-size: var(--sr-text-xs); font-family: var(--sr-font); background: var(--sr-bg); }
+
+  .day-events { display: flex; flex-direction: column; gap: 4px; font-size: var(--sr-text-xs); }
+  .day-event { padding: 2px 6px; border-radius: var(--sr-radius-sm); background: var(--sr-bg-subtle); color: var(--sr-ink-2); }
+  .day-event.followup { background: var(--sr-primary-tint); color: var(--sr-primary-hover); }
+  .day-hint { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+
+  .day-plan-link { margin-top: auto; font-size: var(--sr-text-xs); text-decoration: underline; color: var(--sr-primary); background: none; border: none; cursor: pointer; padding: 0; text-align: left; font-family: var(--sr-font); }
+
+  .sidebar { width: 340px; flex-shrink: 0; border-left: 1px solid var(--sr-line); background: var(--sr-bg-subtle); padding: var(--sr-space-7); }
+  @media (max-width: 1100px) { .sidebar { width: 100%; border-left: none; border-top: 1px solid var(--sr-line); } }
+  .sidebar-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); }
+  .sidebar-group-title { font-size: var(--sr-text-xs); color: var(--sr-ink-3); font-weight: var(--sr-weight-bold); margin: var(--sr-space-5) 0 var(--sr-space-3); }
+  .sidebar-empty { font-size: var(--sr-text-xs); color: var(--sr-ink-3); padding: var(--sr-space-3) 0; }
+
+  .todo-card {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); background: var(--sr-bg);
+    padding: var(--sr-space-4); margin-bottom: var(--sr-space-3); cursor: grab;
+  }
+  .todo-card:active { cursor: grabbing; }
+  .todo-card.dragging { opacity: 0.4; }
+  .todo-card-name { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
+  .todo-card-detail { font-size: var(--sr-text-xs); color: var(--sr-ink-2); margin-top: 2px; }
+  .todo-card-scheduled { font-size: var(--sr-text-2xs); background: var(--sr-ink); color: var(--sr-on-dark); padding: 1px 6px; border-radius: var(--sr-radius-sm); margin-left: var(--sr-space-2); }
+  .todo-card-assign { display: flex; gap: var(--sr-space-2); margin-top: var(--sr-space-3); }
+  .todo-card-assign input { flex: 1; height: 28px; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-2); font-size: var(--sr-text-2xs); font-family: var(--sr-font); }
+  .todo-card-assign button { height: 28px; padding: 0 var(--sr-space-3); border-radius: var(--sr-radius-md); font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .todo-card-assign button:hover { background: var(--sr-bg-subtle); }
+
+  .badge-tier { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .badge-consignment { background: var(--sr-bg-muted); color: var(--sr-ink-2); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
+  .badge-consignment.due { background: var(--sr-danger-tint); color: var(--sr-danger); }
+
+  .loading-hint { padding: var(--sr-space-8); color: var(--sr-ink-3); font-size: var(--sr-text-sm); }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title">本週</span>
+  <button class="week-nav-btn" id="btn-prev-week">← 上一週</button>
+  <button class="week-nav-btn" id="btn-this-week">回到本週</button>
+  <button class="week-nav-btn" id="btn-next-week">下一週 →</button>
+  <span class="week-range-label" id="week-range-label"></span>
+</div>
+
+<div class="band-row" id="band-row"></div>
+<div class="error-banner" id="error-banner" style="display:none"></div>
+
+<div class="week-body">
+  <div class="week-grid" id="week-grid">
+    <div class="loading-hint">載入中...</div>
+  </div>
+  <div class="sidebar">
+    <div class="sidebar-title">這週要做的</div>
+    <div class="sidebar-group-title">還沒指定日期的請款</div>
+    <div id="sidebar-billing"><div class="sidebar-empty">載入中...</div></div>
+    <div class="sidebar-group-title">有期限的待追蹤</div>
+    <div id="sidebar-followups"><div class="sidebar-empty">載入中...</div></div>
+    <div class="sidebar-group-title">逾期沒去的店</div>
+    <div id="sidebar-overdue"><div class="sidebar-empty">載入中...</div></div>
+  </div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script>
+const { get, post, withBusy, toast, escapeHtml, genRequestId, consignmentBadge, loadHolidays, gvizDateToIso } = window.PlannerAPI;
+window.SRNav.render({ active: 'week' });
+window.SRNav.loadBadges();
+
+const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+const FOLLOWUP_LOOKAHEAD_DAYS = 21; // 側欄「有期限的待追蹤」只顯示逾期＋未來21天內，避免塞進太遠的事項
+
+function fmtDs(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function parseDs(s) { return new Date(String(s).replace(/\//g, '-') + 'T00:00:00'); }
+function mondayOf(d) {
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  const m = new Date(d);
+  m.setDate(d.getDate() + diff);
+  m.setHours(0, 0, 0, 0);
+  return m;
+}
+let weekStart = (() => {
+  const qs = new URL(location.href).searchParams.get('start');
+  return qs ? parseDs(qs) : mondayOf(new Date());
+})();
+let regionOptions = []; // [{key,label}]
+
+function updateUrl() {
+  const url = new URL(location.href);
+  url.searchParams.set('start', fmtDs(weekStart));
+  history.replaceState(null, '', url.toString());
+}
+
+async function loadRegionOptions() {
+  if (regionOptions.length) return regionOptions;
+  try {
+    const plan = await get('/api/plan?date=' + fmtDs(new Date()));
+    regionOptions = (plan.todayRegions || []).map(r => ({ key: r.key, label: r.label }));
+  } catch (e) { regionOptions = []; }
+  return regionOptions;
+}
+
+function dayTagsHtml(dateStr, weekday, holidayInfo, hasRoute) {
+  const tags = [];
+  if (holidayInfo && holidayInfo.type === 'holiday') tags.push(`<span class="day-tag holiday">${escapeHtml(holidayInfo.name)}</span>`);
+  else if (holidayInfo && holidayInfo.type === 'makeup_workday') tags.push(`<span class="day-tag makeup">補班</span>`);
+  else if (weekday === 0 || weekday === 6) tags.push(`<span class="day-tag weekend">休息</span>`);
+  if (hasRoute) tags.push(`<span class="day-tag route">已確定路線</span>`);
+  return tags.join('');
+}
+
+function dayHintHtml(holidayInfo) {
+  if (holidayInfo && holidayInfo.type === 'holiday') return `<div class="day-hint">📌 假日，建議先確認店家有沒有開</div>`;
+  if (holidayInfo && holidayInfo.type === 'makeup_workday') return `<div class="day-hint">📌 補班日，店家可能恢復正常營業</div>`;
+  return '';
+}
+
+function regionSelectHtml(dateStr, currentRegion) {
+  const opts = ['<option value="">（未排）</option>']
+    .concat(regionOptions.map(r => `<option value="${escapeHtml(r.key)}" ${r.key === currentRegion ? 'selected' : ''}>${escapeHtml(r.label)}</option>`));
+  return `<select class="region-select" data-date="${dateStr}">${opts.join('')}</select>`;
+}
+
+function dayCellHtml(day, holidaysMap, followupsByDate, todayStr) {
+  const d = parseDs(day.date);
+  const weekday = d.getDay();
+  const dayNum = d.getDate();
+  const isDispatch = dayNum >= 1 && dayNum <= 5;
+  const isBilling = dayNum >= 25 && dayNum <= 30;
+  const holidayInfo = holidaysMap[day.date] || null;
+  const events = (day.calendarEvents || []).map(e => `<div class="day-event">📅 ${escapeHtml(e.title)}</div>`).join('');
+  const followupItems = (followupsByDate[day.date] || []).map(f =>
+    `<div class="day-event followup">${escapeHtml(f.storeName)}：${escapeHtml(f.item)}</div>`).join('');
+  const classes = ['day-cell'];
+  if (weekday === 0 || weekday === 6) classes.push('weekend');
+  if (day.date === todayStr) classes.push('is-today');
+  if (isDispatch) classes.push('dispatch-day');
+  if (isBilling) classes.push('billing-day');
+  return `<div class="${classes.join(' ')}" data-date="${day.date}">
+    <div class="day-head">
+      <span class="day-date">${d.getMonth() + 1}/${d.getDate()}</span>
+      <span class="day-weekday">週${WEEKDAY_NAMES[weekday]}</span>
+    </div>
+    <div class="day-tags">${dayTagsHtml(day.date, weekday, holidayInfo, day.hasRoute)}</div>
+    ${dayHintHtml(holidayInfo)}
+    <div class="day-weather">🌤️ 天氣（尚未串接，待申請 CWA 授權碼）</div>
+    ${regionSelectHtml(day.date, day.region)}
+    <div class="day-events">${events}${followupItems}</div>
+    <button class="day-plan-link" data-date="${day.date}">規劃這天的店 →</button>
+  </div>`;
+}
+
+// 單張卡片渲染失敗（例如後端漏帶某個欄位）不該讓整組清單都卡在空白——2026-11-02 實測踩過
+// consignmentBadge() 缺欄位導致整個 .map() 丟例外、三組清單全部卡在「載入中」的案例。
+// 出錯的那張改顯示「資料不完整」，其他卡片照常顯示。
+function safeCardHtml(renderFn, item) {
+  try { return renderFn(item); } catch (e) {
+    console.error('卡片渲染失敗', item, e);
+    return `<div class="todo-card"><div class="todo-card-name">${escapeHtml(item?.name || '')}</div><div class="todo-card-detail">⚠️ 資料不完整，無法顯示</div></div>`;
+  }
+}
+
+function billingCardHtml(item) {
+  const badge = consignmentBadge(item);
+  return `<div class="todo-card" draggable="true" data-kind="billing" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" data-amount="${item.consignmentAllTotal}">
+    <div class="todo-card-name">${escapeHtml(item.name)}</div>
+    <div class="todo-card-detail">${badge.html || '待對帳'}</div>
+    <div class="todo-card-assign">
+      <input type="date" class="assign-date-input">
+      <button class="assign-btn">排入</button>
+    </div>
+  </div>`;
+}
+
+function followupCardHtml(f) {
+  const iso = gvizDateToIso(f.deadline);
+  const overdue = iso && iso < fmtDs(new Date());
+  return `<div class="todo-card" draggable="true" data-kind="followup" data-id="${escapeHtml(f.followupId)}" data-name="${escapeHtml(f.storeName)}">
+    <div class="todo-card-name">${escapeHtml(f.storeName)}${overdue ? '<span class="todo-card-scheduled" style="background:var(--sr-danger)">逾期</span>' : ''}</div>
+    <div class="todo-card-detail">${escapeHtml(f.item)}・期限 ${escapeHtml(iso || f.deadline || '')}</div>
+    <div class="todo-card-assign">
+      <input type="date" class="assign-date-input" value="${iso || ''}">
+      <button class="assign-btn">改期到</button>
+    </div>
+  </div>`;
+}
+
+function overdueCardHtml(item) {
+  const scheduledHtml = item.scheduledDate
+    ? `<span class="todo-card-scheduled">已排 ${(() => { const d = parseDs(gvizDateToIso(item.scheduledDate) || item.scheduledDate); return isNaN(d) ? item.scheduledDate : (d.getMonth() + 1) + '/' + d.getDate(); })()}</span>`
+    : '';
+  return `<div class="todo-card" draggable="true" data-kind="overdue" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" data-followup-id="${escapeHtml(item.scheduledFollowupId || '')}">
+    <div class="todo-card-name">${escapeHtml(item.name)}${scheduledHtml}</div>
+    <div class="todo-card-detail"><span class="badge-tier">${escapeHtml(item.tier)}</span> 倍數 ${item.ratio}×</div>
+    <div class="todo-card-assign">
+      <input type="date" class="assign-date-input">
+      <button class="assign-btn">${item.scheduledDate ? '改排到' : '排入'}</button>
+    </div>
+  </div>`;
+}
+
+// 失敗時一定要讓使用者看得到——2026-11-02 實測發現 drop 事件路徑完全沒接錯誤處理（assignToDay
+// 丟出的例外變成 unhandled rejection，畫面毫無反應），按鈕路徑雖然有 withBusy 的 alert()，但瀏覽器
+// 自動化／某些情境下原生 alert 不保證被注意到。改成 assignToDay 自己接住錯誤，不管哪種觸發方式都
+// 把錯誤寫進頁面上的 #error-banner（持續顯示到下一次動作，不是像 toast 那樣2秒就消失），不再依賴
+// alert()——這樣錯誤一定會留在畫面上，不會因為原生對話框被自動化略過就看起來「沒反應」。
+function showAssignError(msg) {
+  const banner = document.getElementById('error-banner');
+  banner.textContent = '⚠️ ' + msg;
+  banner.style.display = 'block';
+}
+function clearAssignError() {
+  document.getElementById('error-banner').style.display = 'none';
+}
+
+async function assignToDay(kind, dataset, dateStr) {
+  if (!dateStr) { showAssignError('請先選日期才能排入'); return; }
+  clearAssignError();
+  try {
+    if (kind === 'billing') {
+      await post('/api/followups', {
+        storeId: dataset.id, item: `請款：${dataset.name} $${Number(dataset.amount).toLocaleString()}`,
+        who: '帳務', deadlineType: '指定日期前', deadline: dateStr, requestId: genRequestId(),
+      });
+    } else if (kind === 'followup') {
+      await post('/api/followups', { action: 'update', followupId: dataset.id, patch: { deadline: dateStr } });
+    } else if (kind === 'overdue') {
+      if (dataset.followupId) {
+        await post('/api/followups', { action: 'update', followupId: dataset.followupId, patch: { deadline: dateStr } });
+      } else {
+        await post('/api/followups', {
+          storeId: dataset.id, item: `拜訪：${dataset.name}`,
+          who: '我', deadlineType: '指定日期前', deadline: dateStr, requestId: genRequestId(),
+        });
+      }
+    }
+    toast(`已排到 ${dateStr}`);
+    await loadWeek();
+  } catch (e) {
+    showAssignError(`排入失敗（${kind}）：${e.message}`);
+  }
+}
+
+function wireDragAndDrop() {
+  document.querySelectorAll('.todo-card').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      card.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', JSON.stringify(card.dataset));
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    const btn = card.querySelector('.assign-btn');
+    const input = card.querySelector('.assign-date-input');
+    if (btn) {
+      btn.addEventListener('click', () => withBusy(btn, '排入中...', () => assignToDay(card.dataset.kind, card.dataset, input.value)));
+    }
+  });
+  document.querySelectorAll('.day-cell').forEach(cell => {
+    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); });
+    cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+    cell.addEventListener('drop', e => {
+      e.preventDefault();
+      cell.classList.remove('drag-over');
+      let dataset;
+      try { dataset = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (err) { return; }
+      assignToDay(dataset.kind, dataset, cell.dataset.date);
+    });
+  });
+  document.querySelectorAll('.day-plan-link').forEach(btn => {
+    btn.addEventListener('click', () => { location.href = `planner.html?date=${btn.dataset.date}`; });
+  });
+  document.querySelectorAll('.region-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      await post('/api/week/day', { date: sel.dataset.date, region: sel.value || null });
+      toast('已更新這天的區');
+    });
+  });
+}
+
+async function loadWeek() {
+  updateUrl();
+  const dates = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
+  document.getElementById('week-range-label').textContent =
+    `${dates[0].getMonth() + 1}/${dates[0].getDate()} ～ ${dates[6].getMonth() + 1}/${dates[6].getDate()}`;
+
+  const years = [...new Set(dates.map(d => d.getFullYear()))];
+  const todayStr = fmtDs(new Date());
+
+  const [weekData, holidaysMap, followupsData] = await Promise.all([
+    get('/api/week?start=' + fmtDs(weekStart)),
+    loadHolidays(years),
+    get('/api/followups'),
+    loadRegionOptions(),
+  ]);
+
+  // 頂部色帶：本週落在寄單期(1-5日)/請款期(25-30日)的天數
+  const dispatchDays = weekData.days.filter(d => { const n = parseDs(d.date).getDate(); return n >= 1 && n <= 5; });
+  const billingDays = weekData.days.filter(d => { const n = parseDs(d.date).getDate(); return n >= 25 && n <= 30; });
+  const bandHtml = [];
+  if (dispatchDays.length) bandHtml.push(`<span class="band-pill dispatch">📬 寄單期：${dispatchDays.map(d => (parseDs(d.date).getMonth() + 1) + '/' + parseDs(d.date).getDate()).join('、')}</span>`);
+  if (billingDays.length) bandHtml.push(`<span class="band-pill billing">💰 請款期：待收 ${weekData.billingBanner.count} 家，約 $${Math.round(weekData.billingBanner.amount).toLocaleString()}</span>`);
+  document.getElementById('band-row').innerHTML = bandHtml.join('') || '<span class="week-range-label">本週無寄單期／請款期</span>';
+
+  // 指定日期的事：待追蹤(期限=當天) 依日期分組
+  const followupsWithDeadline = (followupsData.followups || []).filter(f => f.status === '未完成' && f.deadlineType === '指定日期前' && f.deadline);
+  const followupsByDate = {};
+  followupsWithDeadline.forEach(f => {
+    const iso = gvizDateToIso(f.deadline);
+    if (!iso) return;
+    (followupsByDate[iso] = followupsByDate[iso] || []).push(f);
+  });
+
+  document.getElementById('week-grid').innerHTML = weekData.days.map(d => dayCellHtml(d, holidaysMap, followupsByDate, todayStr)).join('');
+
+  // 側欄：還沒指定日期的請款
+  document.getElementById('sidebar-billing').innerHTML = weekData.billingDue.length
+    ? weekData.billingDue.map(item => safeCardHtml(billingCardHtml, item)).join('')
+    : '<div class="sidebar-empty">目前沒有待排的請款</div>';
+
+  // 側欄：有期限的待追蹤（不在本週範圍內、且逾期或未來21天內）
+  const weekDateSet = new Set(weekData.days.map(d => d.date));
+  const lookaheadEnd = fmtDs(new Date(Date.now() + FOLLOWUP_LOOKAHEAD_DAYS * 86400000));
+  const sidebarFollowups = followupsWithDeadline
+    .filter(f => { const iso = gvizDateToIso(f.deadline); return iso && !weekDateSet.has(iso) && iso <= lookaheadEnd; })
+    .sort((a, b) => (gvizDateToIso(a.deadline) || '').localeCompare(gvizDateToIso(b.deadline) || ''));
+  document.getElementById('sidebar-followups').innerHTML = sidebarFollowups.length
+    ? sidebarFollowups.map(item => safeCardHtml(followupCardHtml, item)).join('')
+    : '<div class="sidebar-empty">沒有待排的待追蹤</div>';
+
+  // 側欄：逾期沒去的店
+  document.getElementById('sidebar-overdue').innerHTML = weekData.overdueCustomers.length
+    ? weekData.overdueCustomers.map(item => safeCardHtml(overdueCardHtml, item)).join('')
+    : '<div class="sidebar-empty">目前沒有逾期沒去的店</div>';
+
+  wireDragAndDrop();
+}
+
+document.getElementById('btn-prev-week').addEventListener('click', () => { weekStart.setDate(weekStart.getDate() - 7); loadWeek(); });
+document.getElementById('btn-next-week').addEventListener('click', () => { weekStart.setDate(weekStart.getDate() + 7); loadWeek(); });
+document.getElementById('btn-this-week').addEventListener('click', () => { weekStart = mondayOf(new Date()); loadWeek(); });
+
+loadWeek();
+</script>
+</body>
+</html>
