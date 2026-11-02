@@ -287,6 +287,11 @@ export default {
         return await handleSaveWeekDay(request, env);
       }
 
+      // ★ A7 客戶總覽：頂部分級統計＋依區域分組的格子資料（正式客戶＋開發中店），純讀取
+      if (path === '/api/overview' && request.method === 'GET') {
+        return await handleOverview(env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -2745,6 +2750,112 @@ async function handleWeekOverview(request, env) {
     overdueCustomers,
     note: 'billingBanner 是真實合計；billingDue／overdueCustomers 的「已排」判斷靠事項文字開頭' +
       '「請款：」／「拜訪：」比對未完成待追蹤，跟 /api/plan 共用 buildCustomerOverview_ 保證倍數/寄賣數字一致。',
+  });
+}
+
+// ============================================================
+// A7 客戶總覽（SPEC 5.8，2026-11-02）：純讀取彙總，格子資料，沒有寫入。
+// ============================================================
+
+// 正式客戶的倍數/分級跟 /api/plan、/api/week 共用 buildCustomerOverview_（故意傳空的
+// ruleRows/followupRows/contractByStore/consignmentByStore——A7 只要畫格子，不需要規則狀態/
+// 待追蹤倍率/寄賣提醒這些，傳空值不影響 ratio/tier/city/district 的計算，保證 A7 看到的倍數
+// 跟 A1/A5 永遠是同一套算法，不會自己兜一份另外的版本出來）。
+async function handleOverview(env) {
+  const now = new Date();
+  const todayStr = formatDateIso_(now);
+
+  const [pharmaciesRes, visitsRes, orderData, returnOrderData, screeningRows, stageHistoryRows, savedToday] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    handleVisitsSummary(env).then(r => r.json()),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    env.SCREENING_API_TOKEN
+      ? fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json()).then(d => d.rows || [])
+      : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程') : Promise.resolve([]),
+    env.TODOS_KV ? env.TODOS_KV.get(`plan:${todayStr}`, 'json') : Promise.resolve(null),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const visitMap = visitsRes.summary || {};
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, eligible, now);
+  const p70AvgMonthly = avgMonthlyPercentile_(statsById, 0.70);
+  const medianAvgMonthly = avgMonthlyPercentile_(statsById, 0.50);
+  const customerOverview = buildCustomerOverview_(eligible, statsById, p70AvgMonthly, medianAvgMonthly, [], visitMap, [], {}, {}, now);
+
+  // 「今天已排進路線」：2026-11-02 跟使用者確認過（Q5）——用真正的今天，跟其他規劃層頁面共用的
+  // 可調整「規劃日」無關，A7 是客戶層頁面，不吃 ?date= 參數。
+  const onRouteIds = new Set((savedToday?.route || []).map(s => s.id));
+
+  // 頂部漏斗：只算正式客戶 4 個分級（2026-11-02 跟使用者確認過，Q4），不含開發中階段——那是
+  // A10 已經有的另一個漏斗，這裡重複會讓兩頁資訊重疊。順序照 SPEC 4.5 表格原文。
+  const tierOrder = ['大咖', '潛力新店', '冷淡', '一般'];
+  const top = tierOrder.map(tier => {
+    const inTier = customerOverview.filter(c => c.tier === tier);
+    return {
+      tier, intervalDays: PLANNER_CONFIG.tierIntervalDays[tier],
+      count: inTier.length, overCount: inTier.filter(c => c.ratio >= 1).length,
+    };
+  });
+
+  // 開發中的店：跟 /api/funnel/overview 的 cards 同一套算法（故意複製一份，不是抽共用函式——
+  // 這個檔案裡 /api/plan、/api/funnel/overview 也是各自獨立算一次，同一慣例），只是這裡不分欄、
+  // 攤平成跟正式客戶同一種格子資料，給區域分組用。
+  const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
+  const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
+  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const developing = screeningRows
+    .filter(r => r.decision === '要去' && devStages.indexOf(r.stage) >= 0 && !possiblyConvertedIds.has(r.id))
+    .map(r => {
+      const effectiveDate = latestHistoryDate[r.id] || r.stageDate;
+      const interval = PLANNER_CONFIG.stageIntervalDays[r.stage] || null;
+      const daysSince = effectiveDate ? daysBetween(effectiveDate, now) : null;
+      const ratio = (daysSince !== null && interval) ? Math.round((daysSince / interval) * 100) / 100 : null;
+      return {
+        id: r.id, name: r.name, type: 'new-store', stage: r.stage,
+        city: r.city, district: r.district,
+        ratio, ratioTier: ratio === null ? null : ratioTierOf(ratio),
+        isOnTodayRoute: onRouteIds.has(r.id),
+      };
+    });
+
+  const customerCells = customerOverview.map(c => ({
+    id: c.id, name: c.name, type: 'customer', tier: c.tier,
+    city: c.city, district: c.district,
+    ratio: c.ratio, ratioTier: ratioTierOf(c.ratio),
+    isOnTodayRoute: onRouteIds.has(c.id),
+  }));
+
+  // 區域分組：帳單 7 分類（regionGroupOf_，跟 A1「今天可以跑的區」同一套），不是依城市分組——
+  // 2026-11-02 跟使用者確認過的既定決定，取代 SPEC 5.8 原文字面上寫的「依城市分組」。
+  const byGroupKey = {};
+  PLANNER_CONFIG.regionGroups.forEach(g => { byGroupKey[g.key] = { key: g.key, label: g.label, stores: [] }; });
+  const fallback = { key: 'other', label: PLANNER_CONFIG.regionFallbackLabel, stores: [] };
+  function bucketOf(city, district) {
+    const g = regionGroupOf_(city, district);
+    return g ? byGroupKey[g.key] : fallback;
+  }
+  [...customerCells, ...developing].forEach(cell => { bucketOf(cell.city, cell.district).stores.push(cell); });
+  const regions = PLANNER_CONFIG.regionGroups.map(g => byGroupKey[g.key]).filter(r => r.stores.length);
+  if (fallback.stores.length) regions.push(fallback);
+  regions.forEach(r => r.stores.sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))); // 倍數高到低，比較急的店排前面
+
+  return json({
+    ok: true,
+    top,
+    regions,
+    excludedCount: {
+      total: allPharmacies.length, afterExclude: eligible.length,
+      dead: allPharmacies.filter(p => p.deadReason).length,
+      dad: allPharmacies.filter(p => p.owner === '老爸').length,
+      hsinchu: allPharmacies.filter(p => PLANNER_CONFIG.excludedCities.indexOf(p.city) >= 0).length,
+      noVisit: allPharmacies.filter(p => p.status === '不拜訪').length,
+    },
+    note: '正式客戶倍數/分級跟 /api/plan、/api/week 共用 buildCustomerOverview_；開發中店倍數跟 ' +
+      '/api/funnel/overview 同一套階段公式；區域分組用帳單7分類（regionGroupOf_），不是依城市；' +
+      '排除名單（死客戶/老爸/新竹/不拜訪）完全不顯示；「今天已排」用真正今天的日期，不吃 ?date= 參數。',
   });
 }
 

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜客戶總覽</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A7 客戶總覽（docs/SPEC.md 5.8）。導覽列跟 planner.html／store-rules.html／followups.html／funnel.html 同一套樣式。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; } /* 整頁不能水平捲動，容器各自處理自己的捲動 */
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .page-header-note { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); }
+
+  /* 頂部漏斗：4 個分級卡（SPEC 5.8「上方一排漏斗階段，各顯示家數、建議間隔、超過的家數」——
+     2026-11-02 跟使用者確認過只列正式客戶 4 個分級，不含開發中階段，見 worker.js handleOverview 註解） */
+  .top-tiers { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sr-space-6); margin-bottom: var(--sr-space-8); }
+  @media (max-width: 700px) { .top-tiers { grid-template-columns: repeat(2, 1fr); } }
+  .tier-card { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-6); background: var(--sr-bg); }
+  .tier-card-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink); margin-bottom: var(--sr-space-2); }
+  .tier-card-count { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .tier-card-meta { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: var(--sr-space-2); }
+  .tier-card-over { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+
+  /* 依區域（帳單 7 分類）分組 */
+  .region-block { margin-bottom: var(--sr-space-8); }
+  .region-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
+  .region-title-count { color: var(--sr-ink-3); font-weight: var(--sr-weight-regular); font-size: var(--sr-text-sm); }
+
+  /* 倍數格（DESIGN.md 2.14） */
+  .store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 4px; }
+  .store-cell {
+    position: relative; min-height: 50px; border-radius: var(--sr-radius-sm); padding: 4px 5px 5px;
+    cursor: pointer; font-family: var(--sr-font); text-align: left; border: none;
+    display: flex; flex-direction: column; justify-content: flex-end; min-width: 0;
+  }
+  .store-cell.ratio-very-late { background: var(--sr-ratio-4); color: var(--sr-on-dark); }
+  .store-cell.ratio-late { background: var(--sr-ratio-3); color: var(--sr-ink); }
+  .store-cell.ratio-soon { background: var(--sr-ratio-2); color: var(--sr-ink); }
+  .store-cell.ratio-early { background: var(--sr-ratio-1); color: var(--sr-ink); }
+  .store-cell.on-route { box-shadow: inset 0 0 0 3px var(--sr-primary); }
+  .store-cell-name { font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .store-cell-ratio { font-size: 10px; margin-top: 1px; }
+  .store-cell-dev-badge {
+    position: absolute; top: 2px; left: 2px; font-size: 9px; font-weight: var(--sr-weight-bold);
+    background: var(--sr-bg); color: var(--sr-ink); border-radius: 3px; padding: 0 3px; line-height: 14px;
+  }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title">客戶總覽</span>
+  <span class="page-header-note">死客戶／老爸／新竹縣市／狀態=不拜訪 的店不會出現在這頁</span>
+</div>
+
+<div class="page-body">
+  <div class="top-tiers" id="top-tiers"><div class="empty-hint">載入中…</div></div>
+  <div id="regions-root"><div class="empty-hint">載入中…</div></div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script src="store-drawer.js"></script>
+<script>
+const { get, escapeHtml } = window.PlannerAPI;
+
+window.SRNav.render({ active: 'customers' });
+
+// 4.4 顏色分級 class，跟 worker.js ratioTierOf() 回傳的字串一一對應
+function ratioClassOf(tier) {
+  return tier === 'very-late' ? 'ratio-very-late' : tier === 'late' ? 'ratio-late' : tier === 'soon' ? 'ratio-soon' : 'ratio-early';
+}
+// 開發階段左上角小標（SPEC 5.8「開發中的店左上角標『發／初／二／試』」）
+const DEV_STAGE_BADGE = { '發現': '發', '初訪後': '初', '二訪後': '二', '試賣中': '試' };
+
+function tierCardHtml(t) {
+  const overText = `${t.overCount} 家該去了`;
+  return `<div class="tier-card">
+    <div class="tier-card-label">${escapeHtml(t.tier)}</div>
+    <div class="tier-card-count">${t.count} 家</div>
+    <div class="tier-card-meta">建議間隔 ${t.intervalDays} 天・${t.overCount > 0 ? `<span class="tier-card-over">${overText}</span>` : overText}</div>
+  </div>`;
+}
+
+function storeCellHtml(s) {
+  const ratioText = (s.ratio === null || s.ratio === undefined) ? '—' : s.ratio + '×';
+  const badge = s.type === 'new-store' ? `<span class="store-cell-dev-badge">${escapeHtml(DEV_STAGE_BADGE[s.stage] || '?')}</span>` : '';
+  const cls = ['store-cell', ratioClassOf(s.ratioTier || 'early')];
+  if (s.isOnTodayRoute) cls.push('on-route');
+  return `<button class="${cls.join(' ')}" data-action="open-drawer" data-id="${escapeHtml(s.id)}" title="${escapeHtml(s.name)}">
+    ${badge}
+    <span class="store-cell-name">${escapeHtml(s.name)}</span>
+    <span class="store-cell-ratio">${ratioText}</span>
+  </button>`;
+}
+
+function regionBlockHtml(r) {
+  return `<div class="region-block">
+    <div class="region-title">${escapeHtml(r.label)} <span class="region-title-count">（${r.stores.length} 家）</span></div>
+    <div class="store-grid">${r.stores.map(storeCellHtml).join('')}</div>
+  </div>`;
+}
+
+async function load() {
+  try {
+    const d = await get('/api/overview');
+    document.getElementById('top-tiers').innerHTML = (d.top || []).map(tierCardHtml).join('');
+    const regionsRoot = document.getElementById('regions-root');
+    if (!d.regions || !d.regions.length) { regionsRoot.innerHTML = '<div class="empty-hint">沒有資料</div>'; return; }
+    regionsRoot.innerHTML = d.regions.map(regionBlockHtml).join('');
+  } catch (e) {
+    document.getElementById('top-tiers').innerHTML = '';
+    document.getElementById('regions-root').innerHTML = `<div class="empty-hint">載入失敗：${e.message}</div>`;
+  }
+}
+
+document.body.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-action="open-drawer"]');
+  if (!t) return;
+  if (window.StoreDrawer) window.StoreDrawer.open(t.dataset.id);
+});
+
+load();
+window.SRNav.loadBadges();
+</script>
+
+</body>
+</html>
