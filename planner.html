@@ -496,6 +496,9 @@ function recRowHtml(item) {
     : `${tierBadgeHtml(item.tier)}${alertBadgeHtml(item.alert)}${consignmentBadge(item).html}`;
   const ruleLine = (item.ruleStatus?.rules?.length)
     ? `<div class="rec-rule">規則：${escapeHtml(item.ruleStatus.rules.join('、'))}</div>` : '';
+  // 新店開發才顯示地址（篩選分頁有完整地址欄；正式客戶這裡沒有，維持原本不顯示）
+  const addressLine = (isNewStore && item.address)
+    ? `<div class="rec-reason">${escapeHtml(item.address)}</div>` : '';
   return `<div class="rec-row ${selected ? 'selected' : ''} ${blocked ? 'blocked' : ''}" data-id="${escapeHtml(item.id)}">
     <input type="checkbox" class="rec-check" data-action="toggle-col2" data-id="${escapeHtml(item.id)}"
       ${selected ? 'checked' : ''} ${blocked ? 'disabled title="規則擋住，無法加入"' : ''}>
@@ -504,6 +507,7 @@ function recRowHtml(item) {
         <button class="rec-name" data-action="open-drawer" data-id="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>
       </div>
       <div class="rec-badges">${badgesHtml}</div>
+      ${addressLine}
       <div class="rec-reason">${escapeHtml(item.reason)}</div>
       ${ruleLine}
     </div>

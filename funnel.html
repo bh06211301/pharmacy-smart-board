@@ -192,7 +192,7 @@ function conversionText(conv) {
 }
 
 function cardHtml(c, stage) {
-  const regionText = [c.city, c.district].filter(Boolean).join(' ') || '—';
+  const regionText = c.address || [c.city, c.district].filter(Boolean).join(' ') || '—';
 
   // 轉正式／放棄是終點階段：不會再有下一步，不顯示倍數/下一步/操作按鈕，改顯示結果本身
   if (stage === '轉正式' || stage === '放棄') {

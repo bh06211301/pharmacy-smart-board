@@ -2365,6 +2365,7 @@ async function handlePlannerPlan(request, env) {
     const ruleStatus = evalRuleStatus(ruleRows, id, planDate);
     list.push({
       id, name: r.name, type: 'new-store', stage,
+      city: r.city, district: r.district, address: r.address,
       daysSince, interval, ratio: Math.round(ratio * 100) / 100, ratioTier: ratioTierOf(ratio),
       score, followupItems: followup.items, ruleStatus,
       reason: `${daysSince} / ${interval} 天 = ${(Math.round(ratio * 100) / 100)} 倍` +
@@ -3011,7 +3012,7 @@ async function handleFunnelOverview(request, env) {
       const daysSince = effectiveDate ? daysBetween(effectiveDate, now) : null;
       const ratio = (daysSince !== null && interval) ? Math.round((daysSince / interval) * 100) / 100 : null;
       return {
-        id: r.id, name: r.name, city: r.city, district: r.district, stage: r.stage,
+        id: r.id, name: r.name, city: r.city, district: r.district, address: r.address, stage: r.stage,
         daysSince, ratio, possiblyConverted: possiblyConvertedIds.has(r.id),
         dropReason: r.stage === '放棄' ? (r.dropReason || null) : null,
         customerId: r.stage === '轉正式' ? (convertedCustomerId[r.id] || null) : null,
