@@ -51,9 +51,9 @@
   .stat-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
   .stat-value.muted { font-size: var(--sr-text-md); color: var(--sr-ink-3); font-weight: var(--sr-weight-regular); }
 
-  /* 六欄看板 */
-  .board { display: grid; grid-template-columns: repeat(6, minmax(var(--sr-col-min), 1fr)); gap: var(--sr-space-6); overflow-x: auto; }
-  @media (max-width: 1400px) { .board { grid-template-columns: repeat(6, 260px); } }
+  /* 六欄看板：平均分配在畫面寬度內，不設最小欄寬（--sr-col-min 是 A1 三欄用的，六欄會太寬），不水平捲動 */
+  .board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sr-space-5); }
+  @media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
   .board-col { background: var(--sr-bg-subtle); border-radius: var(--sr-radius-lg); padding: var(--sr-space-5); min-width: 0; }
   .col-header { margin-bottom: var(--sr-space-5); }
   .col-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
@@ -192,13 +192,26 @@ function conversionText(conv) {
 }
 
 function cardHtml(c, stage) {
+  const regionText = [c.city, c.district].filter(Boolean).join(' ') || '—';
+
+  // 轉正式／放棄是終點階段：不會再有下一步，不顯示倍數/下一步/操作按鈕，改顯示結果本身
+  if (stage === '轉正式' || stage === '放棄') {
+    const detail = stage === '轉正式'
+      ? `正式代號：${c.customerId ? escapeHtml(c.customerId) : '—'}`
+      : `放棄原因：${c.dropReason ? escapeHtml(c.dropReason) : '—'}`;
+    return `<div class="card" data-id="${escapeHtml(c.id)}">
+      <button class="card-name" data-action="open-drawer" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>
+      <div class="card-meta">${escapeHtml(regionText)}</div>
+      <div class="card-ratio">${detail}</div>
+    </div>`;
+  }
+
   const isHigh = c.ratio !== null && c.ratio >= 1;
   const nextIdx = STAGES_ORDER.indexOf(stage) + 1;
   const nextStage = nextIdx < STAGES_ORDER.length ? STAGES_ORDER[nextIdx] : null;
   const canAdvance = DEV_STAGES.indexOf(stage) >= 0 && stage !== '試賣中';
   const canDrop = DEV_STAGES.indexOf(stage) >= 0;
   const canConfirm = DEV_STAGES.indexOf(stage) >= 0;
-  const regionText = [c.city, c.district].filter(Boolean).join(' ') || '—';
   return `<div class="card ${isHigh ? 'ratio-high' : ''}" data-id="${escapeHtml(c.id)}">
     <button class="card-name" data-action="open-drawer" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>
     <div class="card-meta">${escapeHtml(regionText)} ・ 已 ${c.daysSince === null ? '—' : c.daysSince} 天</div>

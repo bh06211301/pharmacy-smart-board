@@ -2810,6 +2810,18 @@ function latestStageHistoryDateByStore_(stageHistoryRows) {
   return result;
 }
 
+// 階段歷程裡「到階段＝轉正式」那筆事件的正式代號，給 A10 看板「轉正式」欄的卡片顯示用。
+function convertedCustomerIdByStore_(stageHistoryRows) {
+  const result = {};
+  stageHistoryRows.forEach(h => {
+    if (h.get('到階段') !== '轉正式') return;
+    const storeId = h.get('店代號');
+    const customerId = h.get('正式代號');
+    if (storeId && customerId) result[storeId] = customerId;
+  });
+  return result;
+}
+
 // 呼叫 new-pharmacy-screening 的 doPost 更新篩選分頁階段（stageAction: advance/drop/confirm，
 // 伺服器端驗證在 Code.gs，這裡不重複驗證階段順序）。回傳 {ok,stage} 或 {ok:false,error}，
 // 不 throw——呼叫端要能分辨「這一步失敗」跟「網路本身出錯」，兩種都要走下面的核對流程。
@@ -2987,6 +2999,7 @@ async function handleFunnelOverview(request, env) {
   const allPharmacies = pharmaciesRes.pharmacies || [];
   const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
+  const convertedCustomerId = convertedCustomerIdByStore_(stageHistoryRows);
   const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
   const stages = PLANNER_CONFIG.newStoreStages;
 
@@ -3000,6 +3013,8 @@ async function handleFunnelOverview(request, env) {
       return {
         id: r.id, name: r.name, city: r.city, district: r.district, stage: r.stage,
         daysSince, ratio, possiblyConverted: possiblyConvertedIds.has(r.id),
+        dropReason: r.stage === '放棄' ? (r.dropReason || null) : null,
+        customerId: r.stage === '轉正式' ? (convertedCustomerId[r.id] || null) : null,
       };
     });
 
