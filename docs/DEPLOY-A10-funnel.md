@@ -24,7 +24,8 @@
 | 1.1 | 程式碼已經 `clasp push` 到編輯器（2026-11-02 完成，不用再 push） | 跟手動測試用的是同一份，已驗證 `testStageHistory`／`testPlannerActions`／`testVisitGuardRejectsIncomplete` 全綠 |
 | 1.2 | `cd gas-backend && npx @google/clasp deployments`，找到 `GAS_VISIT_URL` 對應的 deployment id | 部署前再查一次，避免跟 0.1 之間有人手動改過部署 |
 | 1.3 | `npx @google/clasp deploy -i <deploymentId> -d "A10新店開發：階段歷程寫入（addStageHistory/deleteStageHistory）"` | 這步之後 `GAS_VISIT_URL` 才會真的生效新 action |
-| 1.4 | Apps Script 編輯器「部署 → 管理部署」確認存取權限仍是「所有人」 | 每次改部署設定都要重新核對這點 |
+| 1.4 | Apps Script 編輯器「部署 → 管理部署」確認存取權限仍是「所有人」 | 每次改部署設定都要重新核對這點，**你操作** |
+| 1.5 | `curl` GET `GAS_VISIT_URL`（`doGet` 只回 `{status:'ok'}`，不是寫入）確認基本回應正常 | 2026-11-02 補：拜訪紀錄 App 下午要用這支 GAS，部署後先確認沒壞 |
 
 **回退方式**：`clasp` 沒有直接的部署版本回退指令，在「管理部署」介面手動把同一個 deployment 指回 0.1 記下的舊版本號。
 
@@ -54,19 +55,22 @@
 | 3.1.3 | `npx wrangler deployments status`，記下目前 100% 流量的版本 id | 部署前再查一次確認跟 0.3 一致，沒有其他人同時改過 |
 | 3.1.4 | `npx wrangler deploy` | 部署 `worker.js`：新增 `GET /api/funnel/overview`、`POST /api/funnel/result`；`GET /api/plan` 的新店倍數起算日改用「最近一筆階段歷程日期」 |
 | 3.1.5 | `curl https://still-meadow-0efd.bh06211301.workers.dev/health` 確認基本健康檢查 | 不能只看 deploy 指令沒報錯就當作沒事 |
+| 3.1.6 | `curl .../api/plan`，確認 `recommended` 筆數還是 60（53 正式客戶＋7 新店）、`badges.newStoreStuck` 還是 7 | 2026-11-02 補：倍數起算日邏輯改了（見 3.1.4），正式資料還沒有任何階段歷程，這兩個數字部署前後應該完全不變——不一樣就代表邏輯有問題，要停下來查 |
 
 **回退方式**：`npx wrangler rollback <3.1.3 記下的 id>`。Secrets／KV／R2 內容不受影響。
 
 ### 3.2 前端（GitHub Pages）
 
+**2026-11-02 改法**：這次的 7 個檔案已經在 `feature/a10-funnel` 分支上 commit 並推到遠端，不在 `main` 工作目錄重新指名 `git add`（工作目錄還有 `apple-preview/*.html` 刪除、`.claude/commands/` 等跟這次無關的異動，維持不動、不進這次的 commit）。改成合併分支：
+
 | # | 步驟 | 備註 |
 |---|---|---|
-| 3.2.1 | `git status` 核對要加的檔案 | ⚠️ **目前工作目錄還有跟這次無關的異動**：`apple-preview/*.html` 被刪除、`.claude/commands/`、`盤點QRcode.png`、`自定義指令說明.md` 等未追蹤檔案——這些不是 A10 的一部分，**不要用 `git add -A`** |
-| 3.2.2 | 只加這次相關的檔案：`funnel.html`（新）、`planner-nav.js`、`worker.js`、`planner-config.js`、`docs/SPEC.md`、`docs/DEPLOY-2026-11.md`、`docs/DEPLOY-A10-funnel.md` | |
-| 3.2.3 | 確認 `.dev.vars`、`CLAUDE.md`、`screenshots/` 沒有被加進來 | 已經在 `.gitignore`，部署前再看一次 `git status` 確認 |
-| 3.2.4 | `git add` 上述指名的檔案 → `git commit` → `git push` | GitHub Pages 自動更新，`funnel.html` 上線，主選單「新店開發」連結生效 |
+| 3.2.1 | `git checkout main && git merge feature/a10-funnel` | 有衝突就停下來回報，不自己判斷怎麼解 |
+| 3.2.2 | 合併後 `wrangler dev` 跑一次，確認 A1（`planner.html`）、A10（`funnel.html`）都正常載入、資料正常 | 這一步通過才繼續，不是合併完就直接推 |
+| 3.2.3 | 確認 `.dev.vars`、`CLAUDE.md`、`screenshots/` 沒有被帶進來 | 已經在 `.gitignore`，推前再看一次 `git status` 確認 |
+| 3.2.4 | `git push` | GitHub Pages 自動更新，`funnel.html` 上線，主選單「新店開發」連結生效 |
 
-**回退方式**：`git revert <commit>` 再 push，不用 `git reset --hard`（`main` 是共用分支）。
+**回退方式**：`git revert <merge commit>` 再 push，不用 `git reset --hard`（`main` 是共用分支）。
 
 ---
 
@@ -81,12 +85,19 @@
 
 ## 5. 部署後驗證（你操作）
 
+**2026-11-02 改法：「維持」「推進」會寫入真實業務紀錄（推進會真的改篩選分頁階段、維持會讓那家店倍數歸零重算），
+沒有真的拜訪不能按——這兩項延後到你實際拜訪新店時再驗證，不是這次部署的一部分。** 這次部署當下只驗 5.1、5.4、5.5。
+
 | # | 項目 | 預期結果 |
 |---|---|---|
 | 5.1 | 打開 `funnel.html`，確認六欄看板、頂部數字正常顯示 | 跟 2026-11-02 的截圖一致 |
-| 5.2 | 挑一家真實開發中新店（例如寶安藥局），「記結果」→「維持」→確認送出 | 篩選分頁該店「進入階段日期」不變；「階段歷程」分頁多一筆「從＝到＝目前階段」 |
-| 5.3 | 同一家店再「記結果」→「推進」→確認送出 | 篩選分頁該店「目前階段」真的推進一階；「階段歷程」多一筆 |
-| 5.4 | 隨便一家開發中新店按「排進某天」，選一個日期送出 | A3 待追蹤頁看得到這筆，期限類型「指定日期前」 |
+| 5.4 | 挑一家你真的要去的開發中新店，按「排進某天」，選一個你真的打算去的日期送出 | A3 待追蹤頁看得到這筆，期限類型「指定日期前」 |
 | 5.5 | **木木好藥局（id `ce73d892dd`）按「確認已建檔」，填入 `C137`，送出** | 篩選分頁該列「目前階段」變「轉正式」；「階段歷程」多一筆「正式代號=C137」；之後 A10 頂部「轉正式家數」變成 1。**這一步同時是功能驗證、也是補正 SPEC 第 11 節待辦記錄的木木好藥局真實資料缺口**，不用另外跑一次性腳本 |
+
+**延後驗證（等實際拜訪新店時再做，不是這次部署範圍）**：
+| # | 項目 | 預期結果 |
+|---|---|---|
+| 5.2 | 挑一家真實開發中新店，「記結果」→「維持」→確認送出 | 篩選分頁該店「進入階段日期」不變；「階段歷程」分頁多一筆「從＝到＝目前階段」 |
+| 5.3 | 同一家店再「記結果」→「推進」→確認送出 | 篩選分頁該店「目前階段」真的推進一階；「階段歷程」多一筆 |
 
 全部通過才算這次部署完成；任一項失敗，先回報再決定是否要照上面的回退方式退回。
