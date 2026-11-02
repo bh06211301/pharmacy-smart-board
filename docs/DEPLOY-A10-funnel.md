@@ -42,6 +42,16 @@
 
 **回退方式**：同上，在「管理部署」介面指回 0.2 記下的舊版本號。
 
+**2026-11-02 部署當下的實際狀況（@3 出過問題，補修到 @4）**：
+
+2.3 部署成 `@3` 後，照 1.5 的習慣順手做了一次唯讀 curl GET 核對，發現回應變成 Google 登入頁（926KB HTML），不是預期的 JSON——`SCREENING_API_URL` 當下真的斷了。查證過程：先排除網路/curl問題（同時測 `GAS_VISIT_URL` 還正常）、排除生效延遲（重試超過35秒都一樣），最後用 Apps Script API 直接查兩個專案的 `projects.deployments.get`，找到根因：**`gas-backend` 的 `access` 是 `ANYONE_ANONYMOUS`（真公開），`new-pharmacy-screening` 本機 `appsscript.json` 裡寫的是 `ANYONE`**——這兩個名字長得很像但完全不同（`ANYONE` 在 Apps Script API 裡的實際意思是「需要 Google 帳號登入才能用」，不是「任何人」）。
+
+這個錯值**不是這次改動造成的，是本機檔案早就存在的舊錯誤**：`@2`（原始部署）當初建立時用的是正確值，部署版本建立後就凍結，manifest 後來跑偏成 `ANYONE` 也不會影響已經存在的 `@2`；一直到這次 `clasp deploy -i` 建立全新的 `@3`，才把「當下的」manifest 值真正烤進新版本，問題才第一次浮現。影響範圍：`@3` 存活期間（約7分鐘）`SCREENING_API_URL` 需要登入才能打，當時還在線上的 `worker.js`（舊版）呼叫這支時 `.then(r => r.json())` 會因為收到 HTML 而拋錯，`/api/plan` 這段時間應該會直接噴錯——沒有任何資料被寫壞或遺失，純粹是讀取端短暫不可用。
+
+修法：把本機 `appsscript.json` 的 `access` 改回 `ANYONE_ANONYMOUS` → `clasp push`（一般 push 顯示「Skipping push」，是非互動模式下對 manifest/權限變更的確認提示被自動略過，改用 `clasp push --force` 才真的推上去）→ 用 Apps Script API 唯讀核對編輯器裡的內容確實已經更新 → 重新 `clasp deploy -i` 同一個 deployment（`@3→@4`）→ 唯讀核對 `entryPointConfig.access` 確實是 `ANYONE_ANONYMOUS` → curl 確認恢復正常（`rows: 59`，跟修復前筆數一致）。2.4 使用者在 Apps Script 編輯器肉眼複查過 `@4` 存取權限，確認是「所有人」。
+
+**教訓（已經寫進 SPEC.md 第11節，另一條記錄「兩個 repo 都沒有遠端備份」）**：這個 bug 能悄悄存在的根本原因是 `new-pharmacy-screening` 當時完全沒有 git 版控，manifest 什麼時候跑偏、是誰改的，完全沒有歷史可查。部署當天已經補上本機 git（`new-pharmacy-screening` 新建 repo＋第一個 commit，`gas-backend` 補 commit 了一直沒進版控的 11/1＋A10 兩批改動並合併回 main），但兩個都還只在本機、沒有遠端備份，之後需要單獨評估。**以後任何 Apps Script 專案的 `clasp deploy -i` 之前，建議先核對本機 manifest 的 `webapp.access` 是不是 `ANYONE_ANONYMOUS`（不是 `ANYONE`），不要只在部署完才用 curl 事後發現。**
+
 ---
 
 ## 3. pharmacy-smart-board（Worker + 前端）
