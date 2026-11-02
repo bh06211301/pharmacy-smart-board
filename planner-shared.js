@@ -104,7 +104,8 @@
     return String(city || '').replace(/臺/g, '台').trim();
   }
 
-  // 回傳依「市→區」兩層分組的結構，市/區都依字母排序：
+  // 回傳依「市→區」兩層分組的結構：市依家數由多到少排序（2026-11-02 使用者要求，同家數再依
+  // 字母排序當決勝，避免排序不穩定），區維持字母排序不變（SPEC 待辦只提到市的順序）：
   // [{ city, count, districts: [{ district, count, stores }] }]
   function groupStoresByRegion(stores) {
     const cityMap = new Map();
@@ -117,14 +118,14 @@
       districtMap.get(district).push(s);
     });
     return [...cityMap.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'))
       .map(([city, districtMap]) => {
         const districts = [...districtMap.entries()]
           .sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'))
           .map(([district, list]) => ({ district, count: list.length, stores: list }));
         const count = districts.reduce((sum, d) => sum + d.count, 0);
         return { city, count, districts };
-      });
+      })
+      .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city, 'zh-Hant'));
   }
 
   // toast 的樣式獨立注入一次，不靠頁面自己的 <style> 區塊（A2/A3 都會用到）
