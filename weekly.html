@@ -86,8 +86,19 @@
 
   .day-events { display: flex; flex-direction: column; gap: 4px; font-size: var(--sr-text-xs); }
   .day-event { padding: 2px 6px; border-radius: var(--sr-radius-sm); background: var(--sr-bg-subtle); color: var(--sr-ink-2); }
-  .day-event.followup { background: var(--sr-primary-tint); color: var(--sr-primary-hover); }
+  .day-event.followup { background: var(--sr-primary-tint); color: var(--sr-primary-hover); padding: var(--sr-space-2); cursor: grab; }
+  .day-event.followup:active { cursor: grabbing; }
+  .day-event.followup.pending { opacity: .6; font-style: italic; cursor: default; }
+  .day-event-text { font-size: var(--sr-text-2xs); margin-bottom: 3px; }
+  .day-event-actions { display: flex; gap: 3px; align-items: center; }
+  .day-event-actions input.mini { flex: 1; min-width: 0; height: 22px; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 0 3px; font-size: 10px; font-family: var(--sr-font); }
+  .day-event-actions button.mini { height: 22px; min-width: 22px; padding: 0 5px; border-radius: var(--sr-radius-sm); font-size: 10px; font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-primary-hover); color: var(--sr-primary-hover); }
+  .day-event-actions button.cancel-btn { border-color: var(--sr-danger); color: var(--sr-danger); }
   .day-hint { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+
+  /* 2026-11-02：儲存中鎖住全部可拖放/可按的介面，避免延遲時使用者誤連點/連拖造成重複送出 */
+  body.assigning .todo-card { opacity: .5; pointer-events: none; }
+  body.assigning .day-cell { opacity: .85; pointer-events: none; }
 
   .day-plan-link { margin-top: auto; font-size: var(--sr-text-xs); text-decoration: underline; color: var(--sr-primary); background: none; border: none; cursor: pointer; padding: 0; text-align: left; font-family: var(--sr-font); }
 
@@ -152,7 +163,7 @@
 <script src="planner-shared.js"></script>
 <script src="planner-nav.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId, consignmentBadge, loadHolidays, gvizDateToIso } = window.PlannerAPI;
+const { get, post, toast, escapeHtml, genRequestId, consignmentBadge, loadHolidays, gvizDateToIso } = window.PlannerAPI;
 window.SRNav.render({ active: 'week' });
 window.SRNav.loadBadges();
 
@@ -219,8 +230,7 @@ function dayCellHtml(day, holidaysMap, followupsByDate, todayStr) {
   const isBilling = dayNum >= 25 && dayNum <= 30;
   const holidayInfo = holidaysMap[day.date] || null;
   const events = (day.calendarEvents || []).map(e => `<div class="day-event">📅 ${escapeHtml(e.title)}</div>`).join('');
-  const followupItems = (followupsByDate[day.date] || []).map(f =>
-    `<div class="day-event followup">${escapeHtml(f.storeName)}：${escapeHtml(f.item)}</div>`).join('');
+  const followupItems = (followupsByDate[day.date] || []).map(f => safeCardHtml(dayFollowupChipHtml, f)).join('');
   const classes = ['day-cell'];
   if (weekday === 0 || weekday === 6) classes.push('weekend');
   if (day.date === todayStr) classes.push('is-today');
@@ -240,13 +250,28 @@ function dayCellHtml(day, holidaysMap, followupsByDate, todayStr) {
   </div>`;
 }
 
+// 已經排進某天的待追蹤，顯示在那天格子裡——2026-11-02 使用者實測回饋前是純文字、不能再拖動也
+// 不能取消，改成跟側欄卡片同一套互動：可以再拖/按按鈕改到別的天（呼叫 updateFollowup 改期限），
+// 也可以按 ✕ 取消（呼叫 deleteFollowup）。
+function dayFollowupChipHtml(f) {
+  const iso = gvizDateToIso(f.deadline);
+  return `<div class="day-event followup" draggable="true" data-kind="followup" data-id="${escapeHtml(f.followupId)}" data-name="${escapeHtml(f.storeName)}">
+    <div class="day-event-text">${escapeHtml(f.storeName)}：${escapeHtml(f.item)}</div>
+    <div class="day-event-actions">
+      <input type="date" class="assign-date-input mini" value="${iso || ''}">
+      <button class="assign-btn mini" title="改到這天輸入的日期">改</button>
+      <button class="cancel-btn mini" data-followup-id="${escapeHtml(f.followupId)}" data-label="${escapeHtml(f.storeName + '：' + f.item)}" title="取消這筆排程">✕</button>
+    </div>
+  </div>`;
+}
+
 // 單張卡片渲染失敗（例如後端漏帶某個欄位）不該讓整組清單都卡在空白——2026-11-02 實測踩過
 // consignmentBadge() 缺欄位導致整個 .map() 丟例外、三組清單全部卡在「載入中」的案例。
 // 出錯的那張改顯示「資料不完整」，其他卡片照常顯示。
 function safeCardHtml(renderFn, item) {
   try { return renderFn(item); } catch (e) {
     console.error('卡片渲染失敗', item, e);
-    return `<div class="todo-card"><div class="todo-card-name">${escapeHtml(item?.name || '')}</div><div class="todo-card-detail">⚠️ 資料不完整，無法顯示</div></div>`;
+    return `<div class="todo-card"><div class="todo-card-name">${escapeHtml(item?.name || item?.storeName || '')}</div><div class="todo-card-detail">⚠️ 資料不完整，無法顯示</div></div>`;
   }
 }
 
@@ -289,11 +314,11 @@ function overdueCardHtml(item) {
   </div>`;
 }
 
-// 失敗時一定要讓使用者看得到——2026-11-02 實測發現 drop 事件路徑完全沒接錯誤處理（assignToDay
-// 丟出的例外變成 unhandled rejection，畫面毫無反應），按鈕路徑雖然有 withBusy 的 alert()，但瀏覽器
-// 自動化／某些情境下原生 alert 不保證被注意到。改成 assignToDay 自己接住錯誤，不管哪種觸發方式都
-// 把錯誤寫進頁面上的 #error-banner（持續顯示到下一次動作，不是像 toast 那樣2秒就消失），不再依賴
-// alert()——這樣錯誤一定會留在畫面上，不會因為原生對話框被自動化略過就看起來「沒反應」。
+// 失敗時一定要讓使用者看得到——2026-11-02 第一版實測發現 drop 事件路徑完全沒接錯誤處理（例外
+// 變成 unhandled rejection，畫面毫無反應），按鈕路徑原本靠 `withBusy()` 的 alert()，但瀏覽器
+// 自動化／某些情境下原生 alert 不保證被注意到。改成 assignToDay 自己接住所有錯誤（不管拖放還是
+// 按鈕觸發都走同一個函式），寫進頁面上的 #error-banner（持續顯示到下一次動作，不是像 toast 那樣
+// 2秒就消失），不再依賴 alert()／withBusy()——這頁因此不需要再引用 withBusy。
 function showAssignError(msg) {
   const banner = document.getElementById('error-banner');
   banner.textContent = '⚠️ ' + msg;
@@ -303,9 +328,39 @@ function clearAssignError() {
   document.getElementById('error-banner').style.display = 'none';
 }
 
+// 2026-11-02 使用者實測回饋：拖下去後台延遲幾秒看起來沒反應，使用者又拖/按了一次，造成同一家店
+// 建了 2~3 筆重複待追蹤。改成「先顯示再背景存檔」＋全站鎖定：
+// - 放下/按下的瞬間立刻在目標那天格子插入一張半透明的暫時卡片，同時整頁鎖住（body.assigning，
+//   所有卡片跟日曆格子都暫時不能再拖/按），讓使用者清楚知道「正在處理，不要再點」。
+// - 成功：toast 提示＋`loadWeek()` 重新整理，暫時卡片被真正的資料取代。
+// - 失敗：移除暫時卡片、解除鎖定、把錯誤寫進常駐的 #error-banner。
+// 這是第一道防線（避免使用者在前端連點造成的重複）；gas-backend 的 handleAddFollowup_ 另外加了
+// 「同店同事項已有未完成待追蹤就不新增」的後端防線，兩邊都要有，因為前端鎖定只能擋同一個瀏覽器
+// 分頁內的連點，擋不住例如兩個分頁同時操作這種情況。
+let assignInFlight = false;
+
+function setAssigningLock(on) {
+  assignInFlight = on;
+  document.body.classList.toggle('assigning', on);
+}
+
+function renderPendingChip(dateStr, label) {
+  const container = document.querySelector(`.day-cell[data-date="${dateStr}"] .day-events`);
+  if (!container) return null;
+  const el = document.createElement('div');
+  el.className = 'day-event followup pending';
+  el.textContent = `⏳ ${label}`;
+  container.appendChild(el);
+  return el;
+}
+
 async function assignToDay(kind, dataset, dateStr) {
   if (!dateStr) { showAssignError('請先選日期才能排入'); return; }
+  if (assignInFlight) { showAssignError('上一筆還在儲存中，請稍候再試一次'); return; }
   clearAssignError();
+  setAssigningLock(true);
+  const label = kind === 'billing' ? `${dataset.name}（請款）` : kind === 'overdue' ? `${dataset.name}（拜訪）` : `${dataset.name}（改期限）`;
+  const pendingChip = renderPendingChip(dateStr, label);
   try {
     if (kind === 'billing') {
       await post('/api/followups', {
@@ -327,12 +382,34 @@ async function assignToDay(kind, dataset, dateStr) {
     toast(`已排到 ${dateStr}`);
     await loadWeek();
   } catch (e) {
+    if (pendingChip) pendingChip.remove();
     showAssignError(`排入失敗（${kind}）：${e.message}`);
+  } finally {
+    setAssigningLock(false);
+  }
+}
+
+// 取消已經排進某天的待追蹤（日曆格子裡的 ✕）——跳確認後刪除，刪除後回到右側清單（loadWeek 重新整理）。
+async function cancelAssignedItem(followupId, label) {
+  if (!confirm(`確定要取消「${label}」嗎？`)) return;
+  if (assignInFlight) { showAssignError('上一筆還在儲存中，請稍候再試一次'); return; }
+  clearAssignError();
+  setAssigningLock(true);
+  try {
+    await post('/api/followups', { delete: true, followupId });
+    toast('已取消');
+    await loadWeek();
+  } catch (e) {
+    showAssignError(`取消失敗：${e.message}`);
+  } finally {
+    setAssigningLock(false);
   }
 }
 
 function wireDragAndDrop() {
-  document.querySelectorAll('.todo-card').forEach(card => {
+  // 側欄候選卡片（.todo-card）跟已經排進某天的卡片（.day-event.followup）是同一套拖放/
+  // 按鈕指派邏輯——2026-11-02 統一處理，日曆格子裡的事項才能「再拖到別的天」。
+  document.querySelectorAll('.todo-card, .day-event.followup').forEach(card => {
     card.addEventListener('dragstart', e => {
       card.classList.add('dragging');
       e.dataTransfer.setData('text/plain', JSON.stringify(card.dataset));
@@ -341,8 +418,14 @@ function wireDragAndDrop() {
     const btn = card.querySelector('.assign-btn');
     const input = card.querySelector('.assign-date-input');
     if (btn) {
-      btn.addEventListener('click', () => withBusy(btn, '排入中...', () => assignToDay(card.dataset.kind, card.dataset, input.value)));
+      btn.addEventListener('click', () => assignToDay(card.dataset.kind, card.dataset, input.value));
     }
+  });
+  document.querySelectorAll('.cancel-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      cancelAssignedItem(btn.dataset.followupId, btn.dataset.label);
+    });
   });
   document.querySelectorAll('.day-cell').forEach(cell => {
     cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); });
