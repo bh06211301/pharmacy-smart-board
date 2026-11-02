@@ -2225,6 +2225,14 @@ function buildTodayRegions_(list, anchors, allPharmacies) {
   });
   const groups = PLANNER_CONFIG.regionGroups.map(g => ({ ...byGroupKey[g.key], estimateMinutes: regionMinutesOf_(g) }));
   if (fallback.newStoreCount || fallback.customerDueCount || fallback.deliveryCount) groups.push({ ...fallback, estimateMinutes: null });
+  // 2026-11-02：依急迫程度排序——有新店的區在前（高倍數優先，同倍數看新店家數多的），沒有新店的區排最後
+  groups.sort((a, b) => {
+    const aHas = a.newStoreCount > 0;
+    const bHas = b.newStoreCount > 0;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (b.maxRatio !== a.maxRatio) return b.maxRatio - a.maxRatio;
+    return b.newStoreCount - a.newStoreCount;
+  });
   return groups;
 }
 
