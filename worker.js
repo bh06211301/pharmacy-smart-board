@@ -266,6 +266,16 @@ export default {
         return await handleStoreDetail(request, env);
       }
 
+      // ★ A10 新店開發：頂部數字＋每欄卡片＋轉換率
+      if (path === '/api/funnel/overview' && request.method === 'GET') {
+        return await handleFunnelOverview(request, env);
+      }
+
+      // ★ A10「記結果」：advance/drop/keep/confirmed
+      if (path === '/api/funnel/result' && request.method === 'POST') {
+        return await handleFunnelResult(request, env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -2152,7 +2162,7 @@ async function handlePlannerPlan(request, env) {
   const planDate = dateParam ? new Date(dateParam) : new Date();
   if (isNaN(planDate)) return json({ error: 'date 格式不對，要 YYYY-MM-DD' }, 400);
 
-  const [pharmaciesRes, visitsRes, screeningRows, followupRows, ruleRows, orderData, returnOrderData, contractData] = await Promise.all([
+  const [pharmaciesRes, visitsRes, screeningRows, followupRows, ruleRows, orderData, returnOrderData, contractData, stageHistoryRows] = await Promise.all([
     handleGetPharmacies(null, env).then(r => r.json()),
     handleVisitsSummary(env).then(r => r.json()),
     env.SCREENING_API_TOKEN
@@ -2167,10 +2177,14 @@ async function handlePlannerPlan(request, env) {
     env.SHEET_CONTRACT
       ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
       : Promise.resolve({ rows: [], colMap: {} }),
+    // 2026-11-02：A10「階段歷程」——新店倍數的起算日改用「最近一筆階段歷程日期」，沒有歷程時才 fallback
+    // 用篩選分頁的「進入階段日期」（見下面 screeningRows.forEach）。分頁可能還不存在（會回空陣列，不報錯）。
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程') : Promise.resolve([]),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
   const visitMap = visitsRes.summary || {};
+  const latestStageHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
 
   // 2026-10-27 改版：排除死客戶／老爸／新竹縣市／狀態=不拜訪（isEligibleForTiering_，跟 /api/customer-tiers 共用），
   // 只對剩下的「我」負責正式客戶做分級與倍數排序。分級邏輯跟 /api/customer-tiers 共用 classifyTierAndAlert_。
@@ -2322,23 +2336,27 @@ async function handlePlannerPlan(request, env) {
     });
   });
 
-  // 新店開發（篩選分頁，決定＝要去，階段不是轉正式／放棄）：維持原本的階段邏輯，完全不受上面改版影響——
-  // 起算日＝進入階段日期，間隔依階段，倍數公式仍是舊版 min(倍數,ratioCap)*weight。
+  // 新店開發（篩選分頁，決定＝要去，階段不是轉正式／放棄）：間隔依階段，倍數公式仍是舊版
+  // min(倍數,ratioCap)*weight，但起算日 2026-11-02 改成「該店最近一筆階段歷程日期」（沒有歷程時
+  // fallback 用篩選分頁的進入階段日期，向下相容還沒用過 A10「記結果」的店）——每次記結果（含維持）
+  // 都會讓倍數重新起算，不會因為卡在同一階段很久、但其實業務一直在拜訪，就被誤判成「卡住」。
   // 2026-10-28 補：篩選分頁的「階段」欄位沒有自動連動──它追蹤的是「藥局每日異動追蹤」稅籍比對出來的
   // 開發線索（木木好用這條路徑的 id 是 ce73d892dd），跟 pharmacy-visit-app「新案開發」當場建檔走的是
   // 另一套暫存代號機制（木木好那次用的是 f3e4049d69→C137），兩套系統從來沒互相通知過彼此，所以同一家店
   // 有可能先被稅籍比對列成開發線索，後來又從另一條路徑直接建檔成正式客戶，篩選分頁那一列卻永遠停在
-  // 建檔前的階段文字（不會變成「轉正式」）。這裡沒有欄位可以直接查「已轉正」，只能用店名比對：
-  // 篩選分頁這一列的店名如果跟某個正式客戶完全相同，視為已經轉正，不再列進新店開發清單。
-  const realCustomerNames_ = new Set(allPharmacies.map(p => String(p.name || '').trim()).filter(Boolean));
+  // 建檔前的階段文字（不會變成「轉正式」）。這裡沒有欄位可以直接查「已轉正」，只能用店名比對（見
+  // possiblyConvertedScreeningIds_）：篩選分頁這一列的店名如果跟某個正式客戶完全相同，視為已經轉正，
+  // 不再列進新店開發清單——A10 用同一份比對結果改標「可能已轉正，請確認」而不是直接濾掉。
+  const possiblyConvertedIds_ = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   screeningRows.forEach(r => {
-    const { decision, stage, id, name } = r;
+    const { decision, stage, id } = r;
     if (decision !== '要去') return;
     if (!stage || stage === '轉正式' || stage === '放棄') return;
-    if (realCustomerNames_.has(String(name || '').trim())) return;
+    if (possiblyConvertedIds_.has(id)) return;
     const interval = PLANNER_CONFIG.stageIntervalDays[stage];
     if (!interval) return; // 不認得的階段文字，跳過不猜
-    const daysSince = daysBetween(r.stageDate, planDate);
+    const effectiveDate = latestStageHistoryDate[id] || r.stageDate;
+    const daysSince = daysBetween(effectiveDate, planDate);
     if (daysSince === null) return;
     const ratio = daysSince / interval;
     const intervalScore = Math.min(ratio, PLANNER_CONFIG.ratioCap) * PLANNER_CONFIG.intervalScoreWeight;
@@ -2346,7 +2364,7 @@ async function handlePlannerPlan(request, env) {
     const score = Math.round(intervalScore + followup.score);
     const ruleStatus = evalRuleStatus(ruleRows, id, planDate);
     list.push({
-      id, name, type: 'new-store', stage,
+      id, name: r.name, type: 'new-store', stage,
       daysSince, interval, ratio: Math.round(ratio * 100) / 100, ratioTier: ratioTierOf(ratio),
       score, followupItems: followup.items, ruleStatus,
       reason: `${daysSince} / ${interval} 天 = ${(Math.round(ratio * 100) / 100)} 倍` +
@@ -2757,6 +2775,286 @@ async function handlePlannerFollowups(request, env) {
   });
   const data = await res.json();
   return json({ ok: !!data.success, ...data });
+}
+
+// ============================================================
+// A10 新店開發（SPEC 5.9/3.7）：/api/funnel/overview、/api/funnel/result
+// ============================================================
+
+// 篩選分頁這一列的店名如果跟某個正式客戶完全相同，視為已經轉正——當場建檔（pharmacy-visit-app）
+// 跟稅籍比對（new-pharmacy-screening）是兩套從不互相通知的建檔路徑，篩選分頁的「目前階段」欄位
+// 不會自動變成「轉正式」（見下面 handlePlannerPlan 原本那段註解）。/api/plan 用這份結果直接濾掉
+// 這些店（不列進推薦清單），A10 用同一份結果改標「可能已轉正，請確認」讓使用者自己確認後走
+// 「確認已建檔」補正式代號——兩邊必須用同一份比對邏輯，不要各寫一次，否則判斷會兜不起來。
+function possiblyConvertedScreeningIds_(screeningRows, allPharmacies) {
+  const realCustomerNames = new Set(allPharmacies.map(p => String(p.name || '').trim()).filter(Boolean));
+  const ids = new Set();
+  screeningRows.forEach(r => {
+    if (!r.stage || r.stage === '轉正式' || r.stage === '放棄') return;
+    if (realCustomerNames.has(String(r.name || '').trim())) ids.add(r.id);
+  });
+  return ids;
+}
+
+// 階段歷程（店代號/日期都是文字欄位）依店代號取最新一筆的日期，給 /api/plan 跟 /api/funnel/overview
+// 共用當「倍數起算日」——兩邊都要用同一個函式，不然 A1 跟 A10 看到的同一家店倍數會兜不起來。
+// 日期是 yyyy-MM-dd 格式的文字，字串比較就能正確排序，不用轉成 Date 物件。
+function latestStageHistoryDateByStore_(stageHistoryRows) {
+  const result = {};
+  stageHistoryRows.forEach(h => {
+    const storeId = h.get('店代號');
+    const date = h.get('日期');
+    if (!storeId || !date) return;
+    if (!result[storeId] || date > result[storeId]) result[storeId] = date;
+  });
+  return result;
+}
+
+// 呼叫 new-pharmacy-screening 的 doPost 更新篩選分頁階段（stageAction: advance/drop/confirm，
+// 伺服器端驗證在 Code.gs，這裡不重複驗證階段順序）。回傳 {ok,stage} 或 {ok:false,error}，
+// 不 throw——呼叫端要能分辨「這一步失敗」跟「網路本身出錯」，兩種都要走下面的核對流程。
+async function callScreeningStageAction_(storeId, stageAction, dropReason, env) {
+  if (!env.SCREENING_API_TOKEN) return { ok: false, error: '缺少 SCREENING_API_TOKEN（wrangler secret 未設定）' };
+  try {
+    const res = await fetch(SCREENING_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: env.SCREENING_API_TOKEN, id: storeId, patch: { stageAction, dropReason } }),
+      redirect: 'follow',
+    });
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch (e) { data = null; }
+    if (data && data.ok) return { ok: true, stage: data.stage };
+    return { ok: false, error: (data && data.error) || `HTTP ${res.status}（回應內容：${text.slice(0, 200)}）` };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+// 2026-11-02（使用者要求）：篩選分頁那一步「看起來」失敗時，不能直接憑 POST 的回應內容決定要不要
+// 把剛寫的階段歷程刪掉——2026-10-31 已經踩過一次「GAS 回應看起來失敗（curl 顯示 411），但伺服器端
+// 其實已經執行成功」的坑。這裡用 doGet 重新讀一次那家店目前真正的階段，分三種結果處理：
+//   已經是目標階段 → 其實成功了，不刪歷程
+//   還是原本階段   → 真的沒執行，才刪歷程
+//   讀不到／其他值 → 狀態不明，不刪歷程，回報給使用者手動確認
+async function verifyScreeningStage_(storeId, env) {
+  if (!env.SCREENING_API_TOKEN) return { verified: false };
+  try {
+    const res = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`);
+    const data = await res.json();
+    const row = (data.rows || []).find(r => r.id === storeId);
+    if (!row) return { verified: false };
+    return { verified: true, stage: row.stage };
+  } catch (e) {
+    return { verified: false };
+  }
+}
+
+// 回滾階段歷程（補償動作）：失敗本身只記錄，不再往外拋——拋出去會蓋掉 handleFunnelResult 真正要
+// 回報的錯誤訊息，而且回滾失敗最壞情況只是多一筆孤兒歷程事件，人工清理即可，不是資料損壞。
+async function rollbackStageHistory_(eventId, env) {
+  if (!eventId) return;
+  try {
+    await fetch(GAS_VISIT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deleteStageHistory', eventId, token: env.PLANNER_API_TOKEN }),
+      redirect: 'follow',
+    });
+  } catch (e) { /* 回滾失敗不往外拋，見上方註解 */ }
+}
+
+// POST /api/funnel/result：A10「記結果」。action: advance/drop/keep/confirmed。
+// 寫入順序固定：先寫階段歷程（唯一的事實記錄，失敗就整個中止）→ keep 到此結束；
+// advance/drop/confirmed 才需要再寫篩選分頁階段，那一步失敗時走 verifyScreeningStage_ 核對再決定
+// 要不要回滾，不清空前端表單內容（放棄原因不用重打），由前端自己保留使用者輸入。
+async function handleFunnelResult(request, env) {
+  const body = await request.json();
+  const { storeId, storeName, action, dropReason, customerId, requestId } = body;
+  if (!storeId) return json({ error: '缺少 storeId' }, 400);
+  if (['advance', 'drop', 'keep', 'confirmed'].indexOf(action) < 0) {
+    return json({ error: 'action 必須是 advance／drop／keep／confirmed' }, 400);
+  }
+  if (!env.SCREENING_API_TOKEN) return json({ error: '缺少 SCREENING_API_TOKEN（wrangler secret 未設定）' }, 500);
+
+  const screeningRes = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
+  const row = (screeningRes.rows || []).find(r => r.id === storeId);
+  if (!row) return json({ error: `篩選分頁找不到這家店：${storeId}` }, 404);
+  const fromStage = row.stage;
+  const stages = PLANNER_CONFIG.newStoreStages;
+  const idx = stages.indexOf(fromStage);
+
+  let toStage, stageAction;
+  if (action === 'keep') {
+    toStage = fromStage;
+  } else if (action === 'advance') {
+    if (idx < 0 || idx > 2) {
+      return json({ error: idx === 3 ? '試賣中之後請用「確認已建檔」，不能用一般推進' : '目前階段不允許推進' }, 400);
+    }
+    toStage = stages[idx + 1];
+    stageAction = 'advance';
+  } else if (action === 'drop') {
+    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許放棄（必須是發現～試賣中之一）' }, 400);
+    if (!dropReason) return json({ error: '放棄必須填原因' }, 400);
+    toStage = '放棄';
+    stageAction = 'drop';
+  } else { // confirmed
+    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許確認已建檔（必須是發現～試賣中之一）' }, 400);
+    if (!customerId) return json({ error: '缺少 customerId' }, 400);
+    const pharmaciesRes = await handleGetPharmacies(null, env).then(r => r.json());
+    const exists = (pharmaciesRes.pharmacies || []).some(p => p.id === customerId);
+    if (!exists) return json({ error: `新客戶資料表找不到代號：${customerId}，請確認有沒有打錯字` }, 400);
+    // 2026-11-02 使用者要求：同一個正式代號不能被兩家開發中的店拿去轉正式（階段歷程裡已經有
+    // 「到階段=轉正式」且「正式代號」相同、但店代號不同的紀錄，就擋下，避免同一個代號記錯店）
+    const historyRowsForDupCheck = env.SHEET_PLANNER ? await fetchGvizRows(env.SHEET_PLANNER, '階段歷程') : [];
+    const dup = historyRowsForDupCheck.find(h =>
+      h.get('到階段') === '轉正式' && h.get('正式代號') === customerId && h.get('店代號') !== storeId);
+    if (dup) {
+      return json({ error: `代號 ${customerId} 已經被另一家開發中的店（${dup.get('店代號')} ${dup.get('店名')}）用在轉正式紀錄裡，請確認是不是打錯代號` }, 400);
+    }
+    toStage = '轉正式';
+    stageAction = 'confirm';
+  }
+
+  // 第一步：寫階段歷程。失敗就整個中止，不碰篩選分頁——這是最安全的失敗模式，使用者可以直接重按。
+  const historyRes = await fetch(GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'addStageHistory', storeId, storeName: storeName || row.name,
+      fromStage, toStage, source: 'A10', customerId: action === 'confirmed' ? customerId : '',
+      requestId, token: env.PLANNER_API_TOKEN,
+    }),
+    redirect: 'follow',
+  }).then(r => r.json()).catch(e => ({ success: false, error: String(e && e.message || e) }));
+
+  if (!historyRes.success) {
+    return json({
+      success: false, stageUpdated: false, historyWritten: false,
+      error: '階段歷程寫入失敗，沒有任何改動：' + (historyRes.error || '未知錯誤'),
+    }, 502);
+  }
+
+  // keep：只寫歷程，沒有第二個寫入點，到這裡就結束（篩選分頁階段文字本來就沒變）
+  if (action === 'keep') {
+    return json({ success: true, stageUpdated: false, historyWritten: true, stage: fromStage });
+  }
+
+  // 第二步：寫篩選分頁階段
+  const screeningWrite = await callScreeningStageAction_(storeId, stageAction, dropReason, env);
+  if (screeningWrite.ok) {
+    return json({ success: true, stageUpdated: true, historyWritten: true, stage: screeningWrite.stage });
+  }
+
+  // 第二步「看起來」失敗——核對真正的狀態再決定要不要回滾（見 verifyScreeningStage_ 註解）
+  const verify = await verifyScreeningStage_(storeId, env);
+  if (verify.verified && verify.stage === toStage) {
+    return json({
+      success: true, stageUpdated: true, historyWritten: true, stage: verify.stage,
+      warning: '篩選分頁的寫入回應異常，但核對後確認階段已經正確更新，階段歷程保留。',
+    });
+  }
+  if (verify.verified && verify.stage === fromStage) {
+    await rollbackStageHistory_(historyRes.eventId, env);
+    return json({
+      success: false, stageUpdated: false, historyWritten: false,
+      error: '篩選分頁更新失敗：' + screeningWrite.error,
+      detail: '已核對確認階段沒有被改動，剛寫入的階段歷程已回滾刪除，可以重新操作一次。',
+    }, 502);
+  }
+  // 讀不到這家店，或讀到的階段既不是原本的也不是目標的——狀態不明，不刪歷程，交給人工確認
+  return json({
+    success: false, stageUpdated: null, historyWritten: true,
+    error: '篩選分頁寫入後核對失敗，狀態不明，請手動檢查「藥局每日異動追蹤」篩選分頁這家店（' + storeId +
+      '）目前的階段，並比對「階段歷程」分頁剛寫入的這筆事件（eventId=' + (historyRes.eventId || '未知') + '）是否需要人工修正。',
+  }, 502);
+}
+
+// GET /api/funnel/overview：A10 頂部四個數字＋每欄卡片＋每欄轉換率。period: 30｜90｜ytd
+async function handleFunnelOverview(request, env) {
+  const url = new URL(request.url);
+  const period = url.searchParams.get('period') || '90';
+  const now = new Date();
+
+  const [pharmaciesRes, screeningRows, stageHistoryRows] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    env.SCREENING_API_TOKEN
+      ? fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json()).then(d => d.rows || [])
+      : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程') : Promise.resolve([]),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
+  const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
+  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const stages = PLANNER_CONFIG.newStoreStages;
+
+  const cards = screeningRows
+    .filter(r => r.decision === '要去' && r.stage)
+    .map(r => {
+      const effectiveDate = latestHistoryDate[r.id] || r.stageDate;
+      const interval = PLANNER_CONFIG.stageIntervalDays[r.stage] || null;
+      const daysSince = effectiveDate ? daysBetween(effectiveDate, now) : null;
+      const ratio = (daysSince !== null && interval) ? Math.round((daysSince / interval) * 100) / 100 : null;
+      return {
+        id: r.id, name: r.name, city: r.city, district: r.district, stage: r.stage,
+        daysSince, ratio, possiblyConverted: possiblyConvertedIds.has(r.id),
+      };
+    });
+
+  const developing = cards.filter(c => devStages.indexOf(c.stage) >= 0).length;
+  const stuck = cards.filter(c => devStages.indexOf(c.stage) >= 0 && c.ratio !== null && c.ratio >= 1).length;
+
+  // 期間篩選的起點（給「近90天轉正式家數」用，30/90 是天數，ytd 是今年 1/1）
+  let periodStart = null;
+  if (period === 'ytd') periodStart = new Date(now.getFullYear(), 0, 1);
+  else { periodStart = new Date(now); periodStart.setDate(periodStart.getDate() - (Number(period) || 90)); }
+  const periodStartStr = formatDateIso_(periodStart);
+
+  // 轉正式家數：用階段歷程的「到階段=轉正式」事件算，不是數篩選分頁現在的「目前階段」文字——
+  // 篩選分頁可能因為當場建檔漏標（見 possiblyConvertedScreeningIds_ 的註解）永遠停在舊階段，
+  // 階段歷程才是記結果真正發生過的事實記錄，之後用 A10「確認已建檔」補記的轉正也會算進來。
+  const convertedEvents = stageHistoryRows.filter(h => h.get('到階段') === '轉正式');
+  const convertedInPeriod = convertedEvents.filter(h => { const d = h.get('日期'); return d && d >= periodStartStr; });
+
+  // 發現到第一張正式單的平均天數：第一版還算不出來（見 docs/SPEC.md 討論）——需要「發現」事件的
+  // 日期＋正式代號＋訂單主檔 join，階段歷程有了正式代號，但「發現」事件要等這個功能上線後才開始累積，
+  // 現有資料不足，先回 null，前端顯示「資料累積中」。
+  const avgDaysToFirstOrder = null;
+
+  // 每欄轉換率：從階段歷程算「從 X 進來的不重複店數」vs「後來也出現過一筆 到階段=下一階段 的店數」。
+  // 樣本數低於 funnelConversionMinSamples 時回 null，前端顯示「資料累積中」而不是誤導的百分比。
+  function conversionRate_(fromStage) {
+    const nextStage = stages[stages.indexOf(fromStage) + 1];
+    const enteredIds = new Set(stageHistoryRows.filter(h => h.get('到階段') === fromStage).map(h => h.get('店代號')));
+    if (enteredIds.size < PLANNER_CONFIG.funnelConversionMinSamples) {
+      return { rate: null, samples: enteredIds.size };
+    }
+    const advancedCount = [...enteredIds].filter(id =>
+      stageHistoryRows.some(h => h.get('店代號') === id && h.get('到階段') === nextStage)).length;
+    return { rate: Math.round((advancedCount / enteredIds.size) * 1000) / 10, samples: enteredIds.size };
+  }
+
+  const columns = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'].map(stage => ({
+    stage,
+    intervalDays: PLANNER_CONFIG.stageIntervalDays[stage] || null,
+    cards: cards.filter(c => c.stage === stage),
+    conversion: (stage === '轉正式' || stage === '放棄') ? null : conversionRate_(stage),
+  }));
+
+  return json({
+    ok: true,
+    period,
+    top: { developing, stuck, convertedInPeriod: convertedInPeriod.length, avgDaysToFirstOrder },
+    columns,
+    note: '轉正式家數/轉換率讀「階段歷程」分頁（事實記錄），不是篩選分頁現在的「目前階段」文字；' +
+      '「發現到第一張正式單」第一版算不出來，見 docs/SPEC.md。',
+  });
+}
+
+function formatDateIso_(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ============================================================

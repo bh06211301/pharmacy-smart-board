@@ -17,7 +17,7 @@
     { id: 'week', label: '本週', disabled: true },
     { id: 'month', label: '本月', disabled: true },
     { id: 'customers', label: '客戶', disabled: true, badge: 'badge-customers' },
-    { id: 'new-store', label: '新店開發', disabled: true, badge: 'badge-new-store' },
+    { id: 'new-store', label: '新店開發', href: 'funnel.html', badge: 'badge-new-store' },
   ];
   const MANAGE_TABS = [
     { id: 'rules', label: '店家規則', href: 'store-rules.html' },

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜新店開發</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A10 新店開發（docs/SPEC.md 5.9）。導覽列跟 planner.html／store-rules.html／followups.html 同一套樣式。 */
+  * { box-sizing: border-box; }
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .period-pills { display: flex; gap: var(--sr-space-3); margin-left: auto; }
+  .period-pill {
+    height: 24px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+    font-size: var(--sr-text-xs); background: var(--sr-bg); border: 1px solid var(--sr-line);
+    color: var(--sr-ink-2); cursor: pointer; font-family: var(--sr-font);
+  }
+  .period-pill.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
+
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); }
+
+  /* 頂部四個數字 */
+  .top-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sr-space-6); margin-bottom: var(--sr-space-8); }
+  .stat-card { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-6); background: var(--sr-bg); }
+  .stat-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-bottom: var(--sr-space-2); }
+  .stat-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
+  .stat-value.muted { font-size: var(--sr-text-md); color: var(--sr-ink-3); font-weight: var(--sr-weight-regular); }
+
+  /* 六欄看板 */
+  .board { display: grid; grid-template-columns: repeat(6, minmax(var(--sr-col-min), 1fr)); gap: var(--sr-space-6); overflow-x: auto; }
+  @media (max-width: 1400px) { .board { grid-template-columns: repeat(6, 260px); } }
+  .board-col { background: var(--sr-bg-subtle); border-radius: var(--sr-radius-lg); padding: var(--sr-space-5); min-width: 0; }
+  .col-header { margin-bottom: var(--sr-space-5); }
+  .col-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
+  .col-meta { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .col-conversion { font-size: var(--sr-text-2xs); color: var(--sr-ink-2); margin-top: 2px; }
+
+  .card { background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); margin-bottom: var(--sr-space-4); }
+  .card.ratio-high { border: 2px solid var(--sr-danger); }
+  .card-name { background: none; border: none; padding: 0; font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); color: var(--sr-ink); text-decoration: underline; cursor: pointer; font-family: var(--sr-font); text-align: left; }
+  .card-meta { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .card-ratio { font-size: var(--sr-text-xs); margin-top: var(--sr-space-2); }
+  .card-ratio.high { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .card-tag { display: inline-block; font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); background: var(--sr-danger-tint); color: var(--sr-danger); padding: 1px 7px; border-radius: var(--sr-radius-sm); margin-top: var(--sr-space-2); }
+  .card-actions { display: flex; gap: var(--sr-space-2); margin-top: var(--sr-space-4); flex-wrap: wrap; }
+  .sr-btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-4); border-radius: var(--sr-radius-md); font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .sr-btn-sm:hover { background: var(--sr-bg-subtle); }
+  .sr-btn-sm.primary { background: var(--sr-primary); border-color: var(--sr-primary); color: var(--sr-on-dark); }
+  .empty-col-hint { font-size: var(--sr-text-xs); color: var(--sr-ink-3); text-align: center; padding: var(--sr-space-6) 0; }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+
+  /* 共用小型對話框（記結果 / 排進某天 / 確認送出），比照 pharmacy-visit-app「送出前確認步驟」的兩段式流程 */
+  .sr-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 9500; }
+  .sr-modal { width: var(--sr-dialog-w); max-width: 92vw; background: var(--sr-bg); border-radius: var(--sr-radius-xl); padding: var(--sr-space-8); }
+  .sr-modal-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-6); }
+  .sr-modal-field { margin-bottom: var(--sr-space-5); }
+  .sr-modal-field label { display: block; font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-bottom: var(--sr-space-2); }
+  .sr-modal-field input, .sr-modal-field textarea, .sr-modal-field select {
+    width: 100%; height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm); font-family: var(--sr-font); box-sizing: border-box;
+  }
+  .sr-modal-field textarea { height: 80px; padding: var(--sr-space-4); resize: vertical; }
+  .sr-modal-actions { display: flex; justify-content: flex-end; gap: var(--sr-space-4); margin-top: var(--sr-space-7); }
+  .sr-btn { height: var(--sr-btn-h); padding: 0 var(--sr-space-6); border-radius: var(--sr-radius-md); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); font-size: var(--sr-text-sm); }
+  .sr-btn.ghost { background: var(--sr-bg); border: 1px solid var(--sr-line); color: var(--sr-ink); }
+  .sr-btn.primary { background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
+  .sr-btn.danger { background: var(--sr-danger); border: none; color: var(--sr-on-dark); }
+  .sr-btn:disabled { opacity: 0.5; cursor: default; }
+  .action-choices { display: flex; gap: var(--sr-space-3); flex-wrap: wrap; }
+  .action-choice {
+    padding: var(--sr-space-4) var(--sr-space-5); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    cursor: pointer; font-size: var(--sr-text-sm); background: var(--sr-bg); font-family: var(--sr-font);
+  }
+  .action-choice.selected { border-color: var(--sr-primary); background: var(--sr-primary-tint); font-weight: var(--sr-weight-bold); }
+  .action-choice:disabled { opacity: 0.4; cursor: default; }
+  .confirm-text { font-size: var(--sr-text-md); margin-bottom: var(--sr-space-4); }
+  .confirm-error { color: var(--sr-danger); font-size: var(--sr-text-sm); margin-top: var(--sr-space-4); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title">新店開發</span>
+  <div class="period-pills" id="period-pills">
+    <button class="period-pill active" data-period="30">30天</button>
+    <button class="period-pill" data-period="90">90天</button>
+    <button class="period-pill" data-period="ytd">今年</button>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="top-stats" id="top-stats">
+    <div class="stat-card"><div class="stat-label">開發中家數</div><div class="stat-value" id="stat-developing">—</div></div>
+    <div class="stat-card"><div class="stat-label">卡住家數</div><div class="stat-value" id="stat-stuck">—</div></div>
+    <div class="stat-card"><div class="stat-label" id="stat-converted-label">近90天轉正式家數</div><div class="stat-value" id="stat-converted">—</div></div>
+    <div class="stat-card"><div class="stat-label">發現到第一張正式單平均天數</div><div class="stat-value muted" id="stat-avg-days">資料累積中</div></div>
+  </div>
+
+  <div id="board-root"><div class="empty-hint">載入中…</div></div>
+</div>
+
+<!-- 記結果 / 排進某天 / 確認送出 共用的對話框容器 -->
+<div id="modal-root"></div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script src="store-drawer.js"></script>
+<script>
+const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+window.SRNav.render({ active: 'new-store' });
+
+const STAGES_ORDER = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'];
+const DEV_STAGES = ['發現', '初訪後', '二訪後', '試賣中'];
+
+let overviewData = null;
+let period = '30';
+
+async function loadOverview() {
+  try {
+    overviewData = await get(`/api/funnel/overview?period=${period}`);
+    renderAll();
+  } catch (e) {
+    document.getElementById('board-root').innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById('period-pills').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-period]');
+  if (!btn) return;
+  period = btn.dataset.period;
+  document.querySelectorAll('#period-pills .period-pill').forEach(b => b.classList.toggle('active', b === btn));
+  loadOverview();
+});
+
+function periodLabel() {
+  return period === 'ytd' ? '今年' : `近${period}天`;
+}
+
+function renderAll() {
+  if (!overviewData) return;
+  const top = overviewData.top || {};
+  document.getElementById('stat-developing').textContent = top.developing ?? '—';
+  document.getElementById('stat-stuck').textContent = top.stuck ?? '—';
+  document.getElementById('stat-converted-label').textContent = `${periodLabel()}轉正式家數`;
+  document.getElementById('stat-converted').textContent = top.convertedInPeriod ?? '—';
+  const avgEl = document.getElementById('stat-avg-days');
+  if (top.avgDaysToFirstOrder === null || top.avgDaysToFirstOrder === undefined) {
+    avgEl.textContent = '資料累積中'; avgEl.classList.add('muted');
+  } else {
+    avgEl.textContent = top.avgDaysToFirstOrder + ' 天'; avgEl.classList.remove('muted');
+  }
+  renderBoard();
+}
+
+function conversionText(conv) {
+  if (!conv) return '—';
+  if (conv.rate === null) return `資料累積中（${conv.samples} 筆）`;
+  return `轉換率 ${conv.rate}%（${conv.samples} 筆）`;
+}
+
+function cardHtml(c, stage) {
+  const isHigh = c.ratio !== null && c.ratio >= 1;
+  const nextIdx = STAGES_ORDER.indexOf(stage) + 1;
+  const nextStage = nextIdx < STAGES_ORDER.length ? STAGES_ORDER[nextIdx] : null;
+  const canAdvance = DEV_STAGES.indexOf(stage) >= 0 && stage !== '試賣中';
+  const canDrop = DEV_STAGES.indexOf(stage) >= 0;
+  const canConfirm = DEV_STAGES.indexOf(stage) >= 0;
+  const regionText = [c.city, c.district].filter(Boolean).join(' ') || '—';
+  return `<div class="card ${isHigh ? 'ratio-high' : ''}" data-id="${escapeHtml(c.id)}">
+    <button class="card-name" data-action="open-drawer" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>
+    <div class="card-meta">${escapeHtml(regionText)} ・ 已 ${c.daysSince === null ? '—' : c.daysSince} 天</div>
+    <div class="card-ratio ${isHigh ? 'high' : ''}">${c.ratio === null ? '倍數：—' : '倍數：' + c.ratio + (isHigh ? '（該去了）' : '')}${nextStage ? '　下一步：' + escapeHtml(nextStage) : ''}</div>
+    ${c.possiblyConverted ? '<div class="card-tag">可能已轉正，請確認</div>' : ''}
+    <div class="card-actions">
+      <button class="sr-btn-sm" data-action="schedule" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}">排進某天</button>
+      <button class="sr-btn-sm primary" data-action="result" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}"
+        data-stage="${escapeHtml(stage)}" data-can-advance="${canAdvance}" data-can-drop="${canDrop}" data-can-confirm="${canConfirm}">記結果</button>
+    </div>
+  </div>`;
+}
+
+function renderBoard() {
+  const root = document.getElementById('board-root');
+  const columns = overviewData.columns || [];
+  root.innerHTML = `<div class="board">${columns.map(col => `
+    <div class="board-col">
+      <div class="col-header">
+        <div class="col-title">${escapeHtml(col.stage)}</div>
+        <div class="col-meta">${col.intervalDays ? '建議間隔 ' + col.intervalDays + ' 天' : ''}</div>
+        <div class="col-conversion">${conversionText(col.conversion)}</div>
+      </div>
+      ${col.cards.length ? col.cards.map(c => cardHtml(c, col.stage)).join('') : '<div class="empty-col-hint">目前沒有店</div>'}
+    </div>
+  `).join('')}</div>`;
+
+  root.querySelectorAll('[data-action="open-drawer"]').forEach(btn => {
+    btn.addEventListener('click', () => { if (window.StoreDrawer) window.StoreDrawer.open(btn.dataset.id); });
+  });
+  root.querySelectorAll('[data-action="schedule"]').forEach(btn => {
+    btn.addEventListener('click', () => openScheduleModal(btn.dataset.id, btn.dataset.name));
+  });
+  root.querySelectorAll('[data-action="result"]').forEach(btn => {
+    btn.addEventListener('click', () => openResultModal({
+      id: btn.dataset.id, name: btn.dataset.name, stage: btn.dataset.stage,
+      canAdvance: btn.dataset.canAdvance === 'true', canDrop: btn.dataset.canDrop === 'true',
+      canConfirm: btn.dataset.canConfirm === 'true',
+    }));
+  });
+}
+
+// ---------- 排進某天：addFollowup，期限類型固定「指定日期前」，日期一定要使用者選 ----------
+function openScheduleModal(storeId, storeName) {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="sr-modal-overlay" id="schedule-overlay">
+    <div class="sr-modal">
+      <div class="sr-modal-title">排進某天：${escapeHtml(storeName)}</div>
+      <div class="sr-modal-field">
+        <label>指定日期（必填）</label>
+        <input type="date" id="schedule-date">
+      </div>
+      <div class="sr-modal-actions">
+        <button class="sr-btn ghost" id="schedule-cancel">取消</button>
+        <button class="sr-btn primary" id="schedule-submit">加入待追蹤</button>
+      </div>
+      <div class="confirm-error" id="schedule-error" hidden></div>
+    </div>
+  </div>`;
+  document.getElementById('schedule-cancel').addEventListener('click', closeModal);
+  document.getElementById('schedule-overlay').addEventListener('click', (e) => { if (e.target.id === 'schedule-overlay') closeModal(); });
+  document.getElementById('schedule-submit').addEventListener('click', async (e) => {
+    const date = document.getElementById('schedule-date').value;
+    const errEl = document.getElementById('schedule-error');
+    if (!date) { errEl.textContent = '請選擇日期'; errEl.hidden = false; return; }
+    await withBusy(e.target, '送出中…', async () => {
+      try {
+        await post('/api/followups', {
+          storeId, item: `新店開發：${storeName}，請安排拜訪`, who: '篩選器',
+          deadlineType: '指定日期前', deadline: date, requestId: genRequestId(),
+        });
+        toast('已加入待追蹤');
+        closeModal();
+      } catch (err) {
+        errEl.textContent = '失敗：' + err.message;
+        errEl.hidden = false;
+      }
+    });
+  });
+}
+
+// ---------- 記結果：兩段式（選動作 → 確認送出），比照 pharmacy-visit-app 的送出前確認步驟 ----------
+function openResultModal(card) {
+  const root = document.getElementById('modal-root');
+  let selectedAction = null; // advance | keep | drop | confirmed
+  // 2026-11-02 使用者要求：送出失敗、按「返回修改」回到這一頁時，已經打的內容不能被清空
+  // （放棄原因不用重打）——所以這兩個值要存在 openResultModal 的 closure 裡，不能只活在 DOM
+  // 裡（render() 每次都會整個重畫 innerHTML，textarea/input 不帶 value 就會變空白）。
+  let dropReasonValue = '';
+  let customerIdValue = '';
+
+  function fieldHtml() {
+    if (selectedAction === 'drop') {
+      return `<div class="sr-modal-field"><label>放棄原因（必填）</label><textarea id="result-drop-reason">${escapeHtml(dropReasonValue)}</textarea></div>`;
+    }
+    if (selectedAction === 'confirmed') {
+      return `<div class="sr-modal-field"><label>正式代號（必填，AppSheet 建好客戶後填入，例如 C137）</label><input type="text" id="result-customer-id" value="${escapeHtml(customerIdValue)}"></div>`;
+    }
+    return '';
+  }
+
+  function render() {
+    root.innerHTML = `<div class="sr-modal-overlay" id="result-overlay">
+      <div class="sr-modal">
+        <div class="sr-modal-title">記結果：${escapeHtml(card.name)}（目前：${escapeHtml(card.stage)}）</div>
+        <div class="action-choices">
+          ${card.canAdvance ? `<button class="action-choice ${selectedAction === 'advance' ? 'selected' : ''}" data-choice="advance">推進到下一階段</button>` : ''}
+          <button class="action-choice ${selectedAction === 'keep' ? 'selected' : ''}" data-choice="keep">維持</button>
+          ${card.canDrop ? `<button class="action-choice ${selectedAction === 'drop' ? 'selected' : ''}" data-choice="drop">放棄</button>` : ''}
+          ${card.canConfirm ? `<button class="action-choice ${selectedAction === 'confirmed' ? 'selected' : ''}" data-choice="confirmed">確認已建檔（轉正式）</button>` : ''}
+        </div>
+        <div style="margin-top:var(--sr-space-5)">${fieldHtml()}</div>
+        <div class="sr-modal-actions">
+          <button class="sr-btn ghost" id="result-cancel">取消</button>
+          <button class="sr-btn primary" id="result-next" ${selectedAction ? '' : 'disabled'}>下一步</button>
+        </div>
+        <div class="confirm-error" id="result-error" hidden></div>
+      </div>
+    </div>`;
+    root.querySelectorAll('[data-choice]').forEach(btn => {
+      btn.addEventListener('click', () => { selectedAction = btn.dataset.choice; render(); });
+    });
+    document.getElementById('result-cancel').addEventListener('click', closeModal);
+    document.getElementById('result-overlay').addEventListener('click', (e) => { if (e.target.id === 'result-overlay') closeModal(); });
+    const nextBtn = document.getElementById('result-next');
+    if (nextBtn) nextBtn.addEventListener('click', () => onNext());
+  }
+
+  function onNext() {
+    const errEl = document.getElementById('result-error');
+    if (selectedAction === 'drop') {
+      dropReasonValue = document.getElementById('result-drop-reason').value.trim();
+      if (!dropReasonValue) { errEl.textContent = '放棄必須填原因'; errEl.hidden = false; return; }
+    }
+    if (selectedAction === 'confirmed') {
+      customerIdValue = document.getElementById('result-customer-id').value.trim();
+      if (!customerIdValue) { errEl.textContent = '請填入正式代號'; errEl.hidden = false; return; }
+    }
+    const toStage = selectedAction === 'keep' ? card.stage
+      : selectedAction === 'drop' ? '放棄'
+      : selectedAction === 'confirmed' ? '轉正式'
+      : STAGES_ORDER[STAGES_ORDER.indexOf(card.stage) + 1];
+    openConfirmModal({ card, action: selectedAction, dropReason: dropReasonValue, customerId: customerIdValue, toStage, onBack: render });
+  }
+
+  render();
+}
+
+function openConfirmModal({ card, action, dropReason, customerId, toStage, onBack }) {
+  const root = document.getElementById('modal-root');
+  const toText = action === 'confirmed' ? `${toStage}（${escapeHtml(customerId)}）` : escapeHtml(toStage);
+  root.innerHTML = `<div class="sr-modal-overlay" id="confirm-overlay">
+    <div class="sr-modal">
+      <div class="sr-modal-title">確認送出</div>
+      <div class="confirm-text">${escapeHtml(card.name)}：${escapeHtml(card.stage)} → ${toText}，確定？</div>
+      ${action === 'drop' ? `<div class="card-meta">放棄原因：${escapeHtml(dropReason)}</div>` : ''}
+      <div class="sr-modal-actions">
+        <button class="sr-btn ghost" id="confirm-back">返回修改</button>
+        <button class="sr-btn ${action === 'drop' ? 'danger' : 'primary'}" id="confirm-submit">確認送出</button>
+      </div>
+      <div class="confirm-error" id="confirm-error" hidden></div>
+    </div>
+  </div>`;
+  document.getElementById('confirm-back').addEventListener('click', onBack);
+  document.getElementById('confirm-submit').addEventListener('click', async (e) => {
+    const errEl = document.getElementById('confirm-error');
+    await withBusy(e.target, '送出中…', async () => {
+      try {
+        const resp = await post('/api/funnel/result', {
+          storeId: card.id, storeName: card.name, action,
+          dropReason: action === 'drop' ? dropReason : undefined,
+          customerId: action === 'confirmed' ? customerId : undefined,
+          requestId: genRequestId(),
+        });
+        if (resp.warning) toast(resp.warning); else toast('已更新');
+        closeModal();
+        await loadOverview();
+      } catch (err) {
+        // 2026-11-02 使用者要求：失敗時保留表單內容，不清空（放棄原因不用重打），回到選動作畫面
+        errEl.textContent = '失敗：' + err.message;
+        errEl.hidden = false;
+      }
+    });
+  });
+}
+
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+}
+
+loadOverview();
+window.SRNav.loadBadges();
+</script>
+</body>
+</html>

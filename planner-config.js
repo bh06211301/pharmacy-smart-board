@@ -95,4 +95,14 @@ export const PLANNER_CONFIG = {
     soon: 0.5,      // 0.5～1.0：快到了（淺灰）
     // 0.5 以下：還早（白）
   },
+
+  // 5.9 A10 新店開發：階段順序，跟 new-pharmacy-screening/apps-script/Code.gs 的 STAGES 常數保持同步
+  // （兩個 GAS 專案不能共用程式碼，沿用 VisitAppWebhook.js normKey_ 複製一份的既有慣例）。
+  // 改階段名稱／順序時，這裡跟 Code.gs 的 STAGES 兩處都要改，否則 worker.js 算出的「到階段」文字
+  // 會跟 Code.gs 實際寫入篩選分頁的值不一致。
+  newStoreStages: ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'],
+
+  // 5.9 每欄轉換率：進入某階段的筆數（階段歷程「到階段」=該階段的事件數）低於這個門檻時，
+  // 前端顯示「資料累積中」而不是百分比，避免樣本太少時數字誤導。
+  funnelConversionMinSamples: 5,
 };
