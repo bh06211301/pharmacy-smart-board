@@ -17,18 +17,20 @@
     display: flex; align-items: center; gap: var(--sr-space-6);
     padding: 0 var(--sr-space-8);
   }
-  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); }
-  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
+  /* 窄螢幕（約640px）：分頁太多塞不下時，nav-tabs 自己橫向捲動，不要讓整頁被撐寬（2026-11-02）。
+     min-width:0 蓋掉 flex item 預設不會縮小到比內容窄的行為，overflow-x:auto 才真的生效。 */
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .nav-tab {
     font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
     height: var(--sr-nav-h); display: flex; align-items: center;
-    border-bottom: 3px solid transparent;
+    border-bottom: 3px solid transparent; flex-shrink: 0; white-space: nowrap;
   }
   .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
   .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
-  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); }
-  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
-  .nav-manage-link { font-size: var(--sr-text-sm); color: var(--sr-ink-2); text-decoration: none; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+  .nav-manage-link { font-size: var(--sr-text-sm); color: var(--sr-ink-2); text-decoration: none; white-space: nowrap; }
   .nav-badge {
     display: inline-flex; align-items: center; justify-content: center;
     height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
@@ -38,7 +40,7 @@
   /* .nav-badge 自己設了 display，跟瀏覽器預設的 [hidden]{display:none} 同一個特異度，
      誰在後面誰贏——這條在後面，所以要補這條才會真的消失，不然 0 的時候會變成空紅點 */
   .nav-badge[hidden] { display: none; }
-  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
   .plan-date-input {
     height: 32px; font-size: var(--sr-text-sm); border: 1px solid var(--sr-line);
     border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-family: var(--sr-font);
@@ -47,6 +49,10 @@
     width: 200px; height: 36px; background: var(--sr-bg-subtle); border: 1px solid var(--sr-line);
     border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-size: var(--sr-text-sm);
     font-family: var(--sr-font);
+  }
+  /* 窄螢幕：nav-right 本身固定不縮（上面），但找藥局框 200px 太寬，縮小讓 nav-brand/nav-right 還留得下 */
+  @media (max-width: 700px) {
+    .find-pharmacy-input { width: 110px; }
   }
 
   /* ---------- 頁首列（DESIGN.md 2.2） ---------- */
@@ -71,7 +77,7 @@
      寬度 ≥1200px：nav／頁首固定高度，.columns 吃掉剩下的視窗高度，三欄各自在欄內捲動──
      第②欄店家多的時候只有②自己變長，不會把整頁往下推，第③欄路線永遠留在看得到的範圍。
      寬度 <1200px：退回正常文件流（頁面本身捲動），三欄直接疊起來，不做固定高度裁切。 */
-  body { display: flex; flex-direction: column; }
+  body { display: flex; flex-direction: column; overflow-x: hidden; } /* 2026-11-02：整頁不能水平捲動，容器各自處理自己的捲動 */
   .columns {
     display: flex; flex-direction: column;
   }
