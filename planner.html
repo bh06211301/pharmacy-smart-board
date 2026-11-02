@@ -571,9 +571,10 @@ function renderRecommend() {
   const customerList = list.filter(x => x.type === 'customer');
   const newStoreList = list.filter(x => x.type === 'new-store');
 
+  // 2026-11-02 使用者要求：新店開發移到正式客戶上面
   root.innerHTML = pillsHtml +
-    groupHtml(customerList, 'customer', '正式客戶') +
-    groupHtml(newStoreList, 'newStore', '新店開發');
+    groupHtml(newStoreList, 'newStore', '新店開發') +
+    groupHtml(customerList, 'customer', '正式客戶');
 }
 
 function toggleCol2(id) {
