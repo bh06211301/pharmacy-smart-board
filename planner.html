@@ -171,6 +171,12 @@
   .anchor-type { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-xs); padding: 1px 8px; border-radius: var(--sr-radius-sm); flex-shrink: 0; }
   .anchor-line2 { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: 2px; }
   .anchor-line3 { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .anchor-dad-reminder {
+    margin-top: var(--sr-space-3); padding: var(--sr-space-3) var(--sr-space-4);
+    background: var(--sr-danger-tint); border-radius: var(--sr-radius-sm);
+    font-size: var(--sr-text-xs); color: var(--sr-danger); font-weight: var(--sr-weight-bold);
+  }
+  .anchor-dad-reminder div + div { margin-top: 2px; }
   .anchor-remove {
     position: absolute; top: 4px; right: 4px; width: 32px; height: 32px;
     display: flex; align-items: center; justify-content: center;
@@ -623,6 +629,17 @@ function anchorAreaNote(a) {
   return [area, note].filter(Boolean).join('　');
 }
 
+// 負責人＝老爸的店：送貨/請款提醒（2026-11-02），純顯示，不寫入任何資料。
+// SPEC 第11節待辦原本要替老爸的店手動建兩條提醒規則，使用者後來決定改成系統直接判斷顯示。
+function isDadStore(id) {
+  const ph = (allPharmaciesCache || []).find(p => p.id === id);
+  return !!ph && ph.owner === '老爸';
+}
+function dadReminderHtml(id) {
+  if (!isDadStore(id)) return '';
+  return `<div class="anchor-dad-reminder"><div>送貨：帳單要還給老爸</div><div>請款：收到的錢要交給老爸</div></div>`;
+}
+
 function renderAnchors() {
   const root = document.getElementById('anchors-root');
   if (!anchors.length) { root.innerHTML = '<div class="empty-hint">還沒有錨點，先輸入今天一定要去的店</div>'; return; }
@@ -635,6 +652,7 @@ function renderAnchors() {
       </div>
       <div class="anchor-line2">${escapeHtml(anchorAreaNote(a))}${a.deadline ? '　期限：' + escapeHtml(a.deadline) : ''}</div>
       <div class="anchor-line3">來源：${escapeHtml(a.item || a.source || '手動')}</div>
+      ${dadReminderHtml(a.id)}
     </div>`).join('');
 }
 

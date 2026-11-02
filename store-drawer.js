@@ -135,6 +135,12 @@
       .sr-btn-tertiary:disabled { color: var(--sr-ink-3); cursor: not-allowed; }
       .sr-btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
       .sr-btn-sm:hover { background: var(--sr-bg-subtle); }
+      .sr-dad-reminder {
+        margin: var(--sr-space-6) var(--sr-space-8) 0; padding: var(--sr-space-5);
+        background: var(--sr-danger-tint); border-radius: var(--sr-radius-md);
+        font-size: var(--sr-text-sm); color: var(--sr-danger); font-weight: var(--sr-weight-bold);
+      }
+      .sr-dad-reminder div + div { margin-top: var(--sr-space-2); }
       .sr-section { padding: var(--sr-space-7) var(--sr-space-8); border-bottom: 1px solid var(--sr-line-soft); }
       .sr-section-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); display: flex; align-items: center; justify-content: space-between; }
       .sr-empty { font-size: var(--sr-text-sm); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); text-align: center; }
@@ -518,6 +524,10 @@
           <button class="sr-btn sr-btn-tertiary" ${data.phone ? '' : 'disabled'} data-action="call-phone" data-phone="${escapeHtml(data.phone || '')}">打電話</button>
         </div>
       </div>
+      ${data.isDadStore ? `<div class="sr-dad-reminder">
+        <div>送貨：帳單要還給老爸</div>
+        <div>請款：收到的錢要交給老爸</div>
+      </div>` : ''}
       <div class="sr-drawer-body">
         ${tieringBlockHtml(data)}
         ${followupsBlockHtml(data)}

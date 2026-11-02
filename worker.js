@@ -2591,6 +2591,7 @@ async function handleStoreDetail(request, env) {
     district: pharmacy ? pharmacy.district : null,
     greeting: pharmacy ? pharmacy.greeting : null,
     phone: pharmacy ? pharmacy.phone : null,
+    isDadStore: pharmacy ? pharmacy.owner === '老爸' : false,
     excludeReason,
     tiering,
     monthlyOrders,
