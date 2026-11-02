@@ -256,6 +256,31 @@
   .route-stop-tag { font-size: var(--sr-text-2xs); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 1px 6px; color: var(--sr-ink-2); }
   .route-summary { margin-top: var(--sr-space-6); font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
 
+  /* ---------- 地圖（A9，DESIGN.md 2.16） ---------- */
+  #map-view { display: none; position: relative; }
+  #sr-map { width: 100%; height: 70vh; min-height: 480px; }
+  /* 地圖模式不用 1200px 以上三欄那套固定 100vh+overflow:hidden（那是為了讓三欄各自捲動），
+     地圖本身用自己的高度（上面 #sr-map），頁面維持正常可捲動即可，避免跟三欄版面的裁切邏輯打架 */
+  body.map-mode { height: auto !important; overflow: visible !important; }
+  .map-float-panel {
+    position: absolute; top: var(--sr-space-6); right: var(--sr-space-6); z-index: 5;
+    width: 300px; max-height: calc(70vh - 48px); overflow-y: auto;
+    background: var(--sr-bg); border: 1px solid var(--sr-ink); border-radius: var(--sr-radius-lg);
+    padding: var(--sr-space-6); box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+  }
+  .map-float-panel-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
+  .map-info-card { font-family: var(--sr-font); min-width: 180px; }
+  .map-info-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: 4px; }
+  .map-info-line { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-bottom: 4px; }
+  .map-info-actions { display: flex; gap: var(--sr-space-3); align-items: center; margin-top: var(--sr-space-3); }
+  .map-info-actions label { font-size: var(--sr-text-xs); display: flex; align-items: center; gap: 4px; }
+  .map-info-btn {
+    height: 26px; padding: 0 var(--sr-space-4); border-radius: var(--sr-radius-sm);
+    border: 1px solid var(--sr-ink); background: var(--sr-bg); font-size: var(--sr-text-2xs);
+    cursor: pointer; font-family: var(--sr-font);
+  }
+  .map-info-btn:hover { background: var(--sr-bg-subtle); }
+
   .sr-toast-planner {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999;
     background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-sm);
@@ -275,8 +300,8 @@
   <span class="page-header-placeholder" title="排在之後的階段才做">🌤️ 天氣</span>
   <span class="page-header-placeholder" title="排在之後的階段才做">假日</span>
   <div class="view-toggle">
-    <button class="view-toggle-btn active" title="目前只有清單模式，地圖排在之後的階段才做">清單</button>
-    <button class="view-toggle-btn" disabled title="排在之後的階段才做">地圖</button>
+    <button class="view-toggle-btn active" id="view-toggle-list" onclick="setViewMode('list')">清單</button>
+    <button class="view-toggle-btn" id="view-toggle-map" onclick="setViewMode('map')">地圖</button>
   </div>
   <div class="finish-time-block">
     <div class="finish-time-label">預估收工時間</div>
@@ -284,7 +309,7 @@
   </div>
 </div>
 
-<div class="columns">
+<div class="columns" id="list-view">
   <div class="col col-1">
     <div class="col-body">
       <div class="region-overview">
@@ -316,6 +341,16 @@
       <div id="route-root" style="margin-top:14px"><div class="empty-hint">在第①②欄選好店家後，按上面「計算路線」</div></div>
       <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmRoute()">確定，送到手機外勤模式</button>
     </div>
+  </div>
+</div>
+
+<!-- A9 今天（地圖，SPEC 5.3）：跟上面 #list-view 共用同一份 planData/anchors/selectedCol2Ids/
+     filterMode/groupExpanded，只是換一種畫面呈現，不是另開頁面、不是另一份資料狀態。 -->
+<div id="map-view">
+  <div id="sr-map"></div>
+  <div class="map-float-panel">
+    <div class="map-float-panel-title">今天路線</div>
+    <div id="map-route-root"><div class="empty-hint">在清單模式選好店家並按「計算路線」</div></div>
   </div>
 </div>
 
@@ -572,12 +607,14 @@ function groupHtml(items, groupKey, sectionTitle) {
 function toggleGroupExpand(groupKey) {
   groupExpanded[groupKey] = !groupExpanded[groupKey];
   renderRecommend();
+  if (viewMode === 'map') renderMap();
 }
 
 function setFilterMode(mode) {
   if (mode === 'radius' && !anchors.length) return; // 沒有錨點時這顆膠囊是灰的，點了也不動作
   filterMode = mode;
   renderRecommend();
+  if (viewMode === 'map') renderMap();
 }
 
 function renderRecommend() {
@@ -639,6 +676,7 @@ async function pickRegion(key) {
 function toggleCol2(id) {
   if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
   renderRecommend();
+  if (viewMode === 'map') renderMap();
 }
 
 function openStoreDrawer(id) {
@@ -726,6 +764,7 @@ async function removeAnchor(id) {
   renderAnchors();
   renderRecommend();
   renderSuggest();
+  if (viewMode === 'map') renderMap();
   await savePlanState();
   toast('已移除');
 }
@@ -736,6 +775,7 @@ async function addAnchor(a) {
   renderAnchors();
   renderRecommend();
   renderSuggest();
+  if (viewMode === 'map') renderMap();
   await savePlanState();
   toast('已加入今天');
 }
@@ -842,13 +882,239 @@ async function loadPlan() {
     renderRecommend();
     renderSuggest();
     renderRegionOverview();
+    if (viewMode === 'map') renderMap();
   } catch (e) {
     document.getElementById('recommend-root').innerHTML =
       `<div class="empty-hint">載入失敗：${e.message}</div>`;
   }
 }
+// ══════════════════════════════
+// A9 今天（地圖，SPEC 5.3／DESIGN.md 2.16）
+// 跟 #list-view 共用同一份 planData/anchors/selectedCol2Ids/filterMode/groupExpanded，只是換一種
+// 畫面呈現──不另開頁面、不另存一份資料狀態（2026-11-02 跟使用者確認過的架構決定，Q1）。
+// ══════════════════════════════
+let viewMode = 'list';
+try { viewMode = localStorage.getItem('sr_view_mode') || 'list'; } catch (e) {} // SPEC 6.2.4：記住上次選擇
+
+let srMap = null, srMapInfoWindow = null, srMapMarkers = [], srMapCircles = [], srMapPolyline = null;
+
+function applyViewModeUI() {
+  document.getElementById('view-toggle-list').classList.toggle('active', viewMode === 'list');
+  document.getElementById('view-toggle-map').classList.toggle('active', viewMode === 'map');
+  document.getElementById('list-view').style.display = viewMode === 'list' ? '' : 'none';
+  document.getElementById('map-view').style.display = viewMode === 'map' ? 'block' : 'none';
+  document.body.classList.toggle('map-mode', viewMode === 'map');
+}
+
+function setViewMode(mode) {
+  if (mode === viewMode) return;
+  viewMode = mode;
+  try { localStorage.setItem('sr_view_mode', mode); } catch (e) {}
+  applyViewModeUI();
+  if (mode === 'map') renderMap();
+}
+
+// 4.4 顏色分級門檻，跟 worker.js PLANNER_CONFIG.ratioColorThresholds 同一組數字——前端沒有 import
+// 設定檔，照這個檔案其他 helper（haversineKm 等）既有的「刻意複製一份」慣例，之後門檻調整兩邊要一起改。
+function ratioTierOf(ratio) {
+  if (ratio >= 1.5) return 'very-late';
+  if (ratio >= 1.0) return 'late';
+  if (ratio >= 0.5) return 'soon';
+  return 'early';
+}
+function ratioColorVar(tier) {
+  return tier === 'very-late' ? '--sr-ratio-4' : tier === 'late' ? '--sr-ratio-3' : tier === 'soon' ? '--sr-ratio-2' : '--sr-ratio-1';
+}
+// marker 顏色只能吃實際色碼，不能直接吃 CSS 變數名——讀 design-tokens.css 當下算好的值，
+// 不要另外寫死 hex（CLAUDE.md「新頁面一律引用 design-tokens.css 的變數」）。
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// 跟 renderRecommend() 的篩選鏈（排除錨點／filterMode／分級收合狀態）刻意保持一致，故意複製一份
+// 不是抽共用函式——renderRecommend() 之後單獨改動時這裡要記得一起看（跟檔案其他重複 helper 同慣例）。
+function visibleRecommendList() {
+  if (!planData) return [];
+  const excludeIds = anchorIds();
+  let list = (planData.recommended || []).filter(item => !excludeIds.has(item.id));
+  if (filterMode === 'radius') list = list.filter(item => withinAnchorRadius(item.id));
+  const customerList = list.filter(x => x.type === 'customer');
+  const newStoreList = list.filter(x => x.type === 'new-store');
+  function part(items, groupKey) {
+    const due = items.filter(x => x.ratio >= 1);
+    const notYet = items.filter(x => x.ratio < 1);
+    return groupExpanded[groupKey] ? due.concat(notYet) : due;
+  }
+  return part(newStoreList, 'newStore').concat(part(customerList, 'customer'));
+}
+
+function loadGoogleMapsSdk() {
+  return new Promise(resolve => {
+    if (window.google?.maps) { resolve(); return; }
+    const prev = window._onGMapReady;
+    window._onGMapReady = function () { if (prev) prev(); resolve(); };
+    if (!document.getElementById('gmap-script')) {
+      const s = document.createElement('script'); s.id = 'gmap-script';
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_onGMapReady&language=zh-TW`;
+      document.head.appendChild(s);
+    }
+  });
+}
+
+function routeListHtml(route) {
+  if (!route || !route.length) return '<div class="empty-hint">在清單模式選好店家並按「計算路線」</div>';
+  return route.map(s => `<div class="route-stop-row">
+      <span class="route-stop-time">${s.arrival ? fmtMin(s.arrival) : ''}</span>
+      <span class="route-stop-name ${s.isAnchor ? 'anchor' : ''}">${escapeHtml(s.name)}</span>
+      ${s.isAnchor ? '<span class="route-stop-tag">錨點</span>' : ''}
+    </div>`).join('');
+}
+function renderMapRoutePanel() {
+  const root = document.getElementById('map-route-root');
+  if (root) root.innerHTML = routeListHtml(window._confirmedRoute);
+}
+
+// 距最近錨點的直線距離——沒有錨點或查不到座標時顯示「—」，不強行猜座標（跟 withinAnchorRadius 同一套保守原則）。
+function distanceToNearestAnchorText(id) {
+  const byId = {}; (allPharmaciesCache || []).forEach(p => { byId[p.id] = p; });
+  const target = byId[id];
+  if (!target?.lat || !target?.lng || !anchors.length) return '—';
+  let min = Infinity;
+  anchors.forEach(a => {
+    const ph = byId[a.id];
+    if (!ph?.lat || !ph?.lng) return;
+    const d = haversineKm(target.lat, target.lng, ph.lat, ph.lng);
+    if (d < min) min = d;
+  });
+  return isFinite(min) ? (Math.round(min * 10) / 10) + ' 公里' : '—';
+}
+
+function openMapInfo(marker, data) {
+  let html;
+  if (data.kind === 'anchor') {
+    html = `<div class="map-info-card">
+      <div class="map-info-name">${escapeHtml(data.name)}</div>
+      <div class="map-info-line">錨點・來源：${escapeHtml(anchorTypeLabel(data.anchorMeta))}</div>
+      <div class="map-info-actions">
+        <button class="map-info-btn" data-action="open-drawer" data-id="${escapeHtml(data.id)}">看檔案</button>
+        <button class="map-info-btn" data-action="remove-anchor" data-id="${escapeHtml(data.id)}">移除</button>
+      </div>
+    </div>`;
+  } else {
+    const item = data.item || {};
+    const isNewStore = item.type === 'new-store';
+    const checked = selectedCol2Ids.has(data.id);
+    const statusLine = isNewStore ? `階段：${escapeHtml(item.stage || '—')}` : `分級：${escapeHtml(item.tier || '—')}`;
+    html = `<div class="map-info-card">
+      <div class="map-info-name">${escapeHtml(data.name)}</div>
+      <div class="map-info-line">${statusLine}　倍數 ${item.ratio ?? '—'}×</div>
+      <div class="map-info-line">距最近錨點 ${distanceToNearestAnchorText(data.id)}</div>
+      <div class="map-info-actions">
+        <label><input type="checkbox" data-action="toggle-col2" data-id="${escapeHtml(data.id)}" ${checked ? 'checked' : ''}> 加入</label>
+        <button class="map-info-btn" data-action="open-drawer" data-id="${escapeHtml(data.id)}">看檔案</button>
+      </div>
+    </div>`;
+  }
+  srMapInfoWindow.setContent(html);
+  srMapInfoWindow.open({ map: srMap, anchor: marker });
+}
+
+async function renderMap() {
+  await Promise.all([loadGoogleMapsSdk(), loadAllPharmacies()]);
+  if (!srMap) {
+    srMap = new google.maps.Map(document.getElementById('sr-map'), {
+      center: { lat: 25.065, lng: 121.658 }, zoom: 11,
+      mapTypeControl: false, streetViewControl: false,
+      styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }],
+    });
+    srMapInfoWindow = new google.maps.InfoWindow();
+  }
+  srMapInfoWindow.close();
+  srMapMarkers.forEach(m => m.setMap(null)); srMapMarkers = [];
+  srMapCircles.forEach(c => c.setMap(null)); srMapCircles = [];
+  if (srMapPolyline) { srMapPolyline.setMap(null); srMapPolyline = null; }
+
+  const byId = {}; (allPharmaciesCache || []).forEach(p => { byId[p.id] = p; });
+  // 新店（篩選分頁）座標不在 /pharmacies，如果 /api/plan 自己帶了 lat/lng 就補進同一份查詢表
+  (planData?.recommended || []).forEach(item => { if (item.lat && item.lng && !byId[item.id]) byId[item.id] = item; });
+
+  const bounds = new google.maps.LatLngBounds();
+  let anyBounds = false;
+  function extend(lat, lng) { bounds.extend({ lat, lng }); anyBounds = true; }
+
+  const route = window._confirmedRoute || null;
+  const seqById = {}; (route || []).forEach(s => { seqById[s.id] = s.seq; });
+
+  // ① 錨點：28px 深色圓、白色站號（還沒計算路線前沒有站號）＋ 2 公里範圍圈
+  anchors.forEach(a => {
+    const ph = byId[a.id];
+    if (!ph?.lat || !ph?.lng) return;
+    const marker = new google.maps.Marker({
+      position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: a.name, zIndex: 20,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-ink'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+      label: seqById[a.id] ? { text: String(seqById[a.id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
+    });
+    marker.addListener('click', () => openMapInfo(marker, { id: a.id, name: a.name, kind: 'anchor', anchorMeta: a }));
+    srMapMarkers.push(marker);
+    extend(ph.lat, ph.lng);
+    // 2 公里範圍圈：DESIGN.md 寫虛線，google.maps.Circle 不支援虛線樣式（要畫虛線得改用 Polygon
+    // 近似圓形並掛 icons，複雜度高很多）——這次先用純色細圈代替，保守簡化，之後要再精緻化再改（WORKLOG 記錄）。
+    const circle = new google.maps.Circle({
+      map: srMap, center: { lat: ph.lat, lng: ph.lng }, radius: RADIUS_KM * 1000,
+      strokeColor: cssVar('--sr-primary'), strokeOpacity: 0.8, strokeWeight: 2,
+      fillColor: cssVar('--sr-primary-tint'), fillOpacity: 0.12, clickable: false,
+    });
+    srMapCircles.push(circle);
+  });
+
+  // ② 補的站：已勾選加入路線、但不是錨點的店，28px primary 色圓
+  const visible = visibleRecommendList();
+  const visibleById = {}; visible.forEach(x => { visibleById[x.id] = x; });
+  selectedCol2Ids.forEach(id => {
+    const ph = byId[id];
+    if (!ph?.lat || !ph?.lng) return;
+    const item = visibleById[id] || (planData?.recommended || []).find(x => x.id === id);
+    const marker = new google.maps.Marker({
+      position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: item?.name || id, zIndex: 15,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-primary'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+      label: seqById[id] ? { text: String(seqById[id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
+    });
+    marker.addListener('click', () => openMapInfo(marker, { id, name: item?.name || id, kind: 'selected', item }));
+    srMapMarkers.push(marker);
+    extend(ph.lat, ph.lng);
+  });
+
+  // ③ 候選店（清單目前顯示、尚未勾選）：14px 小圓，正式客戶依 4.4 倍數分級上色，開發中空心圓
+  visible.forEach(item => {
+    if (selectedCol2Ids.has(item.id)) return; // ②已經畫過
+    const ph = byId[item.id];
+    if (!ph?.lat || !ph?.lng) return;
+    const isNewStore = item.type === 'new-store';
+    const icon = isNewStore
+      ? { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar('--sr-bg'), fillOpacity: 1, strokeColor: cssVar('--sr-ink'), strokeWeight: 2 }
+      : { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar(ratioColorVar(ratioTierOf(item.ratio))), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1 };
+    const marker = new google.maps.Marker({ position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: item.name, icon, zIndex: 10 });
+    marker.addListener('click', () => openMapInfo(marker, { id: item.id, name: item.name, kind: 'candidate', item }));
+    srMapMarkers.push(marker);
+    extend(ph.lat, ph.lng);
+  });
+
+  // ④ 路線線：直線段連接目前已算好的站點順序，不是實際路網線（不解析 Routes API 回傳的
+  // encoded polyline，避免多引入 Maps JavaScript 的 geometry library，保守簡化，WORKLOG 記錄）
+  if (route && route.length > 1) {
+    const path = route.map(s => { const ph = byId[s.id]; return ph?.lat && ph?.lng ? { lat: ph.lat, lng: ph.lng } : null; }).filter(Boolean);
+    if (path.length > 1) {
+      srMapPolyline = new google.maps.Polyline({ path, geodesic: true, strokeColor: cssVar('--sr-primary'), strokeOpacity: 0.9, strokeWeight: 4, map: srMap });
+    }
+  }
+
+  if (anyBounds) srMap.fitBounds(bounds, 60);
+  renderMapRoutePanel();
+}
+
 document.getElementById('manual-add-input').addEventListener('input', onManualAddInput);
 renderMiniCal();
+applyViewModeUI();
 loadPlan();
 window.SRNav.loadBadges();
 
@@ -940,13 +1206,10 @@ async function calcRoute() {
 
     window._confirmedRoute = reordered.map((s, i) => ({ id: s.id, name: s.name, isAnchor: s.isAnchor, seq: i + 1, arrival: arrivalTimes[i] || null }));
 
-    resultEl.innerHTML = reordered.map((s, i) => `
-      <div class="route-stop-row">
-        <span class="route-stop-time">${arrivalTimes[i] ? fmtMin(arrivalTimes[i]) : ''}</span>
-        <span class="route-stop-name ${s.isAnchor ? 'anchor' : ''}">${s.name}</span>
-        ${s.isAnchor ? '<span class="route-stop-tag">錨點</span>' : ''}
-      </div>`).join('') +
+    resultEl.innerHTML = routeListHtml(window._confirmedRoute) +
       `<div class="route-summary">共 ${reordered.length} 站・${totalKm} km</div>`;
+    renderMapRoutePanel();
+    if (viewMode === 'map') renderMap();
 
     const finishEl = document.getElementById('finish-time-value');
     finishEl.textContent = fmtMin(homeArrival);
