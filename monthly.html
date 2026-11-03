@@ -73,6 +73,8 @@
   .day-cell.pad { border-color: transparent; background: none; cursor: default; opacity: 0.35; }
   .day-cell.pad:hover { border-color: transparent; }
   .day-cell-num { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
+  .day-cell-rain { margin-left: 4px; font-size: var(--sr-text-xs); }
+  .day-cell.rain-warning { box-shadow: inset 0 0 0 2px var(--sr-danger); }
   .day-cell-body { font-size: var(--sr-text-xs); }
   .day-cell-body.muted { color: var(--sr-ink-3); }
   .day-cell.rest { background: var(--sr-bg-subtle); }
@@ -121,7 +123,7 @@
   <button class="month-nav-btn" id="btn-prev-month" disabled>‹</button>
   <span class="page-header-title" id="page-header-title">—</span>
   <button class="month-nav-btn" id="btn-next-month" disabled>›</button>
-  <span class="page-header-note">🌧️ 降雨提醒尚未串接（等中央氣象署開放資料平臺授權碼）</span>
+  <span class="page-header-note">🌧️ 格子右上角有降雨圖示代表降雨機率 60% 以上（氣象署資料僅涵蓋近期約一週，更久以後的日子不顯示）</span>
 </div>
 
 <div class="legend-row">
@@ -197,6 +199,7 @@ function dayCellHtml(day, holidaysMap) {
   if (day.isToday) classes.push('is-today');
   if (day.mailingBand) classes.push('mailing-day');
   if (day.billingBand) classes.push('billing-day');
+  if (day.rainWarning) classes.push('rain-warning');
 
   let bodyHtml;
   if (isRest) {
@@ -209,9 +212,12 @@ function dayCellHtml(day, holidaysMap) {
       ? `<span class="day-cell-body">${escapeHtml(label)}</span>`
       : `<span class="day-cell-body muted">未排</span>`;
   }
+  // 降雨提醒（SPEC 5.7，只有未來天會有 day.rainWarning，門檻 60%，CWA 資料超出範圍時 weather 是
+  // null、rainWarning 固定 false，不特別顯示——跟寄單狀態一樣「缺資料優雅跳過」原則）
+  const rainBadge = day.rainWarning ? `<span class="day-cell-rain" title="降雨機率 ${day.weather?.pop}%">🌧️</span>` : '';
 
   return `<button class="${classes.join(' ')}" data-date="${day.date}" data-action="goto-week" title="點一下看這週（本週頁）">
-    <span class="day-cell-num">${d.getDate()}</span>
+    <span class="day-cell-num">${d.getDate()}${rainBadge}</span>
     ${bodyHtml}
   </button>`;
 }

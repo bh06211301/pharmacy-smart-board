@@ -1,8 +1,10 @@
 // ============================================================
-// A5「本週」：解析 Google 日曆私密 iCal（.ics），給 worker.js 的
+// A5「本週」／A6「本月」：解析 Google 日曆私密 iCal（.ics），給 worker.js 的
 // fetchGoogleCalendarEvents_() 用。只處理單次事件與簡單重複規則
-// （RRULE FREQ=DAILY/WEEKLY，含 BYDAY/UNTIL/COUNT/INTERVAL），
-// 不保證處理「每月第N個星期幾」這類複雜規則（docs/PROPOSAL-A5-weekly.md 已記過這個限制）。
+// （RRULE FREQ=DAILY/WEEKLY/MONTHLY/YEARLY，含 BYDAY/BYMONTH/BYMONTHDAY/UNTIL/COUNT/INTERVAL，
+// 2026-11-03 從原本只支援 DAILY/WEEKLY 加上 MONTHLY/YEARLY），
+// 不保證處理「每月第N個星期幾」這類更複雜的規則（docs/PROPOSAL-A5-weekly.md 已記過這個限制，
+// MONTHLY/YEARLY 只支援固定日期，例如「每月5號」「每年12/14」，不支援「每月第二個星期二」）。
 // ============================================================
 
 function unfoldIcsLines_(text) {
@@ -63,23 +65,57 @@ function startOfWeekMonday_(d) {
 
 // 逐日掃描展開重複事件（只支援 DAILY/WEEKLY），範圍限制在 [horizonStart, horizonEnd] 內，
 // 有 guard 上限避免 ICS 格式異常造成無窮迴圈。
+//
+// 2026-11-03 修正過一個真實 bug：原本不管系列起算日多早，都從 startDate 逐天累加到 horizonStart，
+// 如果系列是好幾年前開始的（例如長年每週提醒），光是走到「現在」就可能超過 guard 上限，導致還沒
+// 掃到真正有意義的未來範圍就被攔停，整個系列查無任何未來場次（用使用者真實的 Google 日曆 ICS 實測
+// 踩到：172 筆事件裡有 2 筆長年每週重複的，解析結果是 0 筆，改好後能正確展開）。
+// 修法：沒有 COUNT 限制時，用除法直接跳到 horizonStart 附近對齊週期的那一天/那一週再開始逐日掃描，
+// 不用從起算日逐天累加；有 COUNT 限制的系列通常較短，維持原本從起算日開始算（COUNT 用來判斷系列
+// 有沒有提早結束），guard 上限放寬到 20000 避免系列起算日較早、COUNT 較大時誤判。
 function expandRecurrence_(startDate, rrule, horizonStart, horizonEnd) {
   const freq = rrule.FREQ;
-  if (freq !== 'DAILY' && freq !== 'WEEKLY') return []; // 月/年重複這次不支援
+  if (freq !== 'DAILY' && freq !== 'WEEKLY' && freq !== 'MONTHLY' && freq !== 'YEARLY') return [];
 
   const interval = parseInt(rrule.INTERVAL || '1', 10) || 1;
   const until = rrule.UNTIL ? parseIcsDateOnly_(rrule.UNTIL) : null;
   const count = rrule.COUNT ? parseInt(rrule.COUNT, 10) : null;
+
+  // YEARLY（含 BYMONTH/BYMONTHDAY，沒有就用起算日自己的月/日，典型如生日/紀念日）跟 MONTHLY
+  // （含 BYMONTHDAY，典型如「每月5號」；不支援「每月第N個星期幾」這種更複雜的規則）用「逐週期」
+  // 直接列舉候選日期，不是逐天掃描——候選數量天生就少（幾年份或幾十個月），用不到 DAILY/WEEKLY
+  // 那套「跳到 horizon 附近再逐日掃」的效能優化，直接列舉更直覺、不容易出錯（2026-11-03 新增，
+  // 使用者實測發現一筆 12/14 全年重複的全天事件原本完全沒有被展開出來）。
+  if (freq === 'YEARLY' || freq === 'MONTHLY') {
+    const scanEndYM = (until && until < horizonEnd) ? until : horizonEnd;
+    return expandYearlyOrMonthly_(startDate, rrule, freq, interval, count, horizonStart, scanEndYM);
+  }
+
   const DOW = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
   const allowedDow = rrule.BYDAY ? rrule.BYDAY.split(',').map(d => DOW[d]).filter(n => n !== undefined) : null;
   const startWeekStart = startOfWeekMonday_(startDate);
 
   const scanEnd = (until && until < horizonEnd) ? until : horizonEnd;
   const dates = [];
-  let occurrences = 0;
+
   let cur = new Date(startDate);
+  if (count === null && cur < horizonStart) {
+    if (freq === 'DAILY') {
+      const daysSinceStart = Math.floor((horizonStart - startDate) / 86400000);
+      const skip = Math.floor(daysSinceStart / interval) * interval;
+      cur = new Date(startDate.getTime() + skip * 86400000);
+    } else {
+      const weeksSinceStart = Math.floor((startOfWeekMonday_(horizonStart) - startWeekStart) / (7 * 86400000));
+      const skip = Math.floor(weeksSinceStart / interval) * interval;
+      cur = new Date(startDate.getTime() + skip * 7 * 86400000);
+    }
+    if (cur < startDate) cur = new Date(startDate); // 保險，不要往回跳到起算日之前
+  }
+
+  let occurrences = 0;
+  const guardMax = count !== null ? 20000 : 2000;
   let guard = 0;
-  while (cur <= scanEnd && guard < 2000) {
+  while (cur <= scanEnd && guard < guardMax) {
     guard++;
     let hit = false;
     if (freq === 'DAILY') {
@@ -98,6 +134,47 @@ function expandRecurrence_(startDate, rrule, horizonStart, horizonEnd) {
       if (count !== null && occurrences >= count) break;
     }
     cur = new Date(cur.getTime() + 86400000);
+  }
+  return dates;
+}
+
+// YEARLY／MONTHLY 用的候選日期列舉（不支援「每月第N個星期幾」，只支援固定日期）。
+// candidate 算出來那個月份沒有這天（例如非閏年的2/29、小月的31號）就直接跳過不硬湊到別天，
+// 這是常見 ICS 處理方式的保守做法，不是漏算。
+function expandYearlyOrMonthly_(startDate, rrule, freq, interval, count, horizonStart, scanEnd) {
+  const byMonth = rrule.BYMONTH ? parseInt(rrule.BYMONTH, 10) : null;   // 只取第一個值，逗號多值這次不展開
+  const byMonthDay = rrule.BYMONTHDAY ? parseInt(rrule.BYMONTHDAY, 10) : null;
+  const targetMonth = byMonth !== null ? byMonth - 1 : startDate.getMonth(); // 0-based
+  const targetDay = byMonthDay !== null ? byMonthDay : startDate.getDate();
+
+  const dates = [];
+  let occurrences = 0;
+  if (freq === 'YEARLY') {
+    const startYear = startDate.getFullYear();
+    for (let y = startYear; y <= scanEnd.getFullYear(); y++) {
+      if ((y - startYear) % interval !== 0) continue;
+      const candidate = new Date(y, targetMonth, targetDay);
+      if (candidate.getMonth() !== targetMonth) continue; // 該年該月沒有這一天
+      if (candidate < startDate) continue; // 系列開始之前不算
+      occurrences++;
+      if (count !== null && occurrences > count) break;
+      if (candidate >= horizonStart && candidate <= scanEnd) dates.push(candidate);
+    }
+  } else { // MONTHLY
+    const startYear = startDate.getFullYear();
+    const startMonthIdx = startDate.getMonth();
+    const totalMonthsSpan = (scanEnd.getFullYear() - startYear) * 12 + (scanEnd.getMonth() - startMonthIdx) + 1;
+    for (let i = 0; i < totalMonthsSpan && i < 2000; i++) {
+      if (i % interval !== 0) continue;
+      const y = startYear + Math.floor((startMonthIdx + i) / 12);
+      const m = (startMonthIdx + i) % 12;
+      const candidate = new Date(y, m, targetDay);
+      if (candidate.getMonth() !== m) continue; // 該月沒有這一天（例如31號遇到小月）
+      if (candidate < startDate) continue;
+      occurrences++;
+      if (count !== null && occurrences > count) break;
+      if (candidate >= horizonStart && candidate <= scanEnd) dates.push(candidate);
+    }
   }
   return dates;
 }

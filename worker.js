@@ -2637,6 +2637,86 @@ async function fetchGoogleCalendarEvents_(env) {
   return events;
 }
 
+// 天氣（2026-11-03，A5/A6 共用）：中央氣象署開放資料平臺鄉鎮天氣預報(一週)，資料集 F-D0047-071
+// （新北市，含汐止區——2026-11-03 用 wrangler dev 實測過，29 個行政區都在裡面，確認是正確代碼）。
+// 固定只查「汐止區」當代表點（業務出發地，CLAUDE.md 已記錄），不是每個「今天可以跑的區」各自查一次
+// 天氣——7 類分區橫跨新北/台北/桃園/新竹，要每區分別查會複雜很多，且天氣本來就是「今天大概狀況」
+// 的參考用途，不是逐區精算，用單一代表點是刻意簡化，不是忘記做。
+// 回傳形狀：{ 'YYYY-MM-DD': { maxTemp, minTemp, pop, description } }，date 範圍由氣象署資料決定
+// （實測約是「現在」起算未來 7 天，12 小時一個時段），超出範圍的日期查無資料，前端不特別處理，
+// 單純不顯示天氣小卡即可（跟「寄單狀態」佔位文字同一種「缺資料時優雅跳過」處理原則）。
+// 快取在 TODOS_KV（key 'weather:forecast'）3 小時，跟使用者 2026-11-03 決定的時間一致。
+async function fetchWeatherForecast_(env) {
+  if (!env.CWA_API_KEY) return {};
+  if (env.TODOS_KV) {
+    const cached = await env.TODOS_KV.get('weather:forecast', 'json');
+    if (cached && Date.now() - cached.fetchedAt < 3 * 3600 * 1000) return cached.byDate || {};
+  }
+  let byDate = {};
+  try {
+    const key = env.CWA_API_KEY.trim();
+    const apiUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-071?Authorization=${encodeURIComponent(key)}&format=JSON`;
+    const res = await fetch(apiUrl);
+    const data = await res.json();
+    if (res.ok && (data.success === 'true' || data.success === true)) {
+      const districts = data.records?.Locations?.[0]?.Location || [];
+      const target = districts.find(l => l.LocationName === '汐止區');
+      if (target) byDate = buildDailyWeatherFromElements_(target.WeatherElement || []);
+    }
+  } catch (e) { byDate = {}; } // 查不到就當作沒有天氣資料，不讓 /api/week、/api/month 掛掉
+  if (env.TODOS_KV) {
+    await env.TODOS_KV.put('weather:forecast', JSON.stringify({ fetchedAt: Date.now(), byDate }), { expirationTtl: 3 * 3600 });
+  }
+  return byDate;
+}
+
+// 氣象署回傳的是逐 12 小時（白天 06-18、晚上 18-06）資料，A5/A6 的格子是「一天一個」，這裡把
+// 同一個西曆日期（取 StartTime 的日期部分）的日/夜兩段合併成一天的摘要：降雨機率取較高者（保守，
+// 當天任一時段有風險就標出來）、溫度取當天兩段的最高/最低，天氣描述優先採白天那段（業務實際跑
+// 外勤是白天 13:30~17:30，晚上那段參考價值較低）。純函式，不呼叫任何外部資源，方便之後測試。
+function buildDailyWeatherFromElements_(weatherElements) {
+  function timesOf(name) {
+    const el = weatherElements.find(e => e.ElementName === name);
+    return el ? (el.Time || []) : [];
+  }
+  function valueOf(t, field) {
+    const ev = t.ElementValue;
+    return ev && ev[0] ? ev[0][field] : undefined;
+  }
+  function dateKeyOf(iso) { return String(iso || '').slice(0, 10); }
+  function isDaytime(iso) { return /T06:00:00/.test(iso || ''); }
+
+  const byDate = {};
+  function ensure(dateKey) {
+    return (byDate[dateKey] = byDate[dateKey] || { maxTemp: null, minTemp: null, pop: null, description: null });
+  }
+  timesOf('最高溫度').forEach(t => {
+    const v = parseFloat(valueOf(t, 'MaxTemperature'));
+    if (isNaN(v)) return;
+    const d = ensure(dateKeyOf(t.StartTime));
+    if (d.maxTemp === null || v > d.maxTemp) d.maxTemp = v;
+  });
+  timesOf('最低溫度').forEach(t => {
+    const v = parseFloat(valueOf(t, 'MinTemperature'));
+    if (isNaN(v)) return;
+    const d = ensure(dateKeyOf(t.StartTime));
+    if (d.minTemp === null || v < d.minTemp) d.minTemp = v;
+  });
+  timesOf('12小時降雨機率').forEach(t => {
+    const v = parseFloat(valueOf(t, 'ProbabilityOfPrecipitation'));
+    if (isNaN(v)) return;
+    const d = ensure(dateKeyOf(t.StartTime));
+    if (d.pop === null || v > d.pop) d.pop = v;
+  });
+  timesOf('天氣預報綜合描述').forEach(t => {
+    const v = valueOf(t, 'WeatherDescription');
+    if (!v) return;
+    const d = ensure(dateKeyOf(t.StartTime));
+    if (!d.description || isDaytime(t.StartTime)) d.description = v;
+  });
+  return byDate;
+}
+
 // GET /api/week?start=YYYY-MM-DD：start 為週一日期，回傳未來 7 天的「跑哪區/已確定路線/日曆事件」
 // ＋「這週要做的」（還沒指定日期的請款／有期限的待追蹤／逾期沒去的店）。
 // 7 天的 region/hasRoute 是原生 KV 讀取（便宜，不跑評分邏輯）；billingDue/overdueCustomers 靠
@@ -2656,7 +2736,7 @@ async function handleWeekOverview(request, env) {
   }
 
   const now = new Date();
-  const [pharmaciesRes, visitsRes, orderData, returnOrderData, contractData, followupRows, ruleRows, calendarEvents] = await Promise.all([
+  const [pharmaciesRes, visitsRes, orderData, returnOrderData, contractData, followupRows, ruleRows, calendarEvents, weatherByDate] = await Promise.all([
     handleGetPharmacies(null, env).then(r => r.json()),
     handleVisitsSummary(env).then(r => r.json()),
     env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
@@ -2667,6 +2747,7 @@ async function handleWeekOverview(request, env) {
     env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
     env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則') : Promise.resolve([]),
     fetchGoogleCalendarEvents_(env).catch(() => []),
+    fetchWeatherForecast_(env).catch(() => ({})),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
@@ -2743,6 +2824,7 @@ async function handleWeekOverview(request, env) {
       hasRoute: !!(saved && Array.isArray(saved.route) && saved.route.length),
       savedAt: saved?.savedAt || null,
       calendarEvents: calendarEvents.filter(e => e.date === dateKey),
+      weather: weatherByDate[dateKey] || null, // 超出氣象署7天範圍時是 null，前端不顯示天氣小卡
     };
   }));
 
@@ -2908,10 +2990,11 @@ async function handleMonthOverview(request, env) {
   const prevMonthKey = formatYearMonth_(prevMonthDate);
   const nextMonthKey = formatYearMonth_(nextMonthDate);
 
-  const [pharmaciesRes, visitsRes, followupRows] = await Promise.all([
+  const [pharmaciesRes, visitsRes, followupRows, weatherByDate] = await Promise.all([
     handleGetPharmacies(null, env).then(r => r.json()),
     handleAllVisits(env).then(r => r.json()),
     env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
+    fetchWeatherForecast_(env).catch(() => ({})),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
@@ -2954,11 +3037,17 @@ async function handleMonthOverview(request, env) {
     const loadTier = (isPast || isToday)
       ? (visitCount >= 7 ? 'high' : visitCount >= 4 ? 'mid' : visitCount >= 1 ? 'low' : null)
       : null;
+    // 降雨提醒（SPEC 5.7「未來日子顯示預計區域與降雨提醒」）：只給未來天，60% 以上才標記，
+    // 跟 A5 同一個門檻（SPEC 4.4 以外的另一組門檻，使用者原文就是「60%以上標紅」）。氣象署資料
+    // 只涵蓋未來約7天，超出範圍 weatherByDate 查無資料，rainWarning 自然是 false，前端不顯示。
+    const weather = (!isPast && !isToday) ? (weatherByDate[iso] || null) : null;
     days.push({
       date: iso, inMonth: true, isToday, isPast, visitCount, loadTier,
       mailingBand: dayNum >= 1 && dayNum <= 5,   // 寄單期，跟 weekly.html 同一套規則（SPEC/CLAUDE.md）
       billingBand: dayNum >= 25 && dayNum <= 30, // 請款期，個別店家例外走「店家規則」，這裡不特殊處理
       region: null, // 只有未來天才補（見下面），過去/今天不需要
+      weather,
+      rainWarning: !!(weather && weather.pop !== null && weather.pop >= 60),
     });
   }
   for (let i = 1; i <= trailingPad; i++) {
