@@ -259,7 +259,7 @@ function dayCellHtml(day, holidaysMap, followupsByDate, todayStr) {
     </div>
     <div class="day-tags">${dayTagsHtml(day.date, weekday, holidayInfo, day.hasRoute)}</div>
     ${dayHintHtml(holidayInfo)}
-    ${weatherHtml(day.weather)}
+    ${day.date < todayStr ? '' : weatherHtml(day.weather)}
     ${regionSelectHtml(day.date, day.region)}
     <div class="day-events">${events}${followupItems}</div>
     <button class="day-plan-link" data-date="${day.date}">規劃這天的店 →</button>
