@@ -423,6 +423,17 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// 跟 planner-shared.js 的 gvizDateToIso() 同一份邏輯（故意複製，不共用——planner.html 目前沒有
+// 載入 planner-shared.js，見該檔案檔頭註解）。待追蹤「期限」從 gviz 讀回來可能是原始字面值
+// "Date(2026,10,16)"，要轉成 YYYY-MM-DD 才能跟 getPlanDate() 比對。
+function gvizDateToIso(s) {
+  if (!s) return null;
+  const m = String(s).match(/^Date\((\d+),(\d+),(\d+)\)$/);
+  if (m) return `${m[1]}-${String(Number(m[2]) + 1).padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  const d = new Date(String(s).replace(/\//g, '-'));
+  return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // 2026-10-28：任何會寫入資料的按鈕都要經過這裡——按下立刻 disabled + 改文字，避免使用者看不到反應
 // 連點好幾次（實測踩到：A8 新增待追蹤連點5次，因為按鈕沒變化，以為沒反應，結果建了5筆一樣的資料）。
 async function withBusy(btn, busyLabel, fn) {
@@ -872,11 +883,35 @@ async function savePlanState() {
   }
 }
 
+// 把「本週頁」已經排在今天這個日期的待追蹤事項自動帶進①今天一定要去（2026-11-03 使用者要求）。
+// weekly.html 的 day.region 只是行政分區標籤，不是具體店家清單——真正「某天排了哪家店」要用
+// /api/followups 裡 deadlineType==='指定日期前' 且 deadline===今天 的待追蹤事項，storeId 跟
+// anchors[].id 是同一種 Customer_ID 格式（見研究結論）。純讀取：只在記憶體裡補進 anchors，
+// 不呼叫 savePlanState()，要等使用者自己動手（移除/手動加入任一錨點）才會存檔，不能一開頁
+// 就把本週頁排的東西寫回 /api/plan。
+async function mergeWeeklyAnchors() {
+  try {
+    const followupsData = await get('/api/followups');
+    const todayDs = getPlanDate();
+    const existingIds = new Set(anchors.map(a => a.id));
+    (followupsData.followups || []).forEach(f => {
+      if (f.status !== '未完成' || f.deadlineType !== '指定日期前' || !f.deadline) return;
+      if (gvizDateToIso(f.deadline) !== todayDs) return;
+      if (!f.storeId || existingIds.has(f.storeId)) return;
+      existingIds.add(f.storeId);
+      anchors.push({ id: f.storeId, name: f.storeName, source: '本週排', item: f.item, deadline: null });
+    });
+  } catch (e) {
+    console.error('帶入本週排程失敗', e);
+  }
+}
+
 async function loadPlan() {
   try {
     const [plan] = await Promise.all([get('/api/plan?date=' + getPlanDate()), loadAllPharmacies()]);
     planData = plan;
     anchors = planData.anchors || [];
+    await mergeWeeklyAnchors();
     renderMiniCal();
     renderAnchors();
     renderRecommend();
