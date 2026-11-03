@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜本月</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* A6 本月（docs/SPEC.md 5.7，DESIGN.md 2.18）。導覽列跟 planner.html／weekly.html 等同一套樣式。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; }
+
+  .nav {
+    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
+  }
+  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
+  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .nav-tab {
+    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
+  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-danger-strong); color: var(--sr-on-dark);
+    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+  }
+  .nav-badge[hidden] { display: none; }
+  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-5); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); flex-wrap: wrap; }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); min-width: 110px; text-align: center; }
+  .page-header-note { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-left: var(--sr-space-5); }
+  .month-nav-btn {
+    width: 32px; height: 32px; border-radius: var(--sr-radius-md); border: 1px solid var(--sr-ink);
+    background: var(--sr-bg); font-size: var(--sr-text-md); cursor: pointer; font-family: var(--sr-font);
+  }
+  .month-nav-btn:hover:not(:disabled) { background: var(--sr-bg-subtle); }
+  .month-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
+  .legend-row { display: flex; gap: var(--sr-space-6); flex-wrap: wrap; padding: var(--sr-space-4) var(--sr-space-8) 0; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: var(--sr-text-2xs); color: var(--sr-ink-2); }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--sr-line); }
+  .legend-swatch.load-high { background: var(--sr-load-high); }
+  .legend-swatch.load-mid { background: var(--sr-load-mid); }
+  .legend-swatch.load-low { background: var(--sr-load-low); }
+  .legend-swatch.rest { background: var(--sr-bg-subtle); }
+  .legend-swatch-band { width: 12px; height: 5px; display: inline-block; border-radius: 2px; }
+  .legend-swatch-band.mailing { background: var(--sr-primary-soft); }
+  .legend-swatch-band.billing { background: var(--sr-primary); }
+
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); display: flex; gap: var(--sr-space-8); align-items: flex-start; }
+  @media (max-width: 900px) { .page-body { flex-direction: column; } }
+
+  .month-grid-wrap { flex: 1; min-width: 0; }
+  .weekday-header { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; }
+  .weekday-header-cell { font-size: var(--sr-text-xs); color: var(--sr-ink-3); text-align: center; padding: 2px 0; }
+  .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+
+  .day-cell {
+    position: relative; height: 108px; border-radius: var(--sr-radius-lg); padding: var(--sr-space-3);
+    border: 1px solid var(--sr-line); background: var(--sr-bg); cursor: pointer; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
+    font-family: var(--sr-font); text-align: left;
+  }
+  .day-cell:hover { border-color: var(--sr-ink); }
+  .day-cell.pad { border-color: transparent; background: none; cursor: default; opacity: 0.35; }
+  .day-cell.pad:hover { border-color: transparent; }
+  .day-cell-num { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
+  .day-cell-body { font-size: var(--sr-text-xs); }
+  .day-cell-body.muted { color: var(--sr-ink-3); }
+  .day-cell.rest { background: var(--sr-bg-subtle); }
+  .day-cell.load-high { background: var(--sr-load-high); color: var(--sr-on-dark); }
+  .day-cell.load-mid { background: var(--sr-load-mid); color: var(--sr-on-dark); }
+  .day-cell.load-low { background: var(--sr-load-low); color: var(--sr-ink); }
+  .day-cell.is-today { box-shadow: inset 0 0 0 2px var(--sr-primary); }
+  /* 底部週期色帶（DESIGN.md 2.18：請款 --sr-primary、寄單 --sr-primary-soft——跟 weekly.html
+     用的 --sr-billing-soft 金棕色不同，這是 DESIGN.md 對 A6/A5 兩頁分別給的不同配色，不是漏改） */
+  .day-cell.mailing-day::after, .day-cell.billing-day::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 5px;
+  }
+  .day-cell.mailing-day::after { background: var(--sr-primary-soft); }
+  .day-cell.billing-day::after { background: var(--sr-primary); }
+
+  .summary-panel {
+    width: 280px; flex-shrink: 0; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg);
+    padding: var(--sr-space-6); background: var(--sr-bg);
+  }
+  @media (max-width: 900px) { .summary-panel { width: 100%; } }
+  .summary-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); }
+  .summary-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--sr-space-3);
+    padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); font-size: var(--sr-text-sm);
+    text-decoration: none; color: var(--sr-ink); font-family: var(--sr-font);
+  }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-row.link { cursor: pointer; }
+  .summary-row.link:hover { background: var(--sr-bg-subtle); }
+  .summary-label { color: var(--sr-ink-2); }
+  .summary-value { font-weight: var(--sr-weight-bold); white-space: nowrap; }
+  .summary-row.muted .summary-value { font-weight: var(--sr-weight-regular); color: var(--sr-ink-3); font-size: var(--sr-text-xs); text-align: right; max-width: 60%; white-space: normal; }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <button class="month-nav-btn" id="btn-prev-month" disabled>‹</button>
+  <span class="page-header-title" id="page-header-title">—</span>
+  <button class="month-nav-btn" id="btn-next-month" disabled>›</button>
+  <span class="page-header-note">🌧️ 降雨提醒尚未串接（等中央氣象署開放資料平臺授權碼）</span>
+</div>
+
+<div class="legend-row">
+  <span class="legend-item"><span class="legend-swatch load-high"></span>7 家以上</span>
+  <span class="legend-item"><span class="legend-swatch load-mid"></span>4～6 家</span>
+  <span class="legend-item"><span class="legend-swatch load-low"></span>1～3 家</span>
+  <span class="legend-item"><span class="legend-swatch rest"></span>休息／假日</span>
+  <span class="legend-item"><span class="legend-swatch-band mailing"></span>寄單期（1～5日）</span>
+  <span class="legend-item"><span class="legend-swatch-band billing"></span>請款期（25～30日）</span>
+</div>
+
+<div class="page-body">
+  <div class="month-grid-wrap">
+    <div id="month-grid-root"><div class="empty-hint">載入中…</div></div>
+  </div>
+  <div class="summary-panel" id="summary-root">
+    <div class="summary-title">本月累計</div>
+    <div class="empty-hint">載入中…</div>
+  </div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script>
+const { get, escapeHtml, loadHolidays } = window.PlannerAPI;
+window.SRNav.render({ active: 'month' });
+window.SRNav.loadBadges();
+
+function parseDs(s) { return new Date(String(s).replace(/\//g, '-') + 'T00:00:00'); }
+function fmtDs(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function fmtMonthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function mondayOf(d) {
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  const m = new Date(d); m.setDate(d.getDate() + diff); m.setHours(0, 0, 0, 0);
+  return m;
+}
+
+let currentMonth = new URL(location.href).searchParams.get('month') || fmtMonthKey(new Date());
+let regionOptions = []; // [{key,label}]，跟 weekly.html 同一個來源（/api/plan 的 todayRegions）
+
+function updateUrl() {
+  const url = new URL(location.href);
+  url.searchParams.set('month', currentMonth);
+  history.replaceState(null, '', url.toString());
+}
+
+async function loadRegionOptions() {
+  if (regionOptions.length) return regionOptions;
+  try {
+    const plan = await get('/api/plan?date=' + fmtDs(new Date()));
+    regionOptions = (plan.todayRegions || []).map(r => ({ key: r.key, label: r.label }));
+  } catch (e) { regionOptions = []; }
+  return regionOptions;
+}
+function regionLabelOf(key) {
+  const r = regionOptions.find(x => x.key === key);
+  return r ? r.label : key;
+}
+
+function dayCellHtml(day, holidaysMap) {
+  const d = parseDs(day.date);
+  if (!day.inMonth) {
+    return `<div class="day-cell pad"><span class="day-cell-num">${d.getDate()}</span></div>`;
+  }
+  const weekday = d.getDay();
+  const holidayInfo = holidaysMap[day.date] || null;
+  const isRest = weekday === 0 || weekday === 6 || (holidayInfo && holidayInfo.type === 'holiday');
+  const classes = ['day-cell'];
+  if (isRest) classes.push('rest');
+  else if (day.loadTier) classes.push('load-' + day.loadTier);
+  if (day.isToday) classes.push('is-today');
+  if (day.mailingBand) classes.push('mailing-day');
+  if (day.billingBand) classes.push('billing-day');
+
+  let bodyHtml;
+  if (isRest) {
+    bodyHtml = `<span class="day-cell-body">${holidayInfo ? escapeHtml(holidayInfo.name) : '休息'}</span>`;
+  } else if (day.isPast || day.isToday) {
+    bodyHtml = `<span class="day-cell-body">${day.visitCount} 家</span>`;
+  } else {
+    const label = day.region ? regionLabelOf(day.region) : null;
+    bodyHtml = label
+      ? `<span class="day-cell-body">${escapeHtml(label)}</span>`
+      : `<span class="day-cell-body muted">未排</span>`;
+  }
+
+  return `<button class="${classes.join(' ')}" data-date="${day.date}" data-action="goto-week" title="點一下看這週（本週頁）">
+    <span class="day-cell-num">${d.getDate()}</span>
+    ${bodyHtml}
+  </button>`;
+}
+
+async function load() {
+  const gridRoot = document.getElementById('month-grid-root');
+  const summaryRoot = document.getElementById('summary-root');
+  try {
+    const [d] = await Promise.all([get('/api/month?month=' + currentMonth), loadRegionOptions()]);
+    currentMonth = d.month;
+    updateUrl();
+
+    const [y, m] = d.month.split('-').map(Number);
+    document.getElementById('page-header-title').textContent = `${y} 年 ${m} 月`;
+    const prevBtn = document.getElementById('btn-prev-month');
+    const nextBtn = document.getElementById('btn-next-month');
+    prevBtn.disabled = !d.canGoPrev; prevBtn.dataset.month = d.prevMonth;
+    nextBtn.disabled = !d.canGoNext; nextBtn.dataset.month = d.nextMonth;
+
+    const years = [...new Set((d.days || []).map(x => Number(x.date.slice(0, 4))))];
+    const holidaysMap = await loadHolidays(years);
+
+    gridRoot.innerHTML =
+      `<div class="weekday-header">${['一', '二', '三', '四', '五', '六', '日'].map(w => `<div class="weekday-header-cell">${w}</div>`).join('')}</div>` +
+      `<div class="month-grid">${(d.days || []).map(day => dayCellHtml(day, holidaysMap)).join('')}</div>`;
+
+    const s = d.summary || {};
+    const billingText = s.billing ? `${s.billing.done} 已完成 / ${s.billing.pending} 未完成` : '—';
+    summaryRoot.innerHTML = `
+      <div class="summary-title">本月累計</div>
+      <div class="summary-row"><span class="summary-label">拜訪次數</span><span class="summary-value">${s.visitCount ?? '—'}</span></div>
+      <div class="summary-row"><span class="summary-label">覆蓋客戶數</span><span class="summary-value">${s.coveredCustomerCount ?? '—'}</span></div>
+      <div class="summary-row"><span class="summary-label">陌生開發數</span><span class="summary-value">${s.newDevVisitCount ?? '—'}</span></div>
+      <div class="summary-row"><span class="summary-label">請款進度</span><span class="summary-value">${escapeHtml(billingText)}</span></div>
+      <div class="summary-row muted"><span class="summary-label">寄單狀態</span><span class="summary-value muted">${escapeHtml(s.mailingNote || '—')}</span></div>
+      <a class="summary-row link" href="customers.html">
+        <span class="summary-label">這個月還沒去過的客戶數</span><span class="summary-value">${s.notVisitedCustomerCount ?? '—'}</span>
+      </a>`;
+  } catch (e) {
+    gridRoot.innerHTML = `<div class="empty-hint">載入失敗：${e.message}</div>`;
+    summaryRoot.innerHTML = `<div class="summary-title">本月累計</div><div class="empty-hint">載入失敗</div>`;
+  }
+}
+
+document.body.addEventListener('click', (e) => {
+  const navBtn = e.target.closest('.month-nav-btn');
+  if (navBtn) {
+    if (!navBtn.disabled && navBtn.dataset.month) { currentMonth = navBtn.dataset.month; load(); }
+    return;
+  }
+  const cell = e.target.closest('[data-action="goto-week"]');
+  if (cell) {
+    const d = parseDs(cell.dataset.date);
+    location.href = 'weekly.html?start=' + fmtDs(mondayOf(d));
+  }
+});
+
+load();
+</script>
+
+</body>
+</html>

@@ -292,6 +292,11 @@ export default {
         return await handleOverview(env);
       }
 
+      // ★ A6 本月：月曆格資料（拜訪量/預計區域/週期色帶）＋本月累計統計，純讀取，只能查上個月/本月/下個月
+      if (path === '/api/month' && request.method === 'GET') {
+        return await handleMonthOverview(request, env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -2856,6 +2861,157 @@ async function handleOverview(env) {
     note: '正式客戶倍數/分級跟 /api/plan、/api/week 共用 buildCustomerOverview_；開發中店倍數跟 ' +
       '/api/funnel/overview 同一套階段公式；區域分組用帳單7分類（regionGroupOf_），不是依城市；' +
       '排除名單（死客戶/老爸/新竹/不拜訪）完全不顯示；「今天已排」用真正今天的日期，不吃 ?date= 參數。',
+  });
+}
+
+// ============================================================
+// A6 本月（SPEC 5.7，2026-11-02）：月曆格資料＋本月累計統計，純讀取，沒有寫入端點。
+// 假日/週末標示交給前端自己讀 holidays-{year}.json 疊加（跟 weekly.html 同一個模式，見
+// planner-shared.js loadHolidays()），這支只處理拜訪量/預計區域/週期色帶/累計數字。
+// ============================================================
+
+function formatYearMonth_(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+
+// 2026-11-02 跟使用者確認過（Q8）：只能查「上個月／本月／下個月」，不開放任意回溯——
+// handleAllVisits() 只回傳最近 500 筆拜訪紀錄，範圍再放寬可能漏算，「本月累計」等統計會不準。
+function monthRangeOk_(requested, today) {
+  const base = new Date(today.getFullYear(), today.getMonth(), 1);
+  const prev = new Date(base); prev.setMonth(prev.getMonth() - 1);
+  const next = new Date(base); next.setMonth(next.getMonth() + 1);
+  return [formatYearMonth_(prev), formatYearMonth_(base), formatYearMonth_(next)].indexOf(requested) >= 0;
+}
+
+// 待追蹤表「建立日期」／「完成日期」有時是 gviz 原始字面值 Date(y,m,d)、有時是純文字日期，
+// parseGvizDate() 兩種都處理，但它不會補零（January 可能回 "2026/1/5"）——直接 slice 字串
+// 抓年月在單位數月份會抓錯，這裡改用真正的 Date 物件算年月，不管原始格式有沒有補零都準。
+function monthKeyOfRaw_(rawDateStr) {
+  const parsed = parseGvizDate(rawDateStr);
+  if (!parsed) return null;
+  const d = new Date(String(parsed).replace(/\//g, '-'));
+  if (isNaN(d)) return null;
+  return formatYearMonth_(d);
+}
+
+async function handleMonthOverview(request, env) {
+  const url = new URL(request.url);
+  const now = new Date();
+  const month = url.searchParams.get('month') || formatYearMonth_(now);
+  if (!/^\d{4}-\d{2}$/.test(month)) return json({ error: 'month 格式不對，要 YYYY-MM' }, 400);
+  if (!monthRangeOk_(month, now)) return json({ error: '只能查詢上個月／本月／下個月' }, 400);
+
+  const [year, monthNum] = month.split('-').map(Number);
+  const monthIndex = monthNum - 1;
+  const firstOfMonth = new Date(year, monthIndex, 1);
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const prevMonthDate = new Date(year, monthIndex - 1, 1);
+  const nextMonthDate = new Date(year, monthIndex + 1, 1);
+  const prevMonthKey = formatYearMonth_(prevMonthDate);
+  const nextMonthKey = formatYearMonth_(nextMonthDate);
+
+  const [pharmaciesRes, visitsRes, followupRows] = await Promise.all([
+    handleGetPharmacies(null, env).then(r => r.json()),
+    handleAllVisits(env).then(r => r.json()),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤') : Promise.resolve([]),
+  ]);
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const eligibleIds = new Set(eligible.map(p => p.id));
+
+  // handleAllVisits() 的 date 欄位是 "YYYY/M/D"（月/日不補零），轉成 "YYYY-MM-DD" 當分組 key。
+  function visitDateToIso_(s) {
+    const m = String(s).match(/^(\d+)\/(\d+)\/(\d+)$/);
+    if (!m) return null;
+    return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+  }
+  const visits = visitsRes.visits || [];
+  const visitsByDate = {};
+  const monthVisits = [];
+  visits.forEach(v => {
+    const iso = visitDateToIso_(v.date);
+    if (!iso) return;
+    (visitsByDate[iso] = visitsByDate[iso] || []).push(v);
+    if (iso.slice(0, 7) === month) monthVisits.push(v);
+  });
+
+  const todayIso = formatDateIso_(now);
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mondayIndexOf_ = jsDay => (jsDay + 6) % 7; // 週一=0…週日=6，月曆格一律週一開頭
+  const leadingPad = mondayIndexOf_(firstOfMonth.getDay());
+  const trailingPad = (7 - ((leadingPad + daysInMonth) % 7)) % 7;
+
+  const days = [];
+  for (let i = leadingPad; i > 0; i--) {
+    const d = new Date(year, monthIndex, 1 - i);
+    days.push({ date: formatDateIso_(d), inMonth: false });
+  }
+  for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+    const date = new Date(year, monthIndex, dayNum);
+    const iso = formatDateIso_(date);
+    const isToday = iso === todayIso;
+    const isPast = date < todayMidnight;
+    const visitCount = (visitsByDate[iso] || []).length;
+    const loadTier = (isPast || isToday)
+      ? (visitCount >= 7 ? 'high' : visitCount >= 4 ? 'mid' : visitCount >= 1 ? 'low' : null)
+      : null;
+    days.push({
+      date: iso, inMonth: true, isToday, isPast, visitCount, loadTier,
+      mailingBand: dayNum >= 1 && dayNum <= 5,   // 寄單期，跟 weekly.html 同一套規則（SPEC/CLAUDE.md）
+      billingBand: dayNum >= 25 && dayNum <= 30, // 請款期，個別店家例外走「店家規則」，這裡不特殊處理
+      region: null, // 只有未來天才補（見下面），過去/今天不需要
+    });
+  }
+  for (let i = 1; i <= trailingPad; i++) {
+    const d = new Date(year, monthIndex, daysInMonth + i);
+    days.push({ date: formatDateIso_(d), inMonth: false });
+  }
+
+  // 未來天的「預計區域」：讀 plan:{date} KV 的 region 欄位（跟 /api/week 同一個 key，原生讀取，
+  // 不跑整套評分），過去/今天不用補這個欄位。
+  if (env.TODOS_KV) {
+    await Promise.all(days.filter(d => d.inMonth && !d.isPast && !d.isToday).map(async d => {
+      const saved = await env.TODOS_KV.get(`plan:${d.date}`, 'json');
+      d.region = saved?.region || null;
+    }));
+  }
+
+  // 本月累計（2026-11-02 跟使用者確認過，Q9/Q10）：統計範圍是目前查詢的月份（跟月曆格對齊，
+  // 不是固定今天所在的月份——切去上個月看，累計數字也跟著切，畫面才不會互相矛盾）。
+  const coveredIds = new Set(monthVisits.map(v => v.pharmacyId).filter(id => eligibleIds.has(id)));
+  const newDevVisitCount = monthVisits.filter(v => v.purpose === '新客開發').length;
+  const notVisitedCustomerCount = eligible.length - coveredIds.size;
+
+  // 請款進度（Q9 保守做法）：數「待追蹤」表事項文字以「請款：」開頭的，依「完成日期」(已完成)
+  // 或「建立日期」(未完成) 落在這個月份，分「已完成」/「未完成」兩類數量——跟 A5 的
+  // billingDue/billingBanner（即時判斷「現在該不該整理寄賣」）是不同的統計目的，這裡單純數
+  // 這個月有多少請款待追蹤被建立/處理掉，資料來源一樣是「待追蹤」分頁，不是舊版 /invoice-tasks。
+  let billingDone = 0, billingPending = 0;
+  followupRows.forEach(f => {
+    const item = f.get('事項') || '';
+    if (!item.startsWith('請款：')) return;
+    const status = f.get('狀態') || '未完成';
+    const refDate = status === '已完成' ? f.get('完成日期') : f.get('建立日期');
+    if (monthKeyOfRaw_(refDate) !== month) return;
+    if (status === '已完成') billingDone++; else billingPending++;
+  });
+
+  return json({
+    ok: true,
+    month, prevMonth: prevMonthKey, nextMonth: nextMonthKey,
+    canGoPrev: monthRangeOk_(prevMonthKey, now), canGoNext: monthRangeOk_(nextMonthKey, now),
+    days,
+    summary: {
+      visitCount: monthVisits.length,
+      coveredCustomerCount: coveredIds.size,
+      newDevVisitCount,
+      notVisitedCustomerCount,
+      billing: { done: billingDone, pending: billingPending },
+      mailingNote: '寄單流程還沒遷移到「待追蹤」表，暫不顯示進度（跟 CLAUDE.md「A5 本週」一節記錄的現況一致）',
+    },
+    note: '只能查上個月／本月／下個月（handleAllVisits 只回傳最近500筆，範圍再放寬可能漏算）；' +
+      '假日/週末由前端讀 holidays-{year}.json 疊加顯示，跟 weekly.html 同一個模式，這支不處理；' +
+      '請款進度數的是「待追蹤」表「請款：」開頭事項在這個月完成/建立的數量，不是 A5 即時寄賣金額判斷；' +
+      '「覆蓋客戶數」「還沒去過的客戶數」只算排除規則篩過的名單內的正式客戶（跟 /api/plan 等一致）。',
   });
 }
 
