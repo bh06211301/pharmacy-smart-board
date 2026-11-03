@@ -2702,6 +2702,11 @@ function buildDailyWeatherFromElements_(weatherElements) {
     const d = ensure(dateKeyOf(t.StartTime));
     if (d.minTemp === null || v < d.minTemp) d.minTemp = v;
   });
+  // 2026-11-03 實測確認：這個元素雖然 Time 陣列有完整7天14段，但第4~7天的值氣象署直接給字串
+  // "-"（代表還沒有精細降雨預報，不是欄位名稱錯或解析漏掉——文件原文「12小時降雨機率(3天內)」
+  // 講的就是這件事，PDF 另外提到的「逐日 24小時降雨機率」同樣寫「(3天內)」，這個產品本來就只有
+  // 精細降雨機率預報到3天，不是CWA哪個API欄位有更完整資料被我漏接）。parseFloat("-") 自然是
+  // NaN，維持原樣跳過即可，pop 停留 null，前端顯示「尚無預報」而不是硬湊一個數字出來。
   timesOf('12小時降雨機率').forEach(t => {
     const v = parseFloat(valueOf(t, 'ProbabilityOfPrecipitation'));
     if (isNaN(v)) return;

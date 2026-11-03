@@ -218,15 +218,18 @@ function dayHintHtml(holidayInfo) {
   return '';
 }
 
-// 氣象署資料只涵蓋未來約7天，超出範圍 weather 會是 null，維持原本的佔位文字（CLAUDE.md「A5 本週」
-// 一節記錄過的現況說明）；有資料時顯示溫度範圍跟降雨機率，60% 以上標紅（SPEC 5.6 原文門檻）。
+// 氣象署資料只涵蓋未來約7天，超出範圍 weather 會是 null，改顯示「超過一週，尚無預報」（2026-11-03
+// 使用者要求，取代舊的「尚未串接」文字——金鑰已經接上了，缺資料是正常的預報範圍限制，不是還沒做）。
+// 2026-11-03 實測確認：降雨機率即使在7天範圍內，第4~7天氣象署本身就只給"-"（沒有精細降雨預報，
+// 文件原文「12小時降雨機率(3天內)」講的就是這件事），不是欄位名稱猜錯或解析漏掉，所以 weather
+// 存在但 pop 是 null 時，也用同一種「尚無預報」語氣顯示，不留空白也不硬湊數字。
 function weatherHtml(weather) {
-  if (!weather) return `<div class="day-weather">🌤️ 天氣（尚未串接，待申請 CWA 授權碼，或超出目前預報範圍）</div>`;
+  if (!weather) return `<div class="day-weather">🌤️ 超過一週，尚無預報</div>`;
   const pop = weather.pop;
-  const popText = pop === null || pop === undefined ? '' : `・降雨 ${pop}%`;
+  const popText = (pop === null || pop === undefined) ? '降雨機率尚無預報' : `降雨 ${pop}%`;
   const tempText = (weather.maxTemp !== null && weather.minTemp !== null) ? `${weather.minTemp}°~${weather.maxTemp}°C` : '';
   const isHighRain = pop !== null && pop !== undefined && pop >= 60;
-  return `<div class="day-weather has-data${isHighRain ? ' rain-high' : ''}">🌤️ ${escapeHtml(tempText)}${escapeHtml(popText)}</div>`;
+  return `<div class="day-weather has-data${isHighRain ? ' rain-high' : ''}">🌤️ ${escapeHtml(tempText)}・${escapeHtml(popText)}</div>`;
 }
 
 function regionSelectHtml(dateStr, currentRegion) {
