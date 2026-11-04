@@ -691,8 +691,8 @@ async function fetchTempPharmacyConversionMap_(env) {
 // 「原始逐字稿」長文字欄位的大表，之前完全沒有快取，卻被 /api/plan、/api/week、/api/followups、
 // /api/overview 四個端點各自重新即時讀一次（量過：單次 planner.html 冷載入這支就佔了 25 秒裡的
 // 大部分時間）。這張表是由另一套系統（pharmacy-visit-app 的 GAS webhook）寫入，這支 worker 自己
-// 沒有對應的寫入端點可以主動清快取，所以用跟 fetchGvizSheet 一樣的固定 TTL（60秒），接受最多
-// 60秒的顯示延遲（符合「讀取類API加短快取，5分鐘以內」的要求）。
+// 沒有對應的寫入端點可以主動清快取，TTL 設 240 秒（使用者定的上限是5分鐘；一開始試過60秒，
+// 量到真實使用情境裡兩次操作間隔常常就超過60秒，等於沒快取到，拉長到240秒降低冷啟動頻率）。
 async function handleVisitsSummary(env) {
   const cacheKey = 'visits:summary';
   if (env && env.TODOS_KV) {
@@ -761,7 +761,7 @@ async function handleVisitsSummary(env) {
 
   const payload = { ok: true, count: Object.keys(result).length, summary: result };
   if (env && env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 60 });
+    await env.TODOS_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 240 });
   }
   return json(payload);
 }
@@ -1377,9 +1377,11 @@ async function handleInvoiceTasks(env) {
 // ============================================================
 // 18. 盤點候選產品清單
 // ============================================================
-// env 有帶且該 sheet 允許快取時，會用 KV 存 60 秒（Cloudflare KV 最短 TTL），
-// 減少反覆打 Google gviz 的往返時間；不帶 env 就是原本每次即時讀取。
-async function fetchGvizSheet(sheetId, sheetName, env) {
+// env 有帶且該 sheet 允許快取時，會用 KV 存 ttlSeconds 秒（預設 60，Cloudflare KV 允許的最短
+// TTL）；不帶 env 就是原本每次即時讀取。2026-11-03：量過一整天斷斷續續才打開一次頁面的真實使用
+// 情境下，60秒TTL常常在兩次操作之間就過期，等於沒快取到——呼叫端可以傳更長的 ttlSeconds（上限
+// 使用者定的5分鐘），fetchGvizRows() 等新加的快取就是用 240 秒。
+async function fetchGvizSheet(sheetId, sheetName, env, ttlSeconds = 60) {
   const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
   const url = sheetName ? `${base}&sheet=${encodeURIComponent(sheetName)}` : base;
   const cacheKey = `gviz:${sheetId}:${sheetName || ''}`;
@@ -1400,7 +1402,7 @@ async function fetchGvizSheet(sheetId, sheetName, env) {
   const result = { rows, colMap };
 
   if (env && env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 });
+    await env.TODOS_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: ttlSeconds });
   }
 
   return result;
@@ -1840,13 +1842,13 @@ ${text}
 // 環境變數新增：SHEET_SCREENING（藥局每日異動追蹤）、SHEET_PLANNER（藥局規劃資料）
 // ============================================================
 
-// 2026-11-03 效能優化：改成呼叫 fetchGvizSheet()，吃它既有的 KV 快取（60秒 TTL）——SHEET_PLANNER
+// 2026-11-03 效能優化：改成呼叫 fetchGvizSheet()，吃它既有的 KV 快取機制（TTL 240秒）——SHEET_PLANNER
 // 的「待追蹤」／「店家規則」／「階段歷程」三個分頁之前完全沒快取，卻分別被 5/4/4 處各自獨立讀取，
 // 同一次頁面載入裡同一張表常常被重新即時讀好幾次。對應的寫入端點（handlePlannerFollowups／
 // handlePlannerRules／handleFunnelResult）已經補上 invalidateGvizCache_() 清快取，避免使用者剛
 // 改完資料卻在 60 秒內看到舊的。
 async function fetchGvizRows(sheetId, sheetName, env) {
-  const { rows, colMap } = await fetchGvizSheet(sheetId, sheetName, env);
+  const { rows, colMap } = await fetchGvizSheet(sheetId, sheetName, env, 240);
   return rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';
     return { get };
@@ -3538,7 +3540,7 @@ function convertedCustomerIdByStore_(stageHistoryRows) {
 
 // 2026-11-03 效能優化：篩選分頁（new-pharmacy-screening）清單只是「顯示用」整批讀一次，之前
 // 完全沒快取，卻被 /api/plan、/api/week、/api/followups、/api/funnel/overview 四個端點各自重新
-// 即時打一次 GAS。這裡加 60 秒 KV 快取；verifyScreeningStage_()／handleFunnelResult() 自己要核對
+// 即時打一次 GAS。這裡加 240 秒 KV 快取；verifyScreeningStage_()／handleFunnelResult() 自己要核對
 // 「現在真正的階段」那兩處刻意不走這份快取（仍然直接 fetch），避免寫入流程根據過期資料做決定。
 async function fetchScreeningRows_(env) {
   if (!env.SCREENING_API_TOKEN) return [];
@@ -3550,7 +3552,7 @@ async function fetchScreeningRows_(env) {
   const data = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
   const rows = data.rows || [];
   if (env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(rows), { expirationTtl: 60 });
+    await env.TODOS_KV.put(cacheKey, JSON.stringify(rows), { expirationTtl: 240 });
   }
   return rows;
 }
