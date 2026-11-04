@@ -402,6 +402,39 @@
 <script>
 const WORKER = window.SR_WORKER_URL;
 
+// ══════════════════════════════
+// 常數區（2026-11-05 搬到檔案最上方：原本放在 calcRoute() 附近，結果今日清單階段一新增的
+// `let departMin = START_MIN;`（頂層陳述式，定義時就會立即求值）排在 START_MIN 宣告之前，
+// 造成 TDZ ReferenceError 把整段 inline script 中斷執行，線上整頁卡死在「載入中」。任何頂層
+// let/const 的初始值都要在這個位置之後才能引用到其他頂層常數，所以常數一律放最上面，不要
+// 散落在各段落附近——這跟 function 宣告（會整體 hoist，呼叫時才執行，不受宣告順序影響）是
+// 兩種完全不同的風險等級，不要混為一談。
+// ══════════════════════════════
+const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 index.html 目前用的同一個前端 Maps key
+const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
+const DEST_ADDR = '台北市內湖區新民街422號';
+const START_MIN = 13 * 60 + 30;
+
+// 今日清單規格（docs/今日清單_規格.md 1-4）：拜訪目的＋停留分鐘只維護一份——
+// **正本在 planner-config.js 的 PLANNER_CONFIG.visitPurposes**，worker.js 直接 import 那份，
+// /api/plan 回應的 config.visitPurposes 就是它。這裡這份只是「API 還沒回來、或 config 欄位
+// 缺失時」的備用值（這個檔案沒有用 type="module"，沒辦法直接 import 設定檔），loadPlan() 拿到
+// 回應後會優先改用 API 回傳的版本，見 loadPlan()。調整拜訪目的只要改 planner-config.js，
+// 不用記得來改這裡——這份備用值落後也只影響「API 完全連不上」這種極端情況。
+let VISIT_PURPOSES = [
+  { key: '例行拜訪', stayMin: 20 },
+  { key: '新店開發', stayMin: 15 },
+  { key: '送貨',     stayMin: 10 },
+  { key: '對帳請款', stayMin: 30 },
+  { key: '介紹新品', stayMin: 20 },
+  { key: '其他',     stayMin: 20, allowCustomText: true },
+];
+
+function fmtMin(min) {
+  const h = Math.floor(min / 60) % 24, m = Math.round(min % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
 // 2026-11-01：主選單改共用元件（planner-nav.js），extraRight 放這頁才有的規劃日期選擇器／找藥局框，
 // 要在 initHeader() 用到 #plan-date-input 之前先把 nav 灌進去，不然抓不到元素。
 window.SRNav.render({
@@ -1165,15 +1198,23 @@ let lastRouteStopIds = null;    // 算出 lastRouteLegMinutes 時的站點 id �
 // 站點集合（誰在今日清單裡）跟上次算路線時不一樣了，就讓「依路線順序」的時間資料整組失效，
 // 改回「未排序」並提示使用者重新按「計算路線」——寧可不顯示時間，也不要顯示用錯的站點組合算出來、
 // 看起來正常但其實不對的到達時間。
+// 2026-11-05 修正：orderMode==='manual' 時，清單增減店家不該整個退回「未排序」——使用者排過
+// 的順序還是使用者的意思，新增的店（syncTodayList_ 本來就會把它加在陣列最後面）、移除的店
+// （直接從陣列拿掉）都不影響其他站的相對順序，只是車程資料過期了，debounce 後補一次新的時間
+// 就好（scheduleManualRecalc_）。只有 orderMode==='route'（自動排的最佳順序）才需要整個退回
+// 未排序，因為「最佳順序」的前提（站點組合）已經不一樣了，重新排才有意義。清單整個清空則兩種
+// 模式都重設成未排序，沒有順序需要保留。
 function invalidateRouteIfStopsChanged_() {
-  if (orderMode === 'unordered') return; // 手動模式('manual')站點變動時也要重新判斷，不是只有 'route'
+  if (orderMode === 'unordered') return;
   const currentIds = todayList.map(r => r.id).sort().join(',');
-  if (currentIds === lastRouteStopIds) return;
-  orderMode = 'unordered';
+  if (currentIds === lastRouteStopIds) return; // 站點組合沒變，連車程資料都還有效，什麼都不用做
   lastRouteLegMinutes = null;
   lastRouteResolvedIds = null;
   lastRouteTotalKm = null;
   todayList.forEach(row => { row.arrival = null; });
+  if (!todayList.length) { orderMode = 'unordered'; return; }
+  if (orderMode === 'route') { orderMode = 'unordered'; return; }
+  scheduleManualRecalc_(); // orderMode === 'manual'：順序保留，debounce 後補新時間
 }
 
 function anchorSourceTag_(source) {
@@ -1771,39 +1812,6 @@ renderMiniCal();
 applyViewModeUI();
 loadPlan();
 window.SRNav.loadBadges();
-
-// ══════════════════════════════
-// 第③欄：順序與時間
-// port 自 index.html 的 runSchedule()（今天剛修過索引對不齊的bug），差異：
-//   1. 拿掉油費估算（SPEC 1「拿掉油費估算，改成顯示預估收工時間」）
-//   2. 起點時間改成 13:30（SPEC 5.2「汐止辦公室出發（約13:30）」），不是舊版的 8:30
-//      ——這兩個頁面描述的是不同的使用情境（SmartRoute 是早餐規劃全天一條路線，
-//      index.html 舊版今日清單可能是另一種假設），不是同一份邏輯照搬數字。
-// ══════════════════════════════
-const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 index.html 目前用的同一個前端 Maps key
-const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
-const DEST_ADDR = '台北市內湖區新民街422號';
-const START_MIN = 13 * 60 + 30;
-
-// 今日清單規格（docs/今日清單_規格.md 1-4）：拜訪目的＋停留分鐘只維護一份——
-// **正本在 planner-config.js 的 PLANNER_CONFIG.visitPurposes**，worker.js 直接 import 那份，
-// /api/plan 回應的 config.visitPurposes 就是它。這裡這份只是「API 還沒回來、或 config 欄位
-// 缺失時」的備用值（這個檔案沒有用 type="module"，沒辦法直接 import 設定檔），loadPlan() 拿到
-// 回應後會優先改用 API 回傳的版本，見下面 loadPlan()。調整拜訪目的只要改 planner-config.js，
-// 不用記得來改這裡——這份備用值落後也只影響「API 完全連不上」這種極端情況。
-let VISIT_PURPOSES = [
-  { key: '例行拜訪', stayMin: 20 },
-  { key: '新店開發', stayMin: 15 },
-  { key: '送貨',     stayMin: 10 },
-  { key: '對帳請款', stayMin: 30 },
-  { key: '介紹新品', stayMin: 20 },
-  { key: '其他',     stayMin: 20, allowCustomText: true },
-];
-
-function fmtMin(min) {
-  const h = Math.floor(min / 60) % 24, m = Math.round(min % 60);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-}
 
 // 2026-11-04 使用者要求修正：原本 calcRoute() 只查 /pharmacies（正式客戶表），新店不在那張表
 // 就直接掉進「只用店名」查 Geocoding API——這把 GMAPS_KEY 設了 HTTP referrer 限制，Geocoding
