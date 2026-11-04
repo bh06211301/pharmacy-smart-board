@@ -137,6 +137,10 @@
       .sr-drawer-name { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
       .sr-drawer-stage { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-xs); padding: 2px 10px; border-radius: var(--sr-radius-sm); }
       .sr-drawer-meta { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: var(--sr-space-2); }
+      .sr-drawer-address { font-size: var(--sr-text-sm); margin-top: var(--sr-space-2); }
+      .sr-drawer-address a { color: var(--sr-primary); text-decoration: underline; }
+      .sr-screening-line { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
+      .sr-screening-line:first-child { margin-top: 0; }
       .sr-drawer-actions { display: flex; gap: var(--sr-space-4); margin-top: var(--sr-space-6); flex-wrap: wrap; }
       .sr-btn { height: var(--sr-btn-h); padding: 0 var(--sr-space-6); border-radius: var(--sr-radius-md); font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); }
       .sr-btn-primary { background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
@@ -330,6 +334,29 @@
   }
 
   // ---------- 店家規則（可新增） ----------
+  // 篩選器資料（new-pharmacy-screening 專案，/api/store 的 data.screening）：新店正式建檔之前
+  // 業務逐店判斷留下的紀錄，陌生拜訪前看一眼用。只有新店才會有 data.screening（見 worker.js
+  // handleStoreDetail），沒有值的欄位不顯示，不要為了排版硬塞空白行。
+  function screeningBlockHtml(data) {
+    const s = data.screening;
+    if (!s) return '';
+    const lines = [];
+    if (s.setup) lines.push(`設立日期：${escapeHtml(s.setup)}`);
+    if (s.stageDate) lines.push(`進入「${escapeHtml(data.stage || '目前階段')}」日期：${escapeHtml(s.stageDate)}`);
+    const judged = [];
+    if (s.front) judged.push('門前藥局');
+    if (s.chain) judged.push('連鎖藥局');
+    if (s.wrong) judged.push('⚠ 名單可能有誤');
+    if (judged.length) lines.push(judged.join('、'));
+    if (s.flags) lines.push(`系統提醒：${escapeHtml(s.flags)}`);
+    if (s.note) lines.push(`備註：${escapeHtml(s.note)}`);
+    if (!lines.length) return '';
+    return `<div class="sr-section">
+      <div class="sr-section-title">篩選資料</div>
+      ${lines.map(l => `<div class="sr-screening-line">${l}</div>`).join('')}
+    </div>`;
+  }
+
   function rulesBlockHtml(data) {
     const items = data.rules || [];
     return `<div class="sr-section">
@@ -529,6 +556,7 @@
           ${data.stage ? `<span class="sr-drawer-stage">${escapeHtml(data.stage)}</span>` : ''}
         </div>
         <div class="sr-drawer-meta">${escapeHtml(data.id)}${cityDistrict ? '　' + escapeHtml(cityDistrict) : ''}${data.greeting ? '　藥師：' + escapeHtml(data.greeting) : ''}</div>
+        ${data.address ? `<div class="sr-drawer-address"><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(data.address)}" target="_blank" rel="noopener">📍 ${escapeHtml(data.address)}</a></div>` : ''}
         <div class="sr-drawer-actions">
           <button class="sr-btn sr-btn-primary" data-action="add-today" data-kind="anchor">加入今天：一定要去</button>
           <button class="sr-btn sr-btn-secondary" data-action="add-today" data-kind="maybe">加入今天：順路</button>
@@ -556,6 +584,7 @@
           <div class="sr-section-title">進貨</div>
           <div id="sr-orders-root"><div class="sr-empty">載入中…</div></div>
         </div>
+        ${data.type === 'new-store' ? screeningBlockHtml(data) : ''}
         <div class="sr-section" style="border-bottom:none">
           <div class="sr-section-title">漏斗歷程</div>
           <div style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">${data.type === 'new-store' ? escapeHtml(data.stage || '') : '正式客戶'}</div>

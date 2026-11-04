@@ -3476,9 +3476,14 @@ async function handleStoreDetail(request, env, ctx) {
     name: pharmacy ? pharmacy.name : (screeningRow ? screeningRow.name : id),
     type: pharmacy ? 'customer' : 'new-store',
     stage: pharmacy ? '正式客戶' : (screeningRow ? screeningRow.stage : null),
-    address: pharmacy ? pharmacy.address : null,
-    city: pharmacy ? pharmacy.city : null,
-    district: pharmacy ? pharmacy.district : null,
+    // 2026-11-05：新店（screeningRow）原本 address/city/district 全部回 null——這幾欄客戶表
+    // 沒有才對，但篩選分頁本來就有同名欄位（new-pharmacy-screening/apps-script/Code.gs 的
+    // FIELD 對照：address/city/district），正式客戶優先，沒有正式客戶資料才退回篩選分頁的值。
+    // 篩選分頁沒有電話欄位（COLS 裡沒有「電話」），phone 維持只讀客戶表，新店永遠是 null，
+    // 不是漏填，是資料來源真的沒有這欄。
+    address: pharmacy ? pharmacy.address : (screeningRow ? screeningRow.address : null),
+    city: pharmacy ? pharmacy.city : (screeningRow ? screeningRow.city : null),
+    district: pharmacy ? pharmacy.district : (screeningRow ? screeningRow.district : null),
     greeting: pharmacy ? pharmacy.greeting : null,
     phone: pharmacy ? pharmacy.phone : null,
     isDadStore: pharmacy ? pharmacy.owner === '老爸' : false,
@@ -3487,6 +3492,17 @@ async function handleStoreDetail(request, env, ctx) {
     monthlyOrders,
     rules: myRules,
     followups: myFollowups,
+    // 篩選器裡對拜訪有用的欄位，原始值直接帶過去，「沒有值要不要顯示」交給前端判斷（store-drawer.js
+    // 的「篩選資料」區塊）——這裡不先篩，保持 Worker 端單純轉資料，顯示規則別分散兩邊各寫一次。
+    screening: screeningRow ? {
+      setup: screeningRow.setup || null,         // 設立日期
+      front: screeningRow.front,                 // 門前藥局（boolean）
+      chain: screeningRow.chain,                 // 連鎖藥局（boolean）
+      wrong: screeningRow.wrong,                 // 名單有誤（boolean）
+      note: screeningRow.note || null,           // 備註
+      stageDate: screeningRow.stageDate || null,  // 進入目前階段的日期
+      flags: screeningRow.flags || null,         // 系統提醒（例如換負責人、地址同既有客戶）
+    } : null,
   });
 }
 
