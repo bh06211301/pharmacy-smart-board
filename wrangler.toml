@@ -13,10 +13,14 @@ bucket_name = "pharmacy-product-photos"
 
 # Plan C 預熱（2026-11-04）：平日（週一～五）台灣時間 07:00 跑一次 scheduled()，把 /api/plan、
 # /api/week、/api/followups 用到的資料源全部重新抓一輪寫進 KV。cron 用 UTC，台灣是 UTC+8，
-# 07:00 台灣 = 前一天 23:00 UTC：台灣週一 07:00 對應 UTC 週日(0) 23:00，台灣週五 07:00 對應
-# UTC 週四(4) 23:00，所以 UTC 的星期要用 0-4（週日～週四），不是 1-5。
+# 07:00 台灣 = 前一天 23:00 UTC：台灣週一 07:00 對應 UTC 週日 23:00，台灣週五 07:00 對應 UTC
+# 週四 23:00，所以 UTC 的星期要落在週日～週四。
+# ⚠️ 2026-11-04 實測踩到：Cloudflare 的 cron 驗證器不接受星期欄位用數字範圍/清單寫法
+# （"0-4" 跟 "0,1,2,3,4" 都回 400 invalid cron string），只接受英文縮寫範圍（SUN-THU）或單一
+# 數字，是 Cloudflare 自己 cron parser 的限制，不是我們語法寫錯——改用 SUN-THU 這個寫法才
+# 部署成功（直接呼叫 Cloudflare API 驗證過，見 PR 說明）。
 [triggers]
-crons = ["0 23 * * 0-4"]
+crons = ["0 23 * * SUN-THU"]
 
 [vars]
 SHEET_PHARMACY = "1qJ62K5Hd2bKP9DdQTjwJOOy0njNICMSPiayW7YJZdNM"
