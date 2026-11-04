@@ -33,12 +33,15 @@
   }
 
   // extraRight：只有 planner.html 用到（規劃日期選擇器、找藥局輸入框），插在「切回舊版」連結前面。
+  // 2026-11-03：767px 以下分頁清單收進漢堡選單（見 design-tokens.css 的 .nav-burger／.nav-tabs.open
+  // RWD 規則），漢堡按鈕只在那個寬度才會用 CSS 顯示出來，1024px 以上完全不影響原本的單排顯示。
   function render({ active, extraRight }) {
     const container = document.getElementById('app-nav');
     if (!container) return;
     container.innerHTML = `
       <span class="nav-brand">SmartRoute</span>
-      <div class="nav-tabs">
+      <button type="button" class="nav-burger" id="nav-burger" aria-label="開啟導覽選單" aria-expanded="false" aria-controls="nav-tabs">☰</button>
+      <div class="nav-tabs" id="nav-tabs">
         ${TABS.map(t => tabHtml(t, active)).join('')}
         <div class="nav-divider"></div>
         <span class="nav-manage-label">管理</span>
@@ -49,6 +52,12 @@
         <a class="nav-manage-link" href="index.html" title="切回舊版月曆/今日清單畫面">切回舊版</a>
       </div>
     `;
+    const burger = document.getElementById('nav-burger');
+    const tabs = document.getElementById('nav-tabs');
+    burger.addEventListener('click', () => {
+      const open = tabs.classList.toggle('open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
   }
 
   function setBadgeEl(id, n) {

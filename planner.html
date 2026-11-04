@@ -9,38 +9,8 @@
   /* Phase 2 骨架：三欄版面＋主選單＋頁首列。資料渲染留給步驟 3～5 補。 */
   * { box-sizing: border-box; }
 
-  /* ---------- 主選單（DESIGN.md 2.1） ---------- */
-  .nav {
-    height: var(--sr-nav-h);
-    background: var(--sr-bg);
-    border-bottom: 1px solid var(--sr-line);
-    display: flex; align-items: center; gap: var(--sr-space-6);
-    padding: 0 var(--sr-space-8);
-  }
-  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
-  /* 窄螢幕（約640px）：分頁太多塞不下時，nav-tabs 自己橫向捲動，不要讓整頁被撐寬（2026-11-02）。
-     min-width:0 蓋掉 flex item 預設不會縮小到比內容窄的行為，overflow-x:auto 才真的生效。 */
-  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .nav-tab {
-    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
-    height: var(--sr-nav-h); display: flex; align-items: center;
-    border-bottom: 3px solid transparent; flex-shrink: 0; white-space: nowrap;
-  }
-  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
-  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
-  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
-  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
-  .nav-manage-link { font-size: var(--sr-text-sm); color: var(--sr-ink-2); text-decoration: none; white-space: nowrap; }
-  .nav-badge {
-    display: inline-flex; align-items: center; justify-content: center;
-    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
-    background: var(--sr-danger-strong); color: var(--sr-on-dark);
-    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
-  }
-  /* .nav-badge 自己設了 display，跟瀏覽器預設的 [hidden]{display:none} 同一個特異度，
-     誰在後面誰贏——這條在後面，所以要補這條才會真的消失，不然 0 的時候會變成空紅點 */
-  .nav-badge[hidden] { display: none; }
-  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+  /* 主選單（.nav／.nav-tabs／.nav-tab…）2026-11-03 搬到 design-tokens.css 集中管理＋加 RWD，
+     不要在這裡重複寫一份（原本7個頁面各自複製，見 docs/SPEC.md 待辦）。 */
   .plan-date-input {
     height: 32px; font-size: var(--sr-text-sm); border: 1px solid var(--sr-line);
     border-radius: var(--sr-radius-md); padding: 0 var(--sr-space-4); font-family: var(--sr-font);

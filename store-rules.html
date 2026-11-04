@@ -11,30 +11,7 @@
   * { box-sizing: border-box; }
   body { overflow-x: hidden; } /* 2026-11-02：整頁不能水平捲動，容器各自處理自己的捲動 */
 
-  .nav {
-    height: var(--sr-nav-h); background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
-    display: flex; align-items: center; gap: var(--sr-space-6); padding: 0 var(--sr-space-8);
-  }
-  .nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
-  /* 窄螢幕（約640px）：分頁太多塞不下時，nav-tabs 自己橫向捲動，不要讓整頁被撐寬 */
-  .nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .nav-tab {
-    font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
-    height: var(--sr-nav-h); display: flex; align-items: center; border-bottom: 3px solid transparent;
-    flex-shrink: 0; white-space: nowrap;
-  }
-  .nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
-  .nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
-  .nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
-  .nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
-  .nav-badge {
-    display: inline-flex; align-items: center; justify-content: center;
-    height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
-    background: var(--sr-danger-strong); color: var(--sr-on-dark);
-    font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
-  }
-  .nav-badge[hidden] { display: none; }
-  .nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+  /* 主選單（.nav／.nav-tabs／.nav-tab…）2026-11-03 搬到 design-tokens.css 集中管理＋加 RWD。 */
 
   .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
   .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }

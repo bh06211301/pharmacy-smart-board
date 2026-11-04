@@ -130,3 +130,80 @@ a:hover { color: var(--sr-primary-hover); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* =========================================================
+   主選單（.nav，由 planner-nav.js 的 render() 產生）
+   2026-11-03 從 planner.html／weekly.html／monthly.html／customers.html／funnel.html／
+   store-rules.html／followups.html 這 7 個頁面各自複製的同一份 <style> 搬過來集中管理
+   （原本故意複製，見各頁檔頭註解跟 docs/SPEC.md 待辦，這次順便處理掉）。
+   之後任何頁面要用主選單，一律引用這裡，不要再各自寫一份。
+   ========================================================= */
+.nav {
+  height: var(--sr-nav-h);
+  background: var(--sr-bg);
+  border-bottom: 1px solid var(--sr-line);
+  display: flex; align-items: center; gap: var(--sr-space-6);
+  padding: 0 var(--sr-space-8);
+}
+.nav-brand { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-right: var(--sr-space-4); flex-shrink: 0; }
+/* 漢堡按鈕只在 767px 以下顯示（見下面 media query），平常隱藏 */
+.nav-burger {
+  display: none;
+  border: none; background: none; cursor: pointer; padding: var(--sr-space-2);
+  font-size: 20px; line-height: 1; color: var(--sr-ink-2); flex-shrink: 0;
+}
+/* 1024px 以上：單排顯示，overflow-x:auto 只是防止分頁數量意外超量時把整頁撐寬的最後防線，
+   不是主要的響應式手段——1024px 以上正常情況下不應該觸發橫向捲動。 */
+.nav-tabs { display: flex; align-items: center; gap: var(--sr-space-7); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.nav-tab {
+  font-size: var(--sr-text-md); color: var(--sr-ink-2); text-decoration: none;
+  height: var(--sr-nav-h); display: flex; align-items: center;
+  border-bottom: 3px solid transparent; flex-shrink: 0; white-space: nowrap;
+}
+.nav-tab.active { color: var(--sr-ink); font-weight: var(--sr-weight-bold); border-bottom-color: var(--sr-primary); }
+.nav-tab.disabled { color: var(--sr-ink-3); cursor: default; }
+.nav-divider { width: 1px; height: 22px; background: var(--sr-line); flex-shrink: 0; }
+.nav-manage-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+.nav-manage-link { font-size: var(--sr-text-sm); color: var(--sr-ink-2); text-decoration: none; white-space: nowrap; }
+.nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; min-width: 18px; padding: 0 5px; border-radius: var(--sr-radius-pill);
+  background: var(--sr-danger-strong); color: var(--sr-on-dark);
+  font-size: 11px; font-weight: var(--sr-weight-bold); margin-left: 4px;
+}
+/* .nav-badge 自己設了 display，跟瀏覽器預設的 [hidden]{display:none} 同一個特異度，
+   誰在後面誰贏——這條在後面，所以要補這條才會真的消失，不然數字是 0 時會變成空紅點 */
+.nav-badge[hidden] { display: none; }
+.nav-right { display: flex; align-items: center; gap: var(--sr-space-5); flex-shrink: 0; }
+
+/* 768～1023px：維持單排，不要變成漢堡——縮小字距跟間距讓「今天/本週/本月/客戶/新店開發/
+   管理/店家規則/待追蹤」全部塞得下，不用橫向捲動（2026-11-03 使用者要求）。 */
+@media (max-width: 1023px) {
+  .nav { padding: 0 var(--sr-space-5); gap: var(--sr-space-4); }
+  .nav-tabs { gap: var(--sr-space-4); }
+  .nav-tab { font-size: var(--sr-text-sm); }
+  .nav-manage-label { display: none; } /* 省空間：divider 已經能視覺分隔，文字標籤可以先省略 */
+}
+
+/* <768px：改漢堡選單——分頁清單預設收起來，按漢堡按鈕才整排往下展開成直排清單。
+   .nav-right（含徽章跟「切回舊版」）不收進漢堡，一直都看得到。 */
+@media (max-width: 767px) {
+  .nav { position: relative; }
+  .nav-burger { display: inline-flex; align-items: center; justify-content: center; }
+  .nav-tabs {
+    display: none;
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+    flex-direction: column; align-items: stretch; gap: 0;
+    background: var(--sr-bg); border-bottom: 1px solid var(--sr-line);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .08);
+    overflow-x: visible; max-height: calc(100vh - var(--sr-nav-h)); overflow-y: auto;
+  }
+  .nav-tabs.open { display: flex; }
+  .nav-tab {
+    height: auto; width: 100%; padding: var(--sr-space-5) var(--sr-space-6);
+    border-bottom: 1px solid var(--sr-line-row); border-left: 3px solid transparent;
+  }
+  .nav-tab.active { border-bottom-color: var(--sr-line-row); border-left-color: var(--sr-primary); }
+  .nav-divider { display: none; }
+  .nav-manage-label { display: block; padding: var(--sr-space-4) var(--sr-space-6) 0; }
+}
