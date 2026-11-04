@@ -928,8 +928,11 @@ async function loadPlan() {
 // 跟 #list-view 共用同一份 planData/anchors/selectedCol2Ids/filterMode/groupExpanded，只是換一種
 // 畫面呈現──不另開頁面、不另存一份資料狀態（2026-11-02 跟使用者確認過的架構決定，Q1）。
 // ══════════════════════════════
+// 2026-11-03 使用者要求：每次打開一律預設清單模式，不再用 localStorage 記住上次選的地圖/清單——
+// 地圖模式初始化依賴 Google Maps SDK 跟 GMAPS_KEY 的 referrer 限制，打開頁面就自動切回地圖
+// 容易撞到「畫面空白連底圖都沒有」（見下面 loadGoogleMapsSdk 的已知問題），改成「地圖只在這次
+// 瀏覽時自己按過切換才會顯示」，重新整理/下次打開永遠從清單開始。
 let viewMode = 'list';
-try { viewMode = localStorage.getItem('sr_view_mode') || 'list'; } catch (e) {} // SPEC 6.2.4：記住上次選擇
 
 let srMap = null, srMapInfoWindow = null, srMapMarkers = [], srMapCircles = [], srMapPolyline = null;
 
@@ -943,8 +946,7 @@ function applyViewModeUI() {
 
 function setViewMode(mode) {
   if (mode === viewMode) return;
-  viewMode = mode;
-  try { localStorage.setItem('sr_view_mode', mode); } catch (e) {}
+  viewMode = mode; // 只存在記憶體裡，不寫 localStorage——重新整理頁面要回到清單，見上面宣告處註解
   applyViewModeUI();
   if (mode === 'map') renderMap();
 }
