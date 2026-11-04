@@ -325,7 +325,7 @@ async function warmCacheKey_(env, cacheKey, fetchFn) {
     if (env.TODOS_KV) await env.TODOS_KV.put(cacheKey, JSON.stringify({ data, cachedAt: Date.now() }));
     return { cacheKey, ok: true };
   } catch (e) {
-    console.error('預熱失敗', cacheKey, e && e.message || e);
+    console.warn('預熱失敗（不影響其他來源，排程本身沒有人在等回應）', cacheKey, e && e.message || e);
     return { cacheKey, ok: false, error: String(e && e.message || e) };
   }
 }
@@ -1454,14 +1454,23 @@ async function swrFetch_(env, ctx, cacheKey, fetchFn) {
       ctx.waitUntil(
         fetchFn()
           .then(data => env.TODOS_KV.put(cacheKey, JSON.stringify({ data, cachedAt: Date.now() })))
-          .catch(e => console.error('SWR背景重讀失敗', cacheKey, e && e.message || e))
+          .catch(e => console.warn('SWR背景重讀/寫入失敗（不影響這次回應，已經回舊資料了）', cacheKey, e && e.message || e))
       );
     }
     return cached; // 不管新舊，這次請求都先用它，不等背景重讀
   }
   const data = await fetchFn();
   const entry = { data, cachedAt: now };
-  if (env && env.TODOS_KV) await env.TODOS_KV.put(cacheKey, JSON.stringify(entry));
+  // 2026-11-04 使用者要求：KV put 失敗（例如超過每日額度）不能讓這次 API 失敗——資料已經
+  // 抓到手上了（data 是好的），只是這次沒辦法寫進快取，下次請求會再抓一次，頂多多打幾次
+  // Google，不影響正確性，照樣把 entry 回給呼叫端。
+  if (env && env.TODOS_KV) {
+    try {
+      await env.TODOS_KV.put(cacheKey, JSON.stringify(entry));
+    } catch (e) {
+      console.warn('KV put 失敗（不影響這次回應，已經拿到新資料了）', cacheKey, e && e.message || e);
+    }
+  }
   return entry;
 }
 
@@ -2747,7 +2756,13 @@ async function fetchGoogleCalendarEvents_(env) {
   const icsText = await fetch(env.GCAL_ICAL_URL).then(r => r.text());
   const events = parseIcsEvents_(icsText);
   if (env.TODOS_KV) {
-    await env.TODOS_KV.put('gcal:events', JSON.stringify({ fetchedAt: Date.now(), events }), { expirationTtl: 3600 });
+    // 2026-11-04：KV put 失敗不能讓 /api/week 整個掛掉，events 已經解析好了，照樣回傳，
+    // 只是這次沒存到快取，下次呼叫會再重新解析一次 ICS，不影響正確性。
+    try {
+      await env.TODOS_KV.put('gcal:events', JSON.stringify({ fetchedAt: Date.now(), events }), { expirationTtl: 3600 });
+    } catch (e) {
+      console.warn('gcal:events 寫入KV失敗（不影響這次回應）', e && e.message || e);
+    }
   }
   return events;
 }
@@ -2780,7 +2795,12 @@ async function fetchWeatherForecast_(env) {
     }
   } catch (e) { byDate = {}; } // 查不到就當作沒有天氣資料，不讓 /api/week、/api/month 掛掉
   if (env.TODOS_KV) {
-    await env.TODOS_KV.put('weather:forecast', JSON.stringify({ fetchedAt: Date.now(), byDate }), { expirationTtl: 3 * 3600 });
+    // KV put 失敗不能讓 /api/week、/api/month 整個掛掉，byDate 已經算好了，照樣回傳。
+    try {
+      await env.TODOS_KV.put('weather:forecast', JSON.stringify({ fetchedAt: Date.now(), byDate }), { expirationTtl: 3 * 3600 });
+    } catch (e) {
+      console.warn('weather:forecast 寫入KV失敗（不影響這次回應）', e && e.message || e);
+    }
   }
   return byDate;
 }
