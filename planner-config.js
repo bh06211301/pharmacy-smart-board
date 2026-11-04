@@ -106,6 +106,18 @@ export const PLANNER_CONFIG = {
   // 前端顯示「資料累積中」而不是百分比，避免樣本太少時數字誤導。
   funnelConversionMinSamples: 5,
 
+  // 今日清單規格（docs/今日清單_規格.md 1-4）：拜訪目的選項與各自的預設停留分鐘。一站可複選
+  // 多個目的，停留時間取其中最長的；使用者手動改的分鐘數優先於這裡算出來的自動值。
+  // 「其他」允許額外輸入一段自訂文字（allowCustomText），不是另開一個目的分類。
+  visitPurposes: [
+    { key: '例行拜訪', stayMin: 20 },
+    { key: '新店開發', stayMin: 15 },
+    { key: '送貨',     stayMin: 10 },
+    { key: '對帳請款', stayMin: 30 },
+    { key: '介紹新品', stayMin: 20 },
+    { key: '其他',     stayMin: 20, allowCustomText: true },
+  ],
+
   // A1「今天可以跑的區」（2026-11-02）：7 類分區。
   // 來源：AppSheet「更新客戶實收總額 Output」表的「實體資料夾」公式——請款單本來就是照這套分類整理，
   // 不是這次新發明的。**AppSheet 那邊如果改了這個公式，這裡也要跟著改，不要讓兩邊各自維護一套、長期兜不起來。**

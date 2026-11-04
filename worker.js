@@ -2732,6 +2732,9 @@ async function handlePlannerPlan(request, env, ctx) {
     todayRegions,
     badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
+    // 2026-11-04：拜訪目的設定只維護一份（PLANNER_CONFIG.visitPurposes，planner-config.js），
+    // 前端 planner.html 優先用這裡回傳的，本地那份只在讀不到 API 時當備用。
+    config: { visitPurposes: PLANNER_CONFIG.visitPurposes },
     cachedAt: cacheMetaCachedAt_(cacheMeta), // Plan C：這次用到的資料裡最舊的一份是什麼時候抓的
     note: '2026-10-27 第二版：倍數改用「最後接觸日」(拜訪或叫貨取較近)，兩者都沒有固定倍數1.0；分級決定間隔；倍數≥1用倍數×月均排序不設上限；到期待追蹤移入 anchors 不參加排名，未到期的乘上 followupMultiplier；還沒套用 2 公里錨點半徑篩選；老爸/新竹縣市/狀態=不拜訪 已排除在推薦外，要在 A1 手動加成送貨錨點（等 A1 錨點 UI 做出來再接）。Phase 2：anchors/route 若當天已存檔會蓋掉系統預設值，見 /api/plan POST',
   });

@@ -230,6 +230,66 @@
   .route-warning-banner { font-size: var(--sr-text-sm); color: var(--sr-danger); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); line-height: var(--sr-leading-tight); }
   .route-summary { margin-top: var(--sr-space-6); font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
 
+  /* ---------- 第③欄：今日清單（docs/今日清單_規格.md 階段一） ---------- */
+  .tl-summary {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sr-space-4);
+    font-size: var(--sr-text-sm); color: var(--sr-ink-2); padding-bottom: var(--sr-space-4);
+    border-bottom: 1px solid var(--sr-line-soft);
+  }
+  .tl-summary strong { color: var(--sr-ink); font-weight: var(--sr-weight-bold); }
+  .tl-depart-input, .tl-stay-input {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); font-family: var(--sr-font);
+    font-size: var(--sr-text-sm); padding: 1px 4px;
+  }
+  .tl-depart-input { width: 88px; }
+  .tl-stay-input { width: 44px; text-align: right; }
+  .tl-order-mode { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+  .tl-actions { display: flex; gap: var(--sr-space-3); margin-top: var(--sr-space-4); }
+  .tl-actions .btn-calc-route { flex: 1; }
+
+  .tl-row {
+    border: 1px solid var(--sr-line-row); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-4); margin-bottom: var(--sr-space-4); cursor: grab;
+  }
+  .tl-row.rule-blocked { border-color: var(--sr-danger); background: color-mix(in srgb, var(--sr-danger) 6%, var(--sr-bg)); }
+  .tl-row.dragging { opacity: 0.4; }
+  .tl-row-top { display: flex; align-items: center; gap: var(--sr-space-3); }
+  .tl-seq { width: 22px; flex-shrink: 0; font-size: var(--sr-text-sm); color: var(--sr-ink-3); font-weight: var(--sr-weight-bold); }
+  .tl-name { flex: 1; font-size: var(--sr-text-base); font-weight: var(--sr-weight-bold); }
+  .tl-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tl-tag { font-size: var(--sr-text-2xs); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 1px 6px; color: var(--sr-ink-2); white-space: nowrap; }
+  .tl-remove { border: none; background: none; cursor: pointer; font-size: var(--sr-text-sm); color: var(--sr-ink-3); flex-shrink: 0; }
+  .tl-remove:hover { color: var(--sr-danger); }
+
+  .tl-purposes { display: flex; flex-wrap: wrap; gap: var(--sr-space-3); margin-top: var(--sr-space-3); }
+  .tl-purpose-chip {
+    display: inline-flex; align-items: center; gap: 3px; font-size: var(--sr-text-2xs);
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 2px 6px; cursor: pointer;
+  }
+  .tl-purpose-chip.checked { border-color: var(--sr-primary); color: var(--sr-primary); font-weight: var(--sr-weight-bold); }
+  .tl-other-text, .tl-note {
+    width: 100%; box-sizing: border-box; margin-top: var(--sr-space-3); border: 1px solid var(--sr-line-soft);
+    border-radius: var(--sr-radius-sm); padding: 3px var(--sr-space-3); font-size: var(--sr-text-2xs); font-family: var(--sr-font);
+  }
+  .tl-auto-task { margin-top: var(--sr-space-3); font-size: var(--sr-text-2xs); color: var(--sr-ink-2); }
+  .tl-rule-conflict { margin-top: var(--sr-space-3); font-size: var(--sr-text-2xs); color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .tl-rule-note { margin-top: var(--sr-space-3); font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+  .tl-row-bottom { display: flex; align-items: center; gap: var(--sr-space-4); margin-top: var(--sr-space-3); font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
+  .tl-arrival { font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
+  .tl-method.by-name { color: var(--sr-billing-soft); font-weight: var(--sr-weight-bold); }
+
+  /* ---------- 順序已手動調整時「計算路線」的二選一（跟 funnel.html 的 .sr-modal 同一套命名，
+     這個檔案沒有共用元件，各頁各自定義一份，見其他重複 helper 同慣例） ---------- */
+  .sr-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 9500; }
+  .sr-modal { width: var(--sr-dialog-w); max-width: 92vw; background: var(--sr-bg); border-radius: var(--sr-radius-xl); padding: var(--sr-space-8); font-family: var(--sr-font); }
+  .sr-modal-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-6); }
+  .sr-modal-actions { display: flex; flex-direction: column; gap: var(--sr-space-4); margin-top: var(--sr-space-4); }
+  .sr-modal-actions button { width: 100%; height: var(--sr-btn-h-lg); border-radius: var(--sr-radius-md); font-weight: var(--sr-weight-bold); font-family: var(--sr-font); cursor: pointer; }
+  .sr-modal-actions .primary { background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
+  .sr-modal-actions .primary:hover { background: var(--sr-primary-hover); }
+  .sr-modal-actions .ghost { background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
+  .sr-modal-actions .ghost:hover { background: var(--sr-bg-subtle); }
+
   /* ---------- 地圖（A9，DESIGN.md 2.16） ---------- */
   #map-view { display: none; position: relative; }
   #sr-map { width: 100%; height: 70vh; min-height: 480px; }
@@ -311,9 +371,15 @@
 
   <div class="col col-3">
     <div class="col-body">
-      <div class="step-title"><span class="step-num">③</span><span class="step-label">順序與時間</span></div>
-      <button class="btn-calc-route" id="btn-calc-route" onclick="calcRoute()">計算路線</button>
-      <div id="route-root" style="margin-top:14px"><div class="empty-hint">在第①②欄選好店家後，按上面「計算路線」</div></div>
+      <div class="step-title"><span class="step-num">③</span><span class="step-label">今日清單</span></div>
+      <div id="today-list-summary" class="tl-summary"><div class="empty-hint">還沒有任何店家</div></div>
+      <div class="tl-actions">
+        <button class="btn-calc-route" id="btn-calc-route" onclick="calcRouteClicked_()">計算路線</button>
+        <button class="btn-calc-route" id="btn-send-field" disabled title="階段三再接上外勤模式">送到外勤模式</button>
+        <button class="btn-calc-route" id="btn-open-gmaps" onclick="openGoogleMaps()">開 Google Maps</button>
+      </div>
+      <div id="today-list-warnings"></div>
+      <div id="today-list-root" style="margin-top:10px"><div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div></div>
       <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmRoute()">確定，送到手機外勤模式</button>
     </div>
   </div>
@@ -328,6 +394,8 @@
     <div id="map-route-root"><div class="empty-hint">在清單模式選好店家並按「計算路線」</div></div>
   </div>
 </div>
+
+<div id="modal-root"></div>
 
 <script src="worker-url.js"></script>
 <script src="planner-nav.js"></script>
@@ -464,12 +532,58 @@ document.body.addEventListener('click', (e) => {
     if (p) withBusy(t, '加入中…', () => pickManualAdd(p));
   } else if (action === 'pick-region') {
     withBusy(t, '加入中…', () => pickRegion(t.dataset.key));
+  } else if (action === 'remove-today') {
+    withBusy(t, '移除中…', () => removeTodayListRow_(id));
+  } else if (action === 'manual-order-keep') {
+    closeManualOrderModal_();
+    clearTimeout(tlManualRecalcTimer_); // 避免跟剛好還在跑的拖曳 debounce 重複打一次 API
+    recalcManualOrderTimes_();
+  } else if (action === 'manual-order-reopt') {
+    closeManualOrderModal_();
+    clearTimeout(tlManualRecalcTimer_);
+    calcRoute();
   }
 });
 document.body.addEventListener('change', (e) => {
   const t = e.target.closest('[data-action]');
   if (!t) return;
-  if (t.dataset.action === 'toggle-col2') toggleCol2(t.dataset.id);
+  const action = t.dataset.action;
+  if (action === 'toggle-col2') toggleCol2(t.dataset.id);
+  else if (action === 'toggle-tl-purpose') toggleTodayPurpose_(t.dataset.id, t.dataset.purpose);
+  else if (action === 'tl-stay-min') setTodayStayMin_(t.dataset.id, t.value);
+});
+// 備註類文字欄位用 input（即時存進狀態，不觸發重算/重畫），出發時間用 input 讓拖拉時間選擇器
+// 即時反應——這兩類都不會造成輸入中被重繪打斷游標的問題（note/other-text 不重畫；depart-time
+// 是瀏覽器原生 time picker，不是使用者逐字打字）。
+document.body.addEventListener('input', (e) => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const action = t.dataset.action;
+  if (action === 'tl-note') setTodayNote_(t.dataset.id, t.value);
+  else if (action === 'tl-other-text') setTodayOtherText_(t.dataset.id, t.value);
+  else if (t.id === 'depart-time-input') setDepartTime_(t.value);
+});
+
+// 今日清單手動拖曳排序（HTML5 原生 drag/drop，委派在 document.body）。
+document.body.addEventListener('dragstart', (e) => {
+  const row = e.target.closest('.tl-row');
+  if (!row) return;
+  tlDragId_ = row.dataset.tlId;
+  row.classList.add('dragging');
+});
+document.body.addEventListener('dragend', (e) => {
+  const row = e.target.closest('.tl-row');
+  if (row) row.classList.remove('dragging');
+  tlDragId_ = null;
+});
+document.body.addEventListener('dragover', (e) => {
+  if (e.target.closest('.tl-row')) e.preventDefault(); // 允許 drop
+});
+document.body.addEventListener('drop', (e) => {
+  const row = e.target.closest('.tl-row');
+  if (!row) return;
+  e.preventDefault();
+  reorderTodayListManually_(row.dataset.tlId);
 });
 
 // ══════════════════════════════
@@ -663,6 +777,7 @@ function toggleCol2(id) {
   if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
   renderRecommend();
   if (viewMode === 'map') renderMap();
+  syncTodayList_();
 }
 
 function openStoreDrawer(id) {
@@ -751,6 +866,7 @@ async function removeAnchor(id) {
   renderRecommend();
   renderSuggest();
   if (viewMode === 'map') renderMap();
+  await syncTodayList_();
   await savePlanState();
   toast('已移除');
 }
@@ -762,6 +878,7 @@ async function addAnchor(a) {
   renderRecommend();
   renderSuggest();
   if (viewMode === 'map') renderMap();
+  await syncTodayList_();
   await savePlanState();
   toast('已加入今天');
 }
@@ -902,6 +1019,9 @@ async function loadPlan() {
   try {
     const [plan] = await Promise.all([get('/api/plan?date=' + getPlanDate()), loadAllPharmacies()]);
     planData = plan;
+    if (Array.isArray(plan.config?.visitPurposes) && plan.config.visitPurposes.length) {
+      VISIT_PURPOSES = plan.config.visitPurposes; // 正本在 planner-config.js，API 讀得到就優先用這份
+    }
     anchors = planData.anchors || [];
     await mergeWeeklyAnchors();
     showDataTime_(plan.cachedAt, loadPlan);
@@ -911,6 +1031,16 @@ async function loadPlan() {
     renderSuggest();
     renderRegionOverview();
     if (viewMode === 'map') renderMap();
+    // 換日期/重新整理：今日清單整個重新合成。跟原本「按計算路線前都顯示空白提示」的行為一致——
+    // plan:{date} 存的 route 沒有附車程分鐘數，重開頁面後沒辦法不重打 Routes API 就還原到達時間，
+    // 所以跟原本 route-root 一樣，重新整理後要重新按一次「計算路線」才會有順序跟時間（不是退步，
+    // 是這次之前本來就沒做到的事，stage 1 規格也沒有要求要做這塊，不在這次範圍內）。
+    todayList = [];
+    orderMode = 'unordered';
+    lastRouteLegMinutes = null;
+    lastRouteTotalKm = null;
+    window._confirmedRoute = null;
+    await syncTodayList_();
   } catch (e) {
     document.getElementById('recommend-root').innerHTML =
       `<div class="empty-hint">載入失敗：${e.message}</div>`;
@@ -1009,6 +1139,487 @@ function routeListHtml(route) {
 function renderMapRoutePanel() {
   const root = document.getElementById('map-route-root');
   if (root) root.innerHTML = routeListHtml(window._confirmedRoute);
+}
+
+// ══════════════════════════════
+// 第③欄：今日清單（docs/今日清單_規格.md 階段一，2026-11-04）
+// 取代原本只顯示「計算路線後的站序」的 route-root，改成①②欄一有變動就立即反映的清單，含拜訪
+// 目的/備註/停留分鐘/規則衝突。純前端狀態（todayList），階段二才會存進試算表——跟 anchors/
+// selectedCol2Ids 不一樣，todayList 不直接存 KV，是由這兩者「合成」出來的畫面狀態，每次①②欄
+// 變動都用 syncTodayList_() 重新合成一次，但保留使用者已經手動改過的目的/備註/停留分鐘（不會
+// 因為勾了別的店就被重置）。
+// ══════════════════════════════
+let todayList = [];           // 每列：見 buildTodayListRow_ 的欄位說明
+let departMin = START_MIN;    // 出發時間（分鐘數），小計列可以改，取代原本到處直接讀 START_MIN
+let orderMode = 'unordered';  // 'unordered'｜'route'｜'manual'：決定小計列文字跟是否顯示到達時間
+let lastRouteLegMinutes = null; // 上次呼叫 Routes API 拿到的每段車程分鐘數——自動排序（calcRoute）
+                                 // 跟手動拖曳後重算（recalcManualOrderTimes_）共用同一份資料結構。
+let lastRouteResolvedIds = null; // 上面那份車程資料實際對應到哪些站（Set，定位失敗的站沒有送進
+                                  // Routes API，不在這裡面）——todayListFinishMin_ 用這個決定要不要
+                                  // 消耗一段車程，不是直接假設「前 N 個都算進去了」，手動模式下未定位
+                                  // 失敗的站可能出現在清單中間，不能用位置判斷。
+let lastRouteStopIds = null;    // 算出 lastRouteLegMinutes 時的站點 id 集合（字串，逗號排序後
+                                 // 拼接）——①②欄變動把站點加進/移出清單後，跟這份不一樣就代表
+                                 // lastRouteLegMinutes 已經過期，不能再拿來算時間，見 invalidateRouteIfStopsChanged_。
+
+// 站點集合（誰在今日清單裡）跟上次算路線時不一樣了，就讓「依路線順序」的時間資料整組失效，
+// 改回「未排序」並提示使用者重新按「計算路線」——寧可不顯示時間，也不要顯示用錯的站點組合算出來、
+// 看起來正常但其實不對的到達時間。
+function invalidateRouteIfStopsChanged_() {
+  if (orderMode === 'unordered') return; // 手動模式('manual')站點變動時也要重新判斷，不是只有 'route'
+  const currentIds = todayList.map(r => r.id).sort().join(',');
+  if (currentIds === lastRouteStopIds) return;
+  orderMode = 'unordered';
+  lastRouteLegMinutes = null;
+  lastRouteResolvedIds = null;
+  lastRouteTotalKm = null;
+  todayList.forEach(row => { row.arrival = null; });
+}
+
+function anchorSourceTag_(source) {
+  if (source === '送貨') return '送貨';
+  if (source === '待追蹤') return '待追蹤';
+  if (source === '本週排') return '本週排';
+  if (source === '今天可以跑的區') return '新店'; // 這個來源目前只用來批量加新店候選
+  if (source === '手動') return '錨點'; // store-drawer.js「加入今天」
+  if (source === '該對帳' || source === '寄賣待整理') return '寄賣對帳'; // 建議加入卡片（cb.label）
+  return '錨點'; // 不認得的來源，保守歸類成「錨點」，不要漏標
+}
+
+// 這家店為什麼在今日清單裡（可能同時符合第①②欄多個來源，標籤要全部列出來）。
+function todayListTypeTags_(id) {
+  const tags = new Set();
+  anchors.filter(a => a.id === id).forEach(a => tags.add(anchorSourceTag_(a.source)));
+  if (selectedCol2Ids.has(id)) {
+    const item = (planData?.recommended || []).find(x => x.id === id);
+    tags.add(item?.type === 'new-store' ? '新店' : '客戶');
+  }
+  return [...tags];
+}
+
+function purposeDef_(key) { return VISIT_PURPOSES.find(p => p.key === key); }
+function purposeStayMin_(key) { return purposeDef_(key)?.stayMin ?? 20; }
+function effectiveStayMin_(row) {
+  if (row.manualStayMin != null) return row.manualStayMin;
+  if (!row.purposes.length) return 20;
+  return Math.max(...row.purposes.map(purposeStayMin_));
+}
+
+// 自動預選拜訪目的（使用者可以改）：正式客戶→例行拜訪；新店→新店開發；送貨來源→送貨；
+// 寄賣待整理/該對帳/事項文字含「請款」的待追蹤→對帳請款；符合多條就全部預選。
+function autoPreselectPurposes_(row) {
+  const rec = (planData?.recommended || []).find(x => x.id === row.id);
+  const preset = new Set();
+  if (rec?.type === 'customer') preset.add('例行拜訪');
+  if (rec?.type === 'new-store') preset.add('新店開發');
+  if (row.typeTags.includes('送貨')) preset.add('送貨');
+  if (rec && consignmentBadge(rec).triggered) preset.add('對帳請款');
+  if (row.typeTags.includes('寄賣對帳')) preset.add('對帳請款');
+  if (row.typeTags.includes('待追蹤')) {
+    const a = anchors.find(x => x.id === row.id && x.source === '待追蹤');
+    if (a?.item && String(a.item).includes('請款')) preset.add('對帳請款');
+  }
+  if (!preset.size) preset.add('例行拜訪'); // 保底，不要有列完全沒有目的
+  row.purposes = [...preset];
+}
+
+// 「這站要做的事」自動組合：寄賣→對帳N張$金額；送貨→送貨（目前沒有單日訂單金額可用，
+// 業務親送自動進錨點時 worker.js 沒有附金額，要顯示金額得先補後端欄位，階段一先不做）；
+// 負責人是老爸的店→帳單還老爸／收款交老爸；待追蹤→事項第一行。符合多條就全部列出來。
+function buildAutoTask_(row) {
+  const parts = [];
+  const rec = (planData?.recommended || []).find(x => x.id === row.id);
+  if (rec) {
+    const cb = consignmentBadge(rec);
+    if (cb.triggered) {
+      if (rec.consignmentStaleCount > 0) parts.push(`對帳 ${rec.consignmentStaleCount} 張 $${(rec.consignmentStaleTotal || 0).toLocaleString()}`);
+      else if (rec.isContracted) parts.push(`對帳 $${(rec.consignmentAllTotal || 0).toLocaleString()}`);
+    }
+  }
+  if (row.typeTags.includes('送貨')) parts.push('送貨');
+  if (isDadStore(row.id)) parts.push('帳單還老爸、收款交老爸');
+  if (row.typeTags.includes('待追蹤')) {
+    const a = anchors.find(x => x.id === row.id && x.source === '待追蹤');
+    if (a?.item) parts.push(String(a.item).split('\n')[0]);
+  }
+  return parts.join('、');
+}
+
+// 店家規則狀態：先查 planData.recommended 有沒有現成的 ruleStatus（/api/plan 已經附帶，絕大多數
+// 情況走這裡，不用再打一次 API）；找不到（例如手動加入的老爸/新竹/不拜訪客戶，這些被 /api/plan
+// 排除在推薦清單外）才打 /api/store 拿該店的規則清單自己算一次——不能直接當「可以去」，否則漏掉
+// 真的有規則衝突的店。查詢失敗時明確標「未知」，不偽裝成「可以去」。
+const ruleStatusFallbackCache_ = {};
+const WEEKDAY_NAMES_TL_ = ['日', '一', '二', '三', '四', '五', '六'];
+function matchesWeekdayClient_(weekdaysStr, planDate) {
+  if (!weekdaysStr) return false;
+  return String(weekdaysStr).split(/[、,]/).map(s => s.trim()).includes(WEEKDAY_NAMES_TL_[planDate.getDay()]);
+}
+function matchesMonthDayClient_(monthDaysStr, planDate) {
+  if (!monthDaysStr) return false;
+  const m = String(monthDaysStr).match(/^(\d+)\s*-\s*(\d+)$/);
+  if (!m) return false;
+  const day = planDate.getDate();
+  return day >= parseInt(m[1], 10) && day <= parseInt(m[2], 10);
+}
+function evalRuleStatusClient_(rules, planDate) {
+  const matched = rules.filter(r => {
+    if (!r.weekdays && !r.monthDays) return true;
+    return matchesWeekdayClient_(r.weekdays, planDate) || matchesMonthDayClient_(r.monthDays, planDate);
+  });
+  if (!matched.length) return { status: '可以去', rules: [] };
+  if (matched.some(r => r.action === '擋住')) return { status: '擋住', rules: matched.map(r => r.note).filter(Boolean) };
+  if (matched.some(r => r.action === '自動調整')) return { status: '自動調整', rules: matched.map(r => r.note).filter(Boolean) };
+  return { status: '提醒', rules: matched.map(r => r.note).filter(Boolean) };
+}
+async function resolveRuleStatus_(id) {
+  const rec = (planData?.recommended || []).find(x => x.id === id);
+  if (rec?.ruleStatus) return rec.ruleStatus;
+  if (ruleStatusFallbackCache_[id]) return ruleStatusFallbackCache_[id];
+  try {
+    const data = await get('/api/store?id=' + encodeURIComponent(id));
+    const planDateObj = new Date(getPlanDate().replace(/-/g, '/'));
+    const status = evalRuleStatusClient_(data.rules || [], planDateObj);
+    ruleStatusFallbackCache_[id] = status;
+    return status;
+  } catch (e) {
+    console.warn('店家規則狀態查詢失敗，標記為未知（不當成可以去）', id, e);
+    return { status: '未知', rules: [] };
+  }
+}
+
+async function buildTodayListRow_(id) {
+  const ph = (allPharmaciesCache || []).find(p => p.id === id);
+  const rec = (planData?.recommended || []).find(x => x.id === id);
+  const anchor = anchors.find(a => a.id === id);
+  const row = {
+    id,
+    name: ph?.name || rec?.name || anchor?.name || id,
+    address: ph?.address || rec?.address || '',
+    typeTags: [],
+    purposes: [], purposesTouched: false,
+    otherPurposeText: '', purposeNote: '',
+    manualStayMin: null,
+    autoTask: '', ruleStatus: null,
+    arrival: null, locateMethod: null,
+  };
+  await refreshTodayListRowMeta_(row);
+  return row;
+}
+async function refreshTodayListRowMeta_(row) {
+  row.typeTags = todayListTypeTags_(row.id);
+  row.ruleStatus = await resolveRuleStatus_(row.id);
+  row.autoTask = buildAutoTask_(row);
+  if (!row.purposesTouched) autoPreselectPurposes_(row);
+}
+
+// ①②欄任何變動後都呼叫這支，把 anchors∪selectedCol2Ids 合成一次今日清單——同一家店同時出現在
+// ①②欄只留一列（用店家代號去重，規格提到的「新開店家沒代號用地址判斷」在目前所有加入①②欄的
+// 路徑裡都一定會帶 id，沒有真的會發生的 id-less 情況，先不多寫一套用不到的分支；如果之後有新的
+// 「直接輸入店名/地址、完全不經過既有清單」的加入方式，要在這裡補上地址去重）。
+async function syncTodayList_() {
+  const desiredIds = new Set([...anchors.map(a => a.id), ...selectedCol2Ids]);
+  todayList = todayList.filter(row => desiredIds.has(row.id));
+
+  const existingIds = new Set(todayList.map(r => r.id));
+  const orderedCandidateIds = [...anchors.map(a => a.id), ...selectedCol2Ids];
+  const seen = new Set();
+  for (const id of orderedCandidateIds) {
+    if (seen.has(id) || existingIds.has(id)) continue;
+    seen.add(id);
+    todayList.push(await buildTodayListRow_(id));
+  }
+  for (const row of todayList) {
+    if (!seen.has(row.id)) await refreshTodayListRowMeta_(row); // 新列剛 build 過，不用重算一次
+  }
+
+  invalidateRouteIfStopsChanged_();
+  recomputeTodayListTimes_();
+}
+
+function todayListBillingTotal_() {
+  let total = 0;
+  todayList.forEach(row => {
+    const rec = (planData?.recommended || []).find(x => x.id === row.id);
+    if (!rec) return;
+    const cb = consignmentBadge(rec);
+    if (!cb.triggered) return;
+    total += rec.consignmentStaleCount > 0 ? (rec.consignmentStaleTotal || 0) : (rec.consignmentAllTotal || 0);
+  });
+  return total;
+}
+
+function renderTodayListSummary_() {
+  const el = document.getElementById('today-list-summary');
+  if (!el) return;
+  if (!todayList.length) { el.innerHTML = '<div class="empty-hint">還沒有任何店家</div>'; return; }
+  const counts = {};
+  todayList.forEach(row => row.typeTags.forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
+  const countsText = Object.entries(counts).map(([k, v]) => `${k} ${v}`).join('・');
+  const billingTotal = todayListBillingTotal_();
+  const orderLabel = orderMode === 'route' ? '依路線順序' : orderMode === 'manual' ? '順序已手動調整' : '未排序';
+  // 不在這裡重算——recomputeTodayListTimes_() 已經算過一次並存進 lastComputedFinishMin_，
+  // 這裡只負責顯示，避免跟那支各自算一次、萬一邏輯以後分岔就兜不起來。
+  const finishText = lastComputedFinishMin_ != null ? fmtMin(lastComputedFinishMin_) : '—（按計算路線）';
+  el.innerHTML = `
+    <span><strong>${todayList.length} 家</strong>${countsText ? '｜' + escapeHtml(countsText) : ''}${lastRouteTotalKm != null ? `・${lastRouteTotalKm} km` : ''}</span>
+    ${billingTotal ? `<span>預估對帳 $${billingTotal.toLocaleString()}</span>` : ''}
+    <span>出發 <input type="time" class="tl-depart-input" id="depart-time-input" value="${fmtMin(departMin)}"></span>
+    <span>預估收工 ${finishText}</span>
+    <span class="tl-order-mode">（${orderLabel}）</span>`;
+}
+
+function ruleConflictHtml_(row) {
+  if (!row.ruleStatus) return '';
+  if (row.ruleStatus.status === '擋住') {
+    return `<div class="tl-rule-conflict">⛔ 規則衝突：${row.ruleStatus.rules.map(escapeHtml).join('；') || '店家規則禁止今天拜訪'}</div>`;
+  }
+  if (row.ruleStatus.status === '提醒' || row.ruleStatus.status === '自動調整') {
+    return `<div class="tl-rule-note">⚠ ${row.ruleStatus.rules.map(escapeHtml).join('；')}</div>`;
+  }
+  if (row.ruleStatus.status === '未知') {
+    return `<div class="tl-rule-note">規則狀態查詢失敗，請自行確認是否可以拜訪</div>`;
+  }
+  return '';
+}
+
+function todayListRowHtml_(row, index) {
+  const seqLabel = orderMode === 'unordered' ? String(index + 1) : `#${index + 1}`;
+  const arrivalText = row.arrival ? fmtMin(row.arrival) : (orderMode === 'unordered' ? '未排序' : '—');
+  const stayMin = effectiveStayMin_(row);
+  const hasOther = row.purposes.includes('其他');
+  return `<div class="tl-row${row.ruleStatus?.status === '擋住' ? ' rule-blocked' : ''}" draggable="true" data-tl-id="${escapeHtml(row.id)}">
+    <div class="tl-row-top">
+      <span class="tl-seq">${seqLabel}</span>
+      <span class="tl-name">${escapeHtml(row.name)}</span>
+      <span class="tl-tags">${row.typeTags.map(t => `<span class="tl-tag">${escapeHtml(t)}</span>`).join('')}</span>
+      <button class="tl-remove" data-action="remove-today" data-id="${escapeHtml(row.id)}" title="移除（同步取消①②欄勾選）">✕</button>
+    </div>
+    <div class="tl-purposes">
+      ${VISIT_PURPOSES.map(p => `<label class="tl-purpose-chip${row.purposes.includes(p.key) ? ' checked' : ''}">
+        <input type="checkbox" data-action="toggle-tl-purpose" data-id="${escapeHtml(row.id)}" data-purpose="${escapeHtml(p.key)}" ${row.purposes.includes(p.key) ? 'checked' : ''}>${escapeHtml(p.key)}
+      </label>`).join('')}
+    </div>
+    ${hasOther ? `<input type="text" class="tl-other-text" data-action="tl-other-text" data-id="${escapeHtml(row.id)}" placeholder="其他：請輸入" value="${escapeHtml(row.otherPurposeText)}">` : ''}
+    <input type="text" class="tl-note" data-action="tl-note" data-id="${escapeHtml(row.id)}" placeholder="目的備註（例如帶新品試用包）" value="${escapeHtml(row.purposeNote)}">
+    ${row.autoTask ? `<div class="tl-auto-task">${escapeHtml(row.autoTask)}</div>` : ''}
+    ${ruleConflictHtml_(row)}
+    <div class="tl-row-bottom">
+      <span>停留 <input type="number" class="tl-stay-input" min="5" step="5" data-action="tl-stay-min" data-id="${escapeHtml(row.id)}" value="${stayMin}">分</span>
+      ${row.locateMethod ? `<span class="tl-method${row.locateMethod === 'name' ? ' by-name' : ''}">用${locateMethodLabel_(row.locateMethod)}定位</span>` : ''}
+      <span class="tl-arrival">${arrivalText}</span>
+    </div>
+  </div>`;
+}
+
+function renderTodayList_() {
+  renderTodayListSummary_();
+  const root = document.getElementById('today-list-root');
+  if (!root) return;
+  if (!todayList.length) { root.innerHTML = '<div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div>'; return; }
+  root.innerHTML = todayList.map((row, i) => todayListRowHtml_(row, i)).join('');
+}
+
+// 只重算時間，不重打 Routes API（除非是手動拖曳剛發生，見 recalcManualOrderTimes_ 那支才會打）——
+// 用上次拿到的每段車程分鐘數（lastRouteLegMinutes）配合目前的出發時間/各站停留分鐘重新往下推。
+// 用 lastRouteResolvedIds（Set）判斷哪些站真的有車程資料可以消耗，不是用「前N個」這種位置假設——
+// 手動拖曳模式下，定位失敗的站可能出現在清單中間，不能假設它們都在最後面。
+function todayListFinishMin_() {
+  let cum = departMin;
+  let legIdx = 0;
+  todayList.forEach(row => {
+    if (!lastRouteResolvedIds.has(row.id)) { row.arrival = null; return; }
+    cum += lastRouteLegMinutes[legIdx++];
+    row.arrival = Math.round(cum);
+    cum += effectiveStayMin_(row);
+  });
+  return Math.round(cum + lastRouteLegMinutes[legIdx]);
+}
+let lastComputedFinishMin_ = null; // renderTodayListSummary_ 顯示用，跟 #finish-time-value 同一個數字來源
+function recomputeTodayListTimes_() {
+  const finishEl = document.getElementById('finish-time-value');
+  if (!lastRouteLegMinutes || !lastRouteResolvedIds || !todayList.length) {
+    todayList.forEach(row => { row.arrival = null; });
+    lastComputedFinishMin_ = null;
+    if (finishEl) { finishEl.textContent = '—'; finishEl.classList.remove('late'); }
+    renderTodayList_();
+    return;
+  }
+  const homeArrival = todayListFinishMin_();
+  lastComputedFinishMin_ = homeArrival;
+  if (finishEl) { finishEl.textContent = fmtMin(homeArrival); finishEl.classList.toggle('late', homeArrival > 17 * 60 + 30); }
+  renderTodayList_();
+}
+
+async function removeTodayListRow_(id) {
+  const ai = anchors.findIndex(a => a.id === id);
+  if (ai >= 0) anchors.splice(ai, 1);
+  selectedCol2Ids.delete(id);
+  todayList = todayList.filter(r => r.id !== id);
+  renderAnchors(); renderRecommend(); renderSuggest();
+  if (viewMode === 'map') renderMap();
+  invalidateRouteIfStopsChanged_();
+  recomputeTodayListTimes_();
+  await savePlanState();
+  toast('已從今日清單移除');
+}
+
+function toggleTodayPurpose_(id, purpose) {
+  const row = todayList.find(r => r.id === id);
+  if (!row) return;
+  row.purposesTouched = true;
+  const i = row.purposes.indexOf(purpose);
+  if (i >= 0) row.purposes.splice(i, 1); else row.purposes.push(purpose);
+  if (!row.purposes.length) row.purposes.push('例行拜訪'); // 不留空，保底
+  recomputeTodayListTimes_();
+}
+function setTodayStayMin_(id, val) {
+  const row = todayList.find(r => r.id === id);
+  if (!row) return;
+  const n = parseInt(val, 10);
+  row.manualStayMin = isNaN(n) || n <= 0 ? null : n;
+  recomputeTodayListTimes_();
+}
+function setTodayNote_(id, val) {
+  const row = todayList.find(r => r.id === id);
+  if (row) row.purposeNote = val;
+}
+function setTodayOtherText_(id, val) {
+  const row = todayList.find(r => r.id === id);
+  if (row) row.otherPurposeText = val;
+}
+function setDepartTime_(val) {
+  const m = String(val || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return;
+  departMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  recomputeTodayListTimes_();
+}
+
+// 手動拖曳改順序：HTML5 原生 drag/drop，委派在 document.body（今日清單整段 innerHTML 重繪也不用
+// 重新綁定）。放下後立刻調整 todayList 陣列順序＋標記 orderMode='manual'、清空到達時間（舊的
+// 車程數字跟新順序對不上，顯示錯的時間比不顯示更糟），畫面先顯示新順序但時間是「—」。
+// 停手 1 秒後（debounce，見 scheduleManualRecalc_）才真的打一次 Routes API（optimizeWaypointOrder:
+// false，不能重排）拿新順序各段的車程分鐘數回來補時間——連續拖好幾次只會在停手後打一次，不是
+// 每放下一次就打一次。
+let tlDragId_ = null;
+let tlManualRecalcTimer_ = null;
+function reorderTodayListManually_(targetId) {
+  if (!tlDragId_ || tlDragId_ === targetId) return;
+  const fromIdx = todayList.findIndex(r => r.id === tlDragId_);
+  const toIdx = todayList.findIndex(r => r.id === targetId);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const [moved] = todayList.splice(fromIdx, 1);
+  todayList.splice(toIdx, 0, moved);
+  orderMode = 'manual';
+  lastRouteLegMinutes = null;
+  lastRouteResolvedIds = null;
+  todayList.forEach(row => { row.arrival = null; });
+  renderTodayList_();
+  scheduleManualRecalc_();
+}
+function scheduleManualRecalc_() {
+  clearTimeout(tlManualRecalcTimer_);
+  tlManualRecalcTimer_ = setTimeout(() => { recalcManualOrderTimes_(); }, 1000);
+}
+
+// 用「目前 todayList 的順序」（不重排）打一次 Routes API 拿車程，只為了算時間——跟 calcRoute()
+// 的差別：intermediates 不設 optimizeWaypointOrder（固定 false），且不會重新排 todayList 的順序
+// （定位失敗的站就留在原本的位置，不像 calcRoute 那樣挪到最後面，因為手動模式下順序是使用者自己
+// 排的，不該因為某一站定位失敗就被我們動位置）。
+async function recalcManualOrderTimes_() {
+  if (!todayList.length) return;
+  const warnEl = document.getElementById('today-list-warnings');
+  const btn = document.getElementById('btn-calc-route');
+  if (warnEl) warnEl.innerHTML = '';
+  if (btn) { btn.disabled = true; btn.textContent = '重算時間中…'; }
+  try {
+    await loadAllPharmacies();
+    const locations = await Promise.all(todayList.map(row => resolveStoreLocation_(row.id, row.name)));
+    const warnings = [];
+    const resolved = [];
+    todayList.forEach((row, i) => {
+      const loc = locations[i];
+      row.locateMethod = loc.method;
+      if (loc.lat && loc.lng) resolved.push({ row, loc });
+      else if (loc.warning) warnings.push(loc.warning);
+    });
+    if (!resolved.length) throw new Error('所有站點都定位失敗，無法重算時間');
+
+    const intermediates = resolved.map(r => ({ location: { latLng: { latitude: r.loc.lat, longitude: r.loc.lng } } }));
+    const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GMAPS_KEY,
+        'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration',
+      },
+      body: JSON.stringify({
+        origin: { address: ORIGIN_ADDR }, destination: { address: DEST_ADDR },
+        intermediates, travelMode: 'DRIVE', optimizeWaypointOrder: false, // 手動順序，不能重排
+      }),
+    });
+    if (!routeResp.ok) {
+      const errData = await routeResp.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `HTTP ${routeResp.status}`);
+    }
+    const routeData = await routeResp.json();
+    if (!routeData.routes?.length) throw new Error('找不到路線');
+    const legs = routeData.routes[0].legs;
+    lastRouteTotalKm = Math.round(legs.reduce((sum, leg) => sum + leg.distanceMeters, 0) / 1000);
+    lastRouteLegMinutes = legs.map(leg => parseInt(leg.duration) / 60);
+    lastRouteResolvedIds = new Set(resolved.map(r => r.row.id));
+    lastRouteStopIds = todayList.map(r => r.id).sort().join(',');
+
+    recomputeTodayListTimes_();
+    window._confirmedRoute = todayList.map((row, i) => ({
+      id: row.id, name: row.name, isAnchor: anchors.some(a => a.id === row.id),
+      seq: i + 1, arrival: row.arrival, locateMethod: row.locateMethod,
+    }));
+    renderMapRoutePanel();
+    if (viewMode === 'map') renderMap();
+    if (warnEl && warnings.length) {
+      warnEl.innerHTML = `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
+    }
+  } catch (e) {
+    if (warnEl) warnEl.innerHTML = `<div class="empty-hint">重算時間失敗：${escapeHtml(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '計算路線'; }
+  }
+}
+
+// 「計算路線」按鈕的實際進入點：手動調整過順序時先問使用者要保留順序只重算時間、還是整個
+// 重新排最佳順序（會蓋掉手動順序）；沒調整過就照舊直接排最佳順序，不用多問。
+function calcRouteClicked_() {
+  if (orderMode === 'manual') { showManualOrderChoiceModal_(); return; }
+  calcRoute();
+}
+function closeManualOrderModal_() {
+  const root = document.getElementById('modal-root');
+  if (root) root.innerHTML = '';
+}
+function showManualOrderChoiceModal_() {
+  const root = document.getElementById('modal-root');
+  if (!root) return;
+  root.innerHTML = `<div class="sr-modal-overlay" id="manual-order-overlay">
+    <div class="sr-modal">
+      <div class="sr-modal-title">順序已手動調整</div>
+      <div class="sr-modal-actions">
+        <button class="primary" data-action="manual-order-keep">保留我的順序，只重算時間</button>
+        <button class="ghost" data-action="manual-order-reopt">重新排最佳順序（會蓋掉手動順序）</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('manual-order-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'manual-order-overlay') closeManualOrderModal_();
+  });
+}
+
+function openGoogleMaps() {
+  if (!todayList.length) { alert('今日清單還沒有任何店家'); return; }
+  const stops = todayList.map(r => r.address || r.name).filter(Boolean);
+  if (!stops.length) { alert('清單裡的店都沒有地址/店名可用'); return; }
+  const url = `https://www.google.com/maps/dir/${encodeURIComponent(ORIGIN_ADDR)}/${stops.map(s => encodeURIComponent(s)).join('/')}/${encodeURIComponent(DEST_ADDR)}`;
+  window.open(url, '_blank');
 }
 
 // 距最近錨點的直線距離——沒有錨點或查不到座標時顯示「—」，不強行猜座標（跟 withinAnchorRadius 同一套保守原則）。
@@ -1174,6 +1785,21 @@ const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
 const DEST_ADDR = '台北市內湖區新民街422號';
 const START_MIN = 13 * 60 + 30;
 
+// 今日清單規格（docs/今日清單_規格.md 1-4）：拜訪目的＋停留分鐘只維護一份——
+// **正本在 planner-config.js 的 PLANNER_CONFIG.visitPurposes**，worker.js 直接 import 那份，
+// /api/plan 回應的 config.visitPurposes 就是它。這裡這份只是「API 還沒回來、或 config 欄位
+// 缺失時」的備用值（這個檔案沒有用 type="module"，沒辦法直接 import 設定檔），loadPlan() 拿到
+// 回應後會優先改用 API 回傳的版本，見下面 loadPlan()。調整拜訪目的只要改 planner-config.js，
+// 不用記得來改這裡——這份備用值落後也只影響「API 完全連不上」這種極端情況。
+let VISIT_PURPOSES = [
+  { key: '例行拜訪', stayMin: 20 },
+  { key: '新店開發', stayMin: 15 },
+  { key: '送貨',     stayMin: 10 },
+  { key: '對帳請款', stayMin: 30 },
+  { key: '介紹新品', stayMin: 20 },
+  { key: '其他',     stayMin: 20, allowCustomText: true },
+];
+
 function fmtMin(min) {
   const h = Math.floor(min / 60) % 24, m = Math.round(min % 60);
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
@@ -1312,15 +1938,24 @@ async function resolveStoreLocation_(id, name) {
   return result;
 }
 
+let lastRouteTotalKm = null;
+
 async function calcRoute() {
   const btn = document.getElementById('btn-calc-route');
-  const resultEl = document.getElementById('route-root');
-  const allStops = [...anchors.map(a => ({ id: a.id, name: a.name, isAnchor: true })),
-    ...(planData?.recommended || []).filter(item => selectedCol2Ids.has(item.id)).map(item => ({ id: item.id, name: item.name, isAnchor: false }))];
+  const warnEl = document.getElementById('today-list-warnings');
+  // 用店家代號去重：同一家店從①②欄都加進來時，只送一個站點給 Routes API，不要重複算、
+  // 重複停留兩次（今日清單規格 1-1「同一家店不得重複」，原本這裡沒去重，是潛在的重複站 bug）。
+  const stopMap = new Map();
+  anchors.forEach(a => { if (!stopMap.has(a.id)) stopMap.set(a.id, { id: a.id, name: a.name, isAnchor: true }); });
+  (planData?.recommended || []).filter(item => selectedCol2Ids.has(item.id)).forEach(item => {
+    if (!stopMap.has(item.id)) stopMap.set(item.id, { id: item.id, name: item.name, isAnchor: false });
+    else stopMap.get(item.id).isAnchor = true; // 本來就是錨點，不要因為②欄也勾了就被蓋掉
+  });
+  const allStops = [...stopMap.values()];
   if (!allStops.length) { alert('第①②欄還沒有選任何店家'); return; }
 
   btn.disabled = true; btn.textContent = '計算中…';
-  resultEl.innerHTML = '<div class="empty-hint">計算中…</div>';
+  if (warnEl) warnEl.innerHTML = '';
   document.getElementById('btn-confirm-route').style.display = 'none';
   try {
     await loadAllPharmacies(); // 確保 allPharmaciesCache 已載好，resolveStoreLocation_ 才查得到客戶表座標/地址
@@ -1362,39 +1997,38 @@ async function calcRoute() {
     const order = (Array.isArray(orderRaw) && orderRaw.length === stops.length) ? orderRaw : stops.map((_, i) => i);
     const legs = route0.legs;
     const reordered = order.map(i => stops[i]).filter(Boolean);
+    lastRouteTotalKm = Math.round(legs.reduce((sum, leg) => sum + leg.distanceMeters, 0) / 1000);
+    // 站數+1：出發→站1、站1→站2…、最後一站→目的地。recomputeTodayListTimes_/todayListFinishMin_
+    // 用這份資料配合目前的出發時間/停留分鐘重算，之後只改時間相關設定都不用再打一次這支 API。
+    lastRouteLegMinutes = legs.map(leg => parseInt(leg.duration) / 60);
 
-    let totalMeters = 0;
-    const arrivalTimes = [];
-    let cumMin = START_MIN;
-    legs.forEach((leg, i) => {
-      totalMeters += leg.distanceMeters;
-      cumMin += parseInt(leg.duration) / 60;
-      if (i < reordered.length) { arrivalTimes.push(Math.round(cumMin)); cumMin += 30; }
-    });
-    const totalKm = Math.round(totalMeters / 1000);
-    const lastLegMin = legs.length ? parseInt(legs[legs.length - 1]?.duration || '0') / 60 : 0;
-    const homeArrival = arrivalTimes.length ? arrivalTimes[arrivalTimes.length - 1] + 30 + Math.round(lastLegMin) : cumMin;
+    // 把今日清單重新排成路線順序：定位失敗的站（warnings 裡那些）留在清單裡但排到最後面，
+    // 不會因為沒算進路線就整個消失——使用者還是看得到、知道要自己確認地址。
+    const resolvedIds = reordered.map(s => s.id);
+    const locateMethodById = {}; reordered.forEach(s => { locateMethodById[s.id] = s.loc.method; });
+    const resolvedRows = resolvedIds.map(id => todayList.find(r => r.id === id)).filter(Boolean);
+    const unresolvedRows = todayList.filter(r => !resolvedIds.includes(r.id));
+    todayList = [...resolvedRows, ...unresolvedRows];
+    todayList.forEach(row => { row.locateMethod = locateMethodById[row.id] || null; });
+    orderMode = 'route';
+    lastRouteResolvedIds = new Set(resolvedIds);
+    lastRouteStopIds = todayList.map(r => r.id).sort().join(',');
 
-    window._confirmedRoute = reordered.map((s, i) => ({
-      id: s.id, name: s.name, isAnchor: s.isAnchor, seq: i + 1, arrival: arrivalTimes[i] || null,
-      locateMethod: s.loc.method, // 'coord'｜'address'｜'name'，routeListHtml() 用來顯示小字
+    recomputeTodayListTimes_();
+
+    window._confirmedRoute = todayList.map((row, i) => ({
+      id: row.id, name: row.name, isAnchor: anchors.some(a => a.id === row.id),
+      seq: i + 1, arrival: row.arrival, locateMethod: row.locateMethod,
     }));
-
-    const warningHtml = warnings.length
-      ? `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`
-      : '';
-    resultEl.innerHTML = warningHtml + routeListHtml(window._confirmedRoute) +
-      `<div class="route-summary">共 ${reordered.length} 站・${totalKm} km</div>`;
     renderMapRoutePanel();
     if (viewMode === 'map') renderMap();
 
-    const finishEl = document.getElementById('finish-time-value');
-    finishEl.textContent = fmtMin(homeArrival);
-    finishEl.classList.toggle('late', homeArrival > 17 * 60 + 30);
-
+    if (warnEl && warnings.length) {
+      warnEl.innerHTML = `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
+    }
     document.getElementById('btn-confirm-route').style.display = '';
   } catch (e) {
-    resultEl.innerHTML = `<div class="empty-hint">路線計算失敗：${e.message}</div>`;
+    if (warnEl) warnEl.innerHTML = `<div class="empty-hint">路線計算失敗：${escapeHtml(e.message)}</div>`;
   } finally {
     btn.disabled = false; btn.textContent = '計算路線';
   }
