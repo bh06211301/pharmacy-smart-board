@@ -34,6 +34,7 @@
   .page-header-date { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
   .page-header-route-points { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
   .page-header-placeholder { font-size: var(--sr-text-xs); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-sm); padding: 2px 8px; }
+  .data-time-badge { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
   .view-toggle { display: flex; border: 1px solid var(--sr-ink); border-radius: 6px; overflow: hidden; }
   .view-toggle-btn { height: 28px; padding: 0 var(--sr-space-5); font-size: var(--sr-text-xs); background: var(--sr-bg); border: none; color: var(--sr-ink); cursor: pointer; font-family: var(--sr-font); }
   .view-toggle-btn.active { background: var(--sr-ink); color: var(--sr-on-dark); font-weight: var(--sr-weight-bold); }
@@ -270,6 +271,7 @@
 <div class="page-header">
   <span class="page-header-date" id="page-header-date">10/27（二）</span>
   <span class="page-header-route-points">汐止出發 → 內湖收工</span>
+  <span class="data-time-badge" id="data-time-badge" title="這份資料是幾點抓的，超過10分鐘會自動補抓一次新的"></span>
   <span class="page-header-placeholder" title="排在之後的階段才做">🌤️ 天氣</span>
   <span class="page-header-placeholder" title="排在之後的階段才做">假日</span>
   <div class="view-toggle">
@@ -879,12 +881,30 @@ async function mergeWeeklyAnchors() {
   }
 }
 
+// Plan C（2026-11-04）：worker.js 的 /api/plan 現在會回 cachedAt（這次組合回應裡最舊的一份
+// 資料是什麼時候抓的）。顯示給使用者看，超過10分鐘就在30秒後自動補抓一次新的——只補一次，
+// 不是每10分鐘就重複打，避免整天開著分頁時，worker.js 背景重讀寫KV的次數疊加太高（估算見
+// worker.js warmPlannerCaches_ 附近的註解）。
+const STALE_AUTO_REFRESH_MS = 10 * 60 * 1000;
+let staleRefreshScheduled_ = false;
+function showDataTime_(cachedAt, reloadFn) {
+  const el = document.getElementById('data-time-badge');
+  if (!cachedAt) { if (el) el.textContent = ''; return; }
+  const d = new Date(cachedAt);
+  if (el) el.textContent = `資料時間 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (!staleRefreshScheduled_ && Date.now() - cachedAt > STALE_AUTO_REFRESH_MS) {
+    staleRefreshScheduled_ = true;
+    setTimeout(async () => { await reloadFn(); toast('已更新'); }, 30000);
+  }
+}
+
 async function loadPlan() {
   try {
     const [plan] = await Promise.all([get('/api/plan?date=' + getPlanDate()), loadAllPharmacies()]);
     planData = plan;
     anchors = planData.anchors || [];
     await mergeWeeklyAnchors();
+    showDataTime_(plan.cachedAt, loadPlan);
     renderMiniCal();
     renderAnchors();
     renderRecommend();

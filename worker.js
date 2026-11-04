@@ -90,7 +90,7 @@ const CORS_HEADERS = {
 // 路由
 // ============================================================
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -121,7 +121,7 @@ export default {
       }
 
       if (path === '/visits-summary' && request.method === 'GET') {
-        return await handleVisitsSummary(env);
+        return await handleVisitsSummary(env, ctx);
       }
 
       if (path === '/orders-summary' && request.method === 'GET') {
@@ -228,7 +228,7 @@ export default {
 
       // ★ SmartRoute 規劃流程 v2 第 1 階段：推薦清單（倍數＋待追蹤分）
       if (path === '/api/plan' && request.method === 'GET') {
-        return await handlePlannerPlan(request, env);
+        return await handlePlannerPlan(request, env, ctx);
       }
 
       // ★ Phase 2：儲存當天的錨點清單＋確定路線（A1 第①③欄用，KV 持久化）
@@ -244,7 +244,7 @@ export default {
 
       // ★ A2 店家規則管理頁：全部店家＋全部規則（含店名）
       if (path === '/api/rules' && request.method === 'GET') {
-        return await handleListPlannerRules(env);
+        return await handleListPlannerRules(env, ctx);
       }
 
       // ★ 店家規則（代理到 GAS 的 addRule/updateRule）
@@ -254,7 +254,7 @@ export default {
 
       // ★ A3 待追蹤管理頁：全部待追蹤（含店名、距上次接觸、對排程的影響）
       if (path === '/api/followups' && request.method === 'GET') {
-        return await handleListPlannerFollowups(env);
+        return await handleListPlannerFollowups(env, ctx);
       }
 
       // ★ 待追蹤（代理到 GAS 的 addFollowup/resolveFollowup/updateFollowup）
@@ -264,22 +264,22 @@ export default {
 
       // ★ Phase 2：A8 藥局檔案抽屜要的單店全部資料（分級、規則、待追蹤）
       if (path === '/api/store' && request.method === 'GET') {
-        return await handleStoreDetail(request, env);
+        return await handleStoreDetail(request, env, ctx);
       }
 
       // ★ A10 新店開發：頂部數字＋每欄卡片＋轉換率
       if (path === '/api/funnel/overview' && request.method === 'GET') {
-        return await handleFunnelOverview(request, env);
+        return await handleFunnelOverview(request, env, ctx);
       }
 
       // ★ A10「記結果」：advance/drop/keep/confirmed
       if (path === '/api/funnel/result' && request.method === 'POST') {
-        return await handleFunnelResult(request, env);
+        return await handleFunnelResult(request, env, ctx);
       }
 
       // ★ A5 本週：7 天概況（跑哪區/已確定路線/日曆事件）＋這週要做的（逾期客戶/待追蹤/請款待收）
       if (path === '/api/week' && request.method === 'GET') {
-        return await handleWeekOverview(request, env);
+        return await handleWeekOverview(request, env, ctx);
       }
 
       // ★ A5 本週：存某一天選定的區（讀取→合併→寫回 plan:{date}，不會洗掉已存的 anchors/route）
@@ -289,12 +289,12 @@ export default {
 
       // ★ A7 客戶總覽：頂部分級統計＋依區域分組的格子資料（正式客戶＋開發中店），純讀取
       if (path === '/api/overview' && request.method === 'GET') {
-        return await handleOverview(env);
+        return await handleOverview(env, ctx);
       }
 
       // ★ A6 本月：月曆格資料（拜訪量/預計區域/週期色帶）＋本月累計統計，純讀取，只能查上個月/本月/下個月
       if (path === '/api/month' && request.method === 'GET') {
-        return await handleMonthOverview(request, env);
+        return await handleMonthOverview(request, env, ctx);
       }
 
       return json({ error: '找不到這個 endpoint' }, 404);
@@ -303,8 +303,63 @@ export default {
       console.error('Worker error:', err);
       return json({ error: err.message }, 500);
     }
-  }
+  },
+
+  // Plan C 預熱：wrangler.toml 的 cron trigger 排程呼叫這支（平日台灣時間 07:00）。
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(warmPlannerCaches_(env));
+  },
 };
+
+// ============================================================
+// Plan C 預熱（2026-11-04）：排程觸發時把 /api/plan、/api/week、/api/followups 會用到的全部
+// 資料源都強制重新抓一次寫進 KV（不管目前快取新不新鮮，一律覆蓋——跟平常讀取走的 swrFetch_
+// 「只在超過4分鐘才背景重讀」邏輯不一樣，預熱本來就是要強制換新）。直接呼叫各支 ...Raw_()
+// 函式（跟平常讀取共用同一份 fetch/parse 邏輯，不是另外複製一份），寫入的 KV key 格式要跟
+// swrFetch_() 用的完全一致，才能真的讓之後的讀取吃到剛預熱好的資料。
+// 每個來源各自 try/catch，一個來源失敗（例如 GAS 剛好在重啟）不影響其他來源照常預熱完成。
+// ============================================================
+async function warmCacheKey_(env, cacheKey, fetchFn) {
+  try {
+    const data = await fetchFn();
+    if (env.TODOS_KV) await env.TODOS_KV.put(cacheKey, JSON.stringify({ data, cachedAt: Date.now() }));
+    return { cacheKey, ok: true };
+  } catch (e) {
+    console.error('預熱失敗', cacheKey, e && e.message || e);
+    return { cacheKey, ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function warmPlannerCaches_(env) {
+  const tasks = [
+    warmCacheKey_(env, 'visits:summary', () => fetchVisitsSummaryRaw_(env)),
+    warmCacheKey_(env, `gviz:${env.SHEET_PHARMACY}:新客戶資料表_AppSheet`, () => fetchGvizSheetRaw_(env.SHEET_PHARMACY, '新客戶資料表_AppSheet')),
+  ];
+  if (env.SCREENING_API_TOKEN) {
+    tasks.push(warmCacheKey_(env, 'screening:rows', () => fetchScreeningRowsRaw_(env)));
+  }
+  if (env.SHEET_PLANNER) {
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_PLANNER}:待追蹤`, () => fetchGvizSheetRaw_(env.SHEET_PLANNER, '待追蹤')));
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_PLANNER}:店家規則`, () => fetchGvizSheetRaw_(env.SHEET_PLANNER, '店家規則')));
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_PLANNER}:階段歷程`, () => fetchGvizSheetRaw_(env.SHEET_PLANNER, '階段歷程')));
+  }
+  if (env.SHEET_ORDER_MASTER) {
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_ORDER_MASTER}:`, () => fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, null)));
+  }
+  tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_RETURN_ORDER}:`, () => fetchGvizSheetRaw_(env.SHEET_RETURN_ORDER, null)));
+  if (env.SHEET_CONTRACT) {
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_CONTRACT}:客戶合約`, () => fetchGvizSheetRaw_(env.SHEET_CONTRACT, '客戶合約')));
+  }
+  // 日曆／天氣不走 swrFetch_（它們自己的 1小時/3小時快取機制，key 格式不一樣），直接呼叫
+  // 既有函式讓它們照自己的邏輯判斷要不要重新抓，預熱不用特別處理。
+  tasks.push(fetchGoogleCalendarEvents_(env).then(() => ({ cacheKey: 'gcal:events', ok: true })).catch(e => ({ cacheKey: 'gcal:events', ok: false, error: String(e && e.message || e) })));
+  tasks.push(fetchWeatherForecast_(env).then(() => ({ cacheKey: 'weather:forecast', ok: true })).catch(e => ({ cacheKey: 'weather:forecast', ok: false, error: String(e && e.message || e) })));
+
+  const results = await Promise.all(tasks);
+  const failed = results.filter(r => !r.ok);
+  console.log(`Plan C 預熱完成：${results.length - failed.length}/${results.length} 成功` + (failed.length ? `，失敗：${failed.map(f => f.cacheKey).join('、')}` : ''));
+  return results;
+}
 
 // ============================================================
 // 1. AI 話術生成
@@ -440,12 +495,13 @@ async function handleOptimizeRoute(request, env) {
 // ============================================================
 // 3. 藥局清單
 // ============================================================
-// 2026-10-31：改走 fetchGvizSheet() 的既有 KV 快取（60秒 TTL，跟退貨單/客戶合約同一套機制，
-// 不是新發明的）。這支幾乎每個 SmartRoute 端點（/api/plan、/api/store、/api/rules、/api/followups）
-// 都會呼叫，客戶資料變動頻率遠低於60秒一次，快取值得做；只在 wrangler dev 驗證過。
-async function handleGetPharmacies(request, env) {
+// 改走 fetchGvizSheet() 的 SWR 快取。這支幾乎每個 SmartRoute 端點（/api/plan、/api/store、
+// /api/rules、/api/followups）都會呼叫，客戶資料變動頻率很低，快取值得做。ctx/cacheMeta 可選：
+// 直接走 /pharmacies 路由時不用傳（沒有 waitUntil 背景重讀能力也不影響正確性，只是那次請求
+// 自己不會觸發背景更新），handlePlannerPlan 等 3 個目標端點會傳兩者進來。
+async function handleGetPharmacies(request, env, ctx, cacheMeta) {
   const sheetName = '新客戶資料表_AppSheet';
-  const { rows, colMap } = await fetchGvizSheet(env.SHEET_PHARMACY, sheetName, env);
+  const { rows, colMap } = await fetchGvizSheet(env.SHEET_PHARMACY, sheetName, env, ctx, cacheMeta);
 
   const pharmacies = rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';
@@ -687,19 +743,11 @@ async function fetchTempPharmacyConversionMap_(env) {
   return map;
 }
 
-// 2026-11-03 效能優化：拜訪紀錄表是全系統唯一一份從上線累積到現在、每筆拜訪都要寫一行、含
-// 「原始逐字稿」長文字欄位的大表，之前完全沒有快取，卻被 /api/plan、/api/week、/api/followups、
-// /api/overview 四個端點各自重新即時讀一次（量過：單次 planner.html 冷載入這支就佔了 25 秒裡的
-// 大部分時間）。這張表是由另一套系統（pharmacy-visit-app 的 GAS webhook）寫入，這支 worker 自己
-// 沒有對應的寫入端點可以主動清快取，TTL 設 240 秒（使用者定的上限是5分鐘；一開始試過60秒，
-// 量到真實使用情境裡兩次操作間隔常常就超過60秒，等於沒快取到，拉長到240秒降低冷啟動頻率）。
-async function handleVisitsSummary(env) {
-  const cacheKey = 'visits:summary';
-  if (env && env.TODOS_KV) {
-    const cached = await env.TODOS_KV.get(cacheKey, 'json');
-    if (cached) return json(cached);
-  }
-
+// 拜訪紀錄表是全系統唯一一份從上線累積到現在、每筆拜訪都要寫一行、含「原始逐字稿」長文字
+// 欄位的大表，被 /api/plan、/api/week、/api/followups、/api/overview、/api/store 各自讀一次。
+// 改用 swrFetch_()。這張表是由另一套系統（pharmacy-visit-app 的 GAS webhook）寫入，這支 worker
+// 自己沒有對應的寫入端點可以主動清快取，純靠 SWR 的 4 分鐘門檻＋排程預熱控制新鮮度。
+async function fetchVisitsSummaryRaw_(env) {
   const sheetId = env.SHEET_VISIT;
   const sheetName = '拜訪紀錄表';
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
@@ -758,12 +806,13 @@ async function handleVisitsSummary(env) {
       overdue:    daysSince !== null && daysSince > 7,
     };
   });
+  return { ok: true, count: Object.keys(result).length, summary: result };
+}
 
-  const payload = { ok: true, count: Object.keys(result).length, summary: result };
-  if (env && env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 240 });
-  }
-  return json(payload);
+async function handleVisitsSummary(env, ctx, cacheMeta) {
+  const entry = await swrFetch_(env, ctx, 'visits:summary', () => fetchVisitsSummaryRaw_(env));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return json(entry.data);
 }
 
 // ============================================================
@@ -1317,12 +1366,11 @@ function needsInvoicing(orderDateStr, now) {
   return now >= threshold;
 }
 
-// 共用：讀取訂單主檔所有列
-// 2026-10-31：改走 fetchGvizSheet() 的既有 KV 快取（60秒 TTL，理由同 handleGetPharmacies）——
-// 這是算分數用的大表，/api/plan、/api/store、/api/followups 都會整批讀一次。
-async function fetchOrderMasterRows(env) {
+// 共用：讀取訂單主檔所有列。改走 fetchGvizSheet() 的 SWR 快取——這是算分數用的大表，
+// /api/plan、/api/store、/api/followups、/api/week 都會整批讀一次。
+async function fetchOrderMasterRows(env, ctx, cacheMeta) {
   if (!env.SHEET_ORDER_MASTER) throw new Error('未設定 SHEET_ORDER_MASTER');
-  return fetchGvizSheet(env.SHEET_ORDER_MASTER, null, env);
+  return fetchGvizSheet(env.SHEET_ORDER_MASTER, null, env, ctx, cacheMeta);
 }
 
 // ============================================================
@@ -1377,20 +1425,62 @@ async function handleInvoiceTasks(env) {
 // ============================================================
 // 18. 盤點候選產品清單
 // ============================================================
-// env 有帶且該 sheet 允許快取時，會用 KV 存 ttlSeconds 秒（預設 60，Cloudflare KV 允許的最短
-// TTL）；不帶 env 就是原本每次即時讀取。2026-11-03：量過一整天斷斷續續才打開一次頁面的真實使用
-// 情境下，60秒TTL常常在兩次操作之間就過期，等於沒快取到——呼叫端可以傳更長的 ttlSeconds（上限
-// 使用者定的5分鐘），fetchGvizRows() 等新加的快取就是用 240 秒。
-async function fetchGvizSheet(sheetId, sheetName, env, ttlSeconds = 60) {
+// ============================================================
+// 2026-11-04 Plan C：讀取類 API 的 KV 快取改成「先給舊資料，背景更新」（stale-while-revalidate）。
+// 量過（見 2026-11-03 那批 commit）：60～240秒的固定 TTL，只要兩次操作間隔超過 TTL，使用者就會
+// 撞到一次 20~40 秒的冷啟動（Google Sheets gviz + GAS screening 本身就慢，不是我們程式碼的問題）。
+// 改成 KV 不設硬性過期，存 {data, cachedAt}；讀的時候：
+//   - 沒有快取 → 只能同步等這次抓完（第一次使用、或 KV 被清過）。
+//   - 有快取且在 SWR_STALE_MS（4分鐘，使用者定的門檻）內 → 直接回，不额外動作。
+//   - 有快取但超過 4 分鐘 → 立刻回這份舊資料給這次請求（使用者不用等），同時用 ctx.waitUntil()
+//     在背景重新抓一次寫回 KV，下一個人來讀就是新的了。背景重讀失敗只記 log，不影響這次回應。
+// 搭配 wrangler.toml 的 cron 預熱（平日 07:00 讀一輪全部資料源寫進 KV）跟/api/plan、/api/week、
+// /api/followups 一定會傳 cacheMeta 收集每個子來源的 cachedAt，相輔相成：預熱後资料通常都在
+// 4分鐘門檻內，一整天大部分時間讀到的都是「新鮮」的，只有真的冷啟動或背景重讀失敗時才會看到
+// 比較舊的 cachedAt。
+// ============================================================
+const SWR_STALE_MS = 4 * 60 * 1000;
+
+async function swrFetch_(env, ctx, cacheKey, fetchFn) {
+  const now = Date.now();
+  let cached = (env && env.TODOS_KV) ? await env.TODOS_KV.get(cacheKey, 'json') : null;
+  // 防呆：這次改版前，同一批 key 存的是舊格式（直接存 {rows,colMap} 之類，沒有 cachedAt），
+  // 雖然舊格式的 TTL 最長 240 秒、照時間算早就過期，但保險起見還是判一下形狀，
+  // 不符合就當沒快取，走下面同步抓一次的路徑，不要把舊格式當新格式用（cachedAt 會是
+  // undefined，NaN 比較一律是 false，會被誤判成「很新鮮」又回傳一個少了 .data 的物件）。
+  if (cached && typeof cached.cachedAt !== 'number') cached = null;
+  if (cached) {
+    if (now - cached.cachedAt >= SWR_STALE_MS && ctx && ctx.waitUntil && env && env.TODOS_KV) {
+      ctx.waitUntil(
+        fetchFn()
+          .then(data => env.TODOS_KV.put(cacheKey, JSON.stringify({ data, cachedAt: Date.now() })))
+          .catch(e => console.error('SWR背景重讀失敗', cacheKey, e && e.message || e))
+      );
+    }
+    return cached; // 不管新舊，這次請求都先用它，不等背景重讀
+  }
+  const data = await fetchFn();
+  const entry = { data, cachedAt: now };
+  if (env && env.TODOS_KV) await env.TODOS_KV.put(cacheKey, JSON.stringify(entry));
+  return entry;
+}
+
+// cacheMeta：呼叫端（handlePlannerPlan/handleWeekOverview/handleListPlannerFollowups）傳一個
+// { oldest: Infinity } 物件進來，每支 SWR 快取函式讀完都呼叫 noteCacheTime_() 回報自己這份資料
+// 的 cachedAt，最後呼叫端取 cacheMeta.oldest 當這次組合回應裡「最舊的一份資料」的時間，顯示給
+// 使用者看「資料時間」。不需要回報的呼叫端（直接走 /visits-summary 這類單一端點）可以不傳。
+function noteCacheTime_(cacheMeta, cachedAt) {
+  if (cacheMeta && typeof cachedAt === 'number' && cachedAt < cacheMeta.oldest) cacheMeta.oldest = cachedAt;
+}
+function cacheMetaCachedAt_(cacheMeta) {
+  return (cacheMeta && cacheMeta.oldest !== Infinity) ? cacheMeta.oldest : Date.now();
+}
+
+// 不經任何快取，直接即時抓一次——fetchGvizSheet() 的 SWR 包裝、跟 warmPlannerCaches_()
+// 的排程預熱共用這支，不要各寫一份一樣的 fetch+parse 邏輯。
+async function fetchGvizSheetRaw_(sheetId, sheetName) {
   const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
   const url = sheetName ? `${base}&sheet=${encodeURIComponent(sheetName)}` : base;
-  const cacheKey = `gviz:${sheetId}:${sheetName || ''}`;
-
-  if (env && env.TODOS_KV) {
-    const cached = await env.TODOS_KV.get(cacheKey, 'json');
-    if (cached) return cached;
-  }
-
   const res = await fetch(url);
   const text = await res.text();
   const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
@@ -1399,13 +1489,14 @@ async function fetchGvizSheet(sheetId, sheetName, env, ttlSeconds = 60) {
   const rows = data?.table?.rows || [];
   const colMap = {};
   cols.forEach((c, i) => { colMap[c.label] = i; });
-  const result = { rows, colMap };
+  return { rows, colMap };
+}
 
-  if (env && env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: ttlSeconds });
-  }
-
-  return result;
+async function fetchGvizSheet(sheetId, sheetName, env, ctx, cacheMeta) {
+  const cacheKey = `gviz:${sheetId}:${sheetName || ''}`;
+  const entry = await swrFetch_(env, ctx, cacheKey, () => fetchGvizSheetRaw_(sheetId, sheetName));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return entry.data;
 }
 
 function gvizGet(row, colMap, label) {
@@ -1842,13 +1933,13 @@ ${text}
 // 環境變數新增：SHEET_SCREENING（藥局每日異動追蹤）、SHEET_PLANNER（藥局規劃資料）
 // ============================================================
 
-// 2026-11-03 效能優化：改成呼叫 fetchGvizSheet()，吃它既有的 KV 快取機制（TTL 240秒）——SHEET_PLANNER
-// 的「待追蹤」／「店家規則」／「階段歷程」三個分頁之前完全沒快取，卻分別被 5/4/4 處各自獨立讀取，
-// 同一次頁面載入裡同一張表常常被重新即時讀好幾次。對應的寫入端點（handlePlannerFollowups／
-// handlePlannerRules／handleFunnelResult）已經補上 invalidateGvizCache_() 清快取，避免使用者剛
-// 改完資料卻在 60 秒內看到舊的。
-async function fetchGvizRows(sheetId, sheetName, env) {
-  const { rows, colMap } = await fetchGvizSheet(sheetId, sheetName, env, 240);
+// 改呼叫 fetchGvizSheet()，吃它的 SWR 快取——SHEET_PLANNER 的「待追蹤」／「店家規則」／
+// 「階段歷程」三個分頁分別被 5/4/4 處各自獨立讀取，同一次頁面載入裡同一張表常常被重新讀好幾次。
+// 對應的寫入端點（handlePlannerFollowups／handlePlannerRules／handleFunnelResult）已經補上
+// invalidateGvizCache_() 清快取，避免使用者剛改完資料卻看到舊的（SWR 不設 TTL，被清掉的 key
+// 下一次讀取會同步重新抓一次，不是回舊資料）。
+async function fetchGvizRows(sheetId, sheetName, env, ctx, cacheMeta) {
+  const { rows, colMap } = await fetchGvizSheet(sheetId, sheetName, env, ctx, cacheMeta);
   return rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';
     return { get };
@@ -2436,30 +2527,33 @@ function buildTodayRegions_(list, anchors, allPharmacies) {
   return groups;
 }
 
-async function handlePlannerPlan(request, env) {
+async function handlePlannerPlan(request, env, ctx) {
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date');
   const planDate = dateParam ? new Date(dateParam) : new Date();
   if (isNaN(planDate)) return json({ error: 'date 格式不對，要 YYYY-MM-DD' }, 400);
 
+  // Plan C：收集這次回應組合用到的每份資料的 cachedAt，取最舊的一份當「資料時間」回給前端
+  // （weekly.html/planner.html 右上角顯示用，見 cacheMetaCachedAt_ 註解）。
+  const cacheMeta = { oldest: Infinity };
   const [pharmaciesRes, visitsRes, screeningRows, followupRows, ruleRows, orderData, returnOrderData, contractData, stageHistoryRows] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    handleVisitsSummary(env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx, cacheMeta).then(r => r.json()),
+    handleVisitsSummary(env, ctx, cacheMeta).then(r => r.json()),
     env.SCREENING_API_TOKEN
-      ? fetchScreeningRows_(env)
+      ? fetchScreeningRows_(env, ctx, cacheMeta)
       : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env) : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env) : Promise.resolve([]),
-    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx, cacheMeta) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env, ctx, cacheMeta) : Promise.resolve([]),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx, cacheMeta) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx, cacheMeta),
     // 「客戶合約」目前沒開「知道連結的人可檢視」，gviz 會拿到 Google 登入頁而不是 JSON，
     // 用 try/catch 吞掉，當作沒有合約資料（全部店都走沒合約的 7 個月規則），不要讓整個 /api/plan 掛掉
     env.SHEET_CONTRACT
-      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
+      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env, ctx, cacheMeta).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
       : Promise.resolve({ rows: [], colMap: {} }),
     // 2026-11-02：A10「階段歷程」——新店倍數的起算日改用「最近一筆階段歷程日期」，沒有歷程時才 fallback
     // 用篩選分頁的「進入階段日期」（見下面 screeningRows.forEach）。分頁可能還不存在（會回空陣列，不報錯）。
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx, cacheMeta) : Promise.resolve([]),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
@@ -2607,6 +2701,7 @@ async function handlePlannerPlan(request, env) {
     todayRegions,
     badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
+    cachedAt: cacheMetaCachedAt_(cacheMeta), // Plan C：這次用到的資料裡最舊的一份是什麼時候抓的
     note: '2026-10-27 第二版：倍數改用「最後接觸日」(拜訪或叫貨取較近)，兩者都沒有固定倍數1.0；分級決定間隔；倍數≥1用倍數×月均排序不設上限；到期待追蹤移入 anchors 不參加排名，未到期的乘上 followupMultiplier；還沒套用 2 公里錨點半徑篩選；老爸/新竹縣市/狀態=不拜訪 已排除在推薦外，要在 A1 手動加成送貨錨點（等 A1 錨點 UI 做出來再接）。Phase 2：anchors/route 若當天已存檔會蓋掉系統預設值，見 /api/plan POST',
   });
 }
@@ -2746,7 +2841,7 @@ function buildDailyWeatherFromElements_(weatherElements) {
 // ＋「這週要做的」（還沒指定日期的請款／有期限的待追蹤／逾期沒去的店）。
 // 7 天的 region/hasRoute 是原生 KV 讀取（便宜，不跑評分邏輯）；billingDue/overdueCustomers 靠
 // buildCustomerOverview_ 只算一次（不是 7 天各算一次），因為這兩者是「現在」的狀態，不是逐日變化的東西。
-async function handleWeekOverview(request, env) {
+async function handleWeekOverview(request, env, ctx) {
   const url = new URL(request.url);
   const startParam = url.searchParams.get('start');
   if (!startParam) return json({ error: '缺少 start' }, 400);
@@ -2761,16 +2856,19 @@ async function handleWeekOverview(request, env) {
   }
 
   const now = new Date();
+  // Plan C：同 handlePlannerPlan，收集 cachedAt（日曆/天氣故意不算進來——它們本來就設計成
+  // 1小時/3小時的長效快取，算進「最舊資料時間」只會讓顯示看起來比實際更舊，誤導使用者）。
+  const cacheMeta = { oldest: Infinity };
   const [pharmaciesRes, visitsRes, orderData, returnOrderData, contractData, followupRows, ruleRows, calendarEvents, weatherByDate] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    handleVisitsSummary(env).then(r => r.json()),
-    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    handleGetPharmacies(null, env, ctx, cacheMeta).then(r => r.json()),
+    handleVisitsSummary(env, ctx, cacheMeta).then(r => r.json()),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx, cacheMeta) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx, cacheMeta),
     env.SHEET_CONTRACT
-      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
+      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env, ctx, cacheMeta).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
       : Promise.resolve({ rows: [], colMap: {} }),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env) : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx, cacheMeta) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env, ctx, cacheMeta) : Promise.resolve([]),
     fetchGoogleCalendarEvents_(env).catch(() => []),
     fetchWeatherForecast_(env).catch(() => ({})),
   ]);
@@ -2860,6 +2958,7 @@ async function handleWeekOverview(request, env) {
     billingBanner,
     billingDue,
     overdueCustomers,
+    cachedAt: cacheMetaCachedAt_(cacheMeta),
     note: 'billingBanner 是真實合計；billingDue／overdueCustomers 的「已排」判斷靠事項文字開頭' +
       '「請款：」／「拜訪：」比對未完成待追蹤，跟 /api/plan 共用 buildCustomerOverview_ 保證倍數/寄賣數字一致。',
   });
@@ -2873,19 +2972,19 @@ async function handleWeekOverview(request, env) {
 // ruleRows/followupRows/contractByStore/consignmentByStore——A7 只要畫格子，不需要規則狀態/
 // 待追蹤倍率/寄賣提醒這些，傳空值不影響 ratio/tier/city/district 的計算，保證 A7 看到的倍數
 // 跟 A1/A5 永遠是同一套算法，不會自己兜一份另外的版本出來）。
-async function handleOverview(env) {
+async function handleOverview(env, ctx) {
   const now = new Date();
   const todayStr = formatDateIso_(now);
 
   const [pharmaciesRes, visitsRes, orderData, returnOrderData, screeningRows, stageHistoryRows, savedToday] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    handleVisitsSummary(env).then(r => r.json()),
-    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+    handleVisitsSummary(env, ctx).then(r => r.json()),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx),
     env.SCREENING_API_TOKEN
-      ? fetchScreeningRows_(env)
+      ? fetchScreeningRows_(env, ctx)
       : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx) : Promise.resolve([]),
     env.TODOS_KV ? env.TODOS_KV.get(`plan:${todayStr}`, 'json') : Promise.resolve(null),
   ]);
 
@@ -2999,7 +3098,7 @@ function monthKeyOfRaw_(rawDateStr) {
   return formatYearMonth_(d);
 }
 
-async function handleMonthOverview(request, env) {
+async function handleMonthOverview(request, env, ctx) {
   const url = new URL(request.url);
   const now = new Date();
   const month = url.searchParams.get('month') || formatYearMonth_(now);
@@ -3016,9 +3115,9 @@ async function handleMonthOverview(request, env) {
   const nextMonthKey = formatYearMonth_(nextMonthDate);
 
   const [pharmaciesRes, visitsRes, followupRows, weatherByDate] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
     handleAllVisits(env).then(r => r.json()),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx) : Promise.resolve([]),
     fetchWeatherForecast_(env).catch(() => ({})),
   ]);
 
@@ -3134,24 +3233,24 @@ async function handleMonthOverview(request, env) {
 // 分級/寄賣/簽約那一段直接複用 /api/plan 的同一組函數跟同一套資料來源，保證兩邊看到的數字一致；
 // 不是另外寫一套算法。代價是跟 /api/plan 一樣要整批撈訂單/退貨/合約資料，但這是給抽屜用的低頻端點，不是列表。
 // ============================================================
-async function handleStoreDetail(request, env) {
+async function handleStoreDetail(request, env, ctx) {
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
   if (!id) return json({ error: '缺少 id' }, 400);
   const planDate = new Date();
 
   const [pharmaciesRes, visitsRes, screeningRows, followupRows, ruleRows, orderData, returnOrderData, contractData] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    handleVisitsSummary(env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+    handleVisitsSummary(env, ctx).then(r => r.json()),
     env.SCREENING_API_TOKEN
-      ? fetchScreeningRows_(env)
+      ? fetchScreeningRows_(env, ctx)
       : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env) : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env) : Promise.resolve([]),
-    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env, ctx) : Promise.resolve([]),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx),
     env.SHEET_CONTRACT
-      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
+      ? fetchGvizSheet(env.SHEET_CONTRACT, '客戶合約', env, ctx).catch(() => ({ rows: [], colMap: {}, fetchError: true }))
       : Promise.resolve({ rows: [], colMap: {} }),
   ]);
 
@@ -3329,10 +3428,10 @@ function visibleForRuleManagement_(p) {
   return true;
 }
 
-async function handleListPlannerRules(env) {
+async function handleListPlannerRules(env, ctx) {
   const [pharmaciesRes, ruleRows] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env) : Promise.resolve([]),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '店家規則', env, ctx) : Promise.resolve([]),
   ]);
 
   const allPharmacies = (pharmaciesRes.pharmacies || []).filter(visibleForRuleManagement_);
@@ -3393,17 +3492,18 @@ function followupImpactText_(storeType, deadlineType, deadline, now) {
   return `整店 ×${PLANNER_CONFIG.followupMultiplier}`;
 }
 
-async function handleListPlannerFollowups(env) {
+async function handleListPlannerFollowups(env, ctx) {
   const now = new Date();
+  const cacheMeta = { oldest: Infinity };
   const [pharmaciesRes, visitsRes, screeningRows, followupRows, orderData, returnOrderData] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
-    handleVisitsSummary(env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx, cacheMeta).then(r => r.json()),
+    handleVisitsSummary(env, ctx, cacheMeta).then(r => r.json()),
     env.SCREENING_API_TOKEN
-      ? fetchScreeningRows_(env)
+      ? fetchScreeningRows_(env, ctx, cacheMeta)
       : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env) : Promise.resolve([]),
-    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env) : Promise.resolve({ rows: [], colMap: {} }),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx, cacheMeta) : Promise.resolve([]),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx, cacheMeta) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx, cacheMeta),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
@@ -3451,6 +3551,7 @@ async function handleListPlannerFollowups(env) {
     followups,
     addableStores,
     badges: { followupsDueSoon: computeFollowupsDueSoonBadge_(followupRows) },
+    cachedAt: cacheMetaCachedAt_(cacheMeta),
   });
 }
 
@@ -3538,23 +3639,19 @@ function convertedCustomerIdByStore_(stageHistoryRows) {
   return result;
 }
 
-// 2026-11-03 效能優化：篩選分頁（new-pharmacy-screening）清單只是「顯示用」整批讀一次，之前
-// 完全沒快取，卻被 /api/plan、/api/week、/api/followups、/api/funnel/overview 四個端點各自重新
-// 即時打一次 GAS。這裡加 240 秒 KV 快取；verifyScreeningStage_()／handleFunnelResult() 自己要核對
-// 「現在真正的階段」那兩處刻意不走這份快取（仍然直接 fetch），避免寫入流程根據過期資料做決定。
-async function fetchScreeningRows_(env) {
-  if (!env.SCREENING_API_TOKEN) return [];
-  const cacheKey = 'screening:rows';
-  if (env.TODOS_KV) {
-    const cached = await env.TODOS_KV.get(cacheKey, 'json');
-    if (cached) return cached;
-  }
+// 篩選分頁（new-pharmacy-screening）清單只是「顯示用」整批讀一次，被 /api/plan、/api/week、
+// /api/followups、/api/funnel/overview 四個端點各自讀。改用 swrFetch_()；verifyScreeningStage_()／
+// handleFunnelResult() 自己要核對「現在真正的階段」那兩處刻意不走這份快取（仍然直接 fetch），
+// 避免寫入流程根據過期資料做決定。
+async function fetchScreeningRowsRaw_(env) {
   const data = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
-  const rows = data.rows || [];
-  if (env.TODOS_KV) {
-    await env.TODOS_KV.put(cacheKey, JSON.stringify(rows), { expirationTtl: 240 });
-  }
-  return rows;
+  return data.rows || [];
+}
+async function fetchScreeningRows_(env, ctx, cacheMeta) {
+  if (!env.SCREENING_API_TOKEN) return [];
+  const entry = await swrFetch_(env, ctx, 'screening:rows', () => fetchScreeningRowsRaw_(env));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return entry.data;
 }
 
 // 呼叫 new-pharmacy-screening 的 doPost 更新篩選分頁階段（stageAction: advance/drop/confirm，
@@ -3619,7 +3716,7 @@ async function rollbackStageHistory_(eventId, env) {
 // 寫入順序固定：先寫階段歷程（唯一的事實記錄，失敗就整個中止）→ keep 到此結束；
 // advance/drop/confirmed 才需要再寫篩選分頁階段，那一步失敗時走 verifyScreeningStage_ 核對再決定
 // 要不要回滾，不清空前端表單內容（放棄原因不用重打），由前端自己保留使用者輸入。
-async function handleFunnelResult(request, env) {
+async function handleFunnelResult(request, env, ctx) {
   const body = await request.json();
   const { storeId, storeName, action, dropReason, customerId, requestId } = body;
   if (!storeId) return json({ error: '缺少 storeId' }, 400);
@@ -3652,12 +3749,12 @@ async function handleFunnelResult(request, env) {
   } else { // confirmed
     if (idx < 0 || idx > 3) return json({ error: '目前階段不允許確認已建檔（必須是發現～試賣中之一）' }, 400);
     if (!customerId) return json({ error: '缺少 customerId' }, 400);
-    const pharmaciesRes = await handleGetPharmacies(null, env).then(r => r.json());
+    const pharmaciesRes = await handleGetPharmacies(null, env, ctx).then(r => r.json());
     const exists = (pharmaciesRes.pharmacies || []).some(p => p.id === customerId);
     if (!exists) return json({ error: `新客戶資料表找不到代號：${customerId}，請確認有沒有打錯字` }, 400);
     // 2026-11-02 使用者要求：同一個正式代號不能被兩家開發中的店拿去轉正式（階段歷程裡已經有
     // 「到階段=轉正式」且「正式代號」相同、但店代號不同的紀錄，就擋下，避免同一個代號記錯店）
-    const historyRowsForDupCheck = env.SHEET_PLANNER ? await fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env) : [];
+    const historyRowsForDupCheck = env.SHEET_PLANNER ? await fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx) : [];
     const dup = historyRowsForDupCheck.find(h =>
       h.get('到階段') === '轉正式' && h.get('正式代號') === customerId && h.get('店代號') !== storeId);
     if (dup) {
@@ -3725,17 +3822,17 @@ async function handleFunnelResult(request, env) {
 }
 
 // GET /api/funnel/overview：A10 頂部四個數字＋每欄卡片＋每欄轉換率。period: 30｜90｜ytd
-async function handleFunnelOverview(request, env) {
+async function handleFunnelOverview(request, env, ctx) {
   const url = new URL(request.url);
   const period = url.searchParams.get('period') || '90';
   const now = new Date();
 
   const [pharmaciesRes, screeningRows, stageHistoryRows] = await Promise.all([
-    handleGetPharmacies(null, env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
     env.SCREENING_API_TOKEN
-      ? fetchScreeningRows_(env)
+      ? fetchScreeningRows_(env, ctx)
       : Promise.resolve([]),
-    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx) : Promise.resolve([]),
   ]);
 
   const allPharmacies = pharmaciesRes.pharmacies || [];

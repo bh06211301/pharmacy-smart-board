@@ -17,6 +17,7 @@
   .week-nav-btn { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-bg); border: 1px solid var(--sr-ink); color: var(--sr-ink); }
   .week-nav-btn:hover { background: var(--sr-bg-subtle); }
   .week-range-label { font-size: var(--sr-text-md); color: var(--sr-ink-2); }
+  .data-time-badge { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
 
   .band-row { display: flex; gap: var(--sr-space-5); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line-soft); flex-wrap: wrap; }
   .band-pill {
@@ -119,6 +120,7 @@
   <button class="week-nav-btn" id="btn-this-week">回到本週</button>
   <button class="week-nav-btn" id="btn-next-week">下一週 →</button>
   <span class="week-range-label" id="week-range-label"></span>
+  <span class="data-time-badge" id="data-time-badge" title="這份資料是幾點抓的，超過10分鐘會自動補抓一次新的"></span>
 </div>
 
 <div class="band-row" id="band-row"></div>
@@ -443,6 +445,22 @@ function wireDragAndDrop() {
   });
 }
 
+// Plan C（2026-11-04）：跟 planner.html 同一套邏輯（故意複製，不共用，見專案既有慣例）——
+// worker.js 的 /api/week 現在會回 cachedAt，顯示給使用者看，超過10分鐘就在30秒後補抓一次新的，
+// 只補一次，不是每10分鐘一直重複。
+const STALE_AUTO_REFRESH_MS = 10 * 60 * 1000;
+let staleRefreshScheduled_ = false;
+function showDataTime_(cachedAt, reloadFn) {
+  const el = document.getElementById('data-time-badge');
+  if (!cachedAt) { if (el) el.textContent = ''; return; }
+  const d = new Date(cachedAt);
+  if (el) el.textContent = `資料時間 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (!staleRefreshScheduled_ && Date.now() - cachedAt > STALE_AUTO_REFRESH_MS) {
+    staleRefreshScheduled_ = true;
+    setTimeout(async () => { await reloadFn(); toast('已更新'); }, 30000);
+  }
+}
+
 async function loadWeek() {
   updateUrl();
   const dates = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
@@ -458,6 +476,7 @@ async function loadWeek() {
     get('/api/followups'),
     loadRegionOptions(),
   ]);
+  showDataTime_(weekData.cachedAt, loadWeek);
 
   // 頂部色帶：本週落在寄單期(1-5日)/請款期(25-30日)的天數
   const dispatchDays = weekData.days.filter(d => { const n = parseDs(d.date).getDate(); return n >= 1 && n <= 5; });

@@ -11,6 +11,13 @@ id = "85f8b8c8077a42048b8113fd05df020e"
 binding = "PRODUCT_PHOTOS"
 bucket_name = "pharmacy-product-photos"
 
+# Plan C 預熱（2026-11-04）：平日（週一～五）台灣時間 07:00 跑一次 scheduled()，把 /api/plan、
+# /api/week、/api/followups 用到的資料源全部重新抓一輪寫進 KV。cron 用 UTC，台灣是 UTC+8，
+# 07:00 台灣 = 前一天 23:00 UTC：台灣週一 07:00 對應 UTC 週日(0) 23:00，台灣週五 07:00 對應
+# UTC 週四(4) 23:00，所以 UTC 的星期要用 0-4（週日～週四），不是 1-5。
+[triggers]
+crons = ["0 23 * * 0-4"]
+
 [vars]
 SHEET_PHARMACY = "1qJ62K5Hd2bKP9DdQTjwJOOy0njNICMSPiayW7YJZdNM"
 SHEET_VISIT    = "10rofUuKtji4tKGyUv6cvbsiTEq1ynRP0zJxohc3l68U"
