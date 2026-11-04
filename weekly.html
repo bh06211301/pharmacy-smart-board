@@ -350,6 +350,31 @@ function renderPendingChip(dateStr, label) {
   return el;
 }
 
+// 2026-11-04：gas-backend 的 addFollowup 防重複（同店同事項已有未完成待追蹤就不新增，見
+// handlePlannerPlan 旁的 commit 3e98a30）會讓這次請求帶的 deadline/deadlineType/who 被忽略——
+// Worker 補了一層：偵測到 duplicate 時，如果這次的值跟既有那一筆不同，會呼叫 updateFollowup
+// 把既有那一筆改過來，並把前後差異（previousDeadlineType/previousDeadline、deadlineType/
+// deadline）回傳。這裡把這組回傳值轉成人看得懂的提示；回傳 true 代表已經顯示過提示，呼叫端
+// 不用再顯示自己原本那句「已排到...」。
+function dedupDeadlineLabel_(deadlineType, deadline) {
+  if (deadlineType !== '指定日期前' || !deadline) return '下次經過';
+  const iso = gvizDateToIso(deadline) || deadline;
+  const d = parseDs(iso);
+  return isNaN(d) ? String(deadline) : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+function handleFollowupDedupToast_(resp, storeName) {
+  if (!resp || !resp.duplicate) return false;
+  if (resp.updated) {
+    const prev = dedupDeadlineLabel_(resp.previousDeadlineType, resp.previousDeadline);
+    const next = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}原本排 ${prev}，已改到 ${next}`);
+  } else {
+    const label = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}已經有這筆待追蹤（期限 ${label}），沒有重複新增`);
+  }
+  return true;
+}
+
 async function assignToDay(kind, dataset, dateStr) {
   if (!dateStr) { showAssignError('請先選日期才能排入'); return; }
   if (assignInFlight) { showAssignError('上一筆還在儲存中，請稍候再試一次'); return; }
@@ -358,8 +383,9 @@ async function assignToDay(kind, dataset, dateStr) {
   const label = kind === 'billing' ? `${dataset.name}（請款）` : kind === 'overdue' ? `${dataset.name}（拜訪）` : `${dataset.name}（改期限）`;
   const pendingChip = renderPendingChip(dateStr, label);
   try {
+    let addResp = null;
     if (kind === 'billing') {
-      await post('/api/followups', {
+      addResp = await post('/api/followups', {
         storeId: dataset.id, item: `請款：${dataset.name} $${Number(dataset.amount).toLocaleString()}`,
         who: '帳務', deadlineType: '指定日期前', deadline: dateStr, requestId: genRequestId(),
       });
@@ -369,13 +395,13 @@ async function assignToDay(kind, dataset, dateStr) {
       if (dataset.followupId) {
         await post('/api/followups', { action: 'update', followupId: dataset.followupId, patch: { deadline: dateStr } });
       } else {
-        await post('/api/followups', {
+        addResp = await post('/api/followups', {
           storeId: dataset.id, item: `拜訪：${dataset.name}`,
           who: '我', deadlineType: '指定日期前', deadline: dateStr, requestId: genRequestId(),
         });
       }
     }
-    toast(`已排到 ${dateStr}`);
+    if (!handleFollowupDedupToast_(addResp, dataset.name)) toast(`已排到 ${dateStr}`);
     await loadWeek();
   } catch (e) {
     if (pendingChip) pendingChip.remove();

@@ -259,7 +259,7 @@ export default {
 
       // ★ 待追蹤（代理到 GAS 的 addFollowup/resolveFollowup/updateFollowup）
       if (path === '/api/followups' && request.method === 'POST') {
-        return await handlePlannerFollowups(request, env);
+        return await handlePlannerFollowups(request, env, ctx);
       }
 
       // ★ Phase 2：A8 藥局檔案抽屜要的單店全部資料（分級、規則、待追蹤）
@@ -3655,7 +3655,7 @@ async function handlePlannerRules(request, env) {
 // updateFollowup action），token 代填的理由同上。
 // 2026-10-31：A3「編輯」用明確的 body.action === 'update'（不是用 followupId 存在與否去推斷，
 // 跟 handlePlannerRules 的 ruleId 推斷寫法不一樣——使用者要求這裡要明確，避免未來改欄位時推斷邏輯誤判）。
-async function handlePlannerFollowups(request, env) {
+async function handlePlannerFollowups(request, env, ctx) {
   const body = await request.json();
   const action = body.delete ? 'deleteFollowup'
     : body.resolve ? 'resolveFollowup'
@@ -3671,6 +3671,52 @@ async function handlePlannerFollowups(request, env) {
   // 寫成功才清「待追蹤」的 gviz 快取（同上，weekly.html 拖放指派到某天之後會立刻重新 GET
   // /api/followups，不清快取會讓使用者以為拖放沒生效）。
   if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, '待追蹤');
+
+  // 2026-11-04：gas-backend 的 addFollowup 偵測到「同店同事項已有未完成待追蹤」時（3e98a30）
+  // 只回傳既有那一筆的 followupId（duplicate:true），這次請求帶的 deadline/deadlineType/who
+  // 整個被忽略——如果使用者其實是想改期限/改負責人（不是單純連點造成的重複），畫面會跟平常新增
+  // 成功顯示一樣的提示，但設定完全沒套用，使用者不會發現。這裡補一層：讀出既有那一筆目前的
+  // deadline/deadlineType/who，跟這次請求的值比對，不同就代呼叫 updateFollowup 把既有那一筆改成
+  // 這次的值，再把前後差異回傳給前端，讓前端能分「已改期限」／「設定沒變，沒有重複新增」兩種情況
+  // 分別提示（見 followups.html/weekly.html/funnel.html 的 handleFollowupDedupToast_）。
+  // GAS 本身不用改——這是比對/決定要不要補一次 updateFollowup 呼叫的邏輯，放在 Worker 這一層。
+  if (action === 'addFollowup' && data.success && data.duplicate && data.followupId) {
+    const followupRows = await fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx, { oldest: Infinity });
+    const existing = followupRows.find(f => f.get('待追蹤ID') === data.followupId);
+    const previousDeadlineType = existing ? (existing.get('期限類型') || '下次經過') : '下次經過';
+    const previousDeadline = existing ? (existing.get('期限') || '') : '';
+    const previousWho = existing ? (existing.get('誰交代') || '我') : '我';
+
+    const patch = {};
+    if (body.deadlineType !== undefined && body.deadlineType !== previousDeadlineType) patch.deadlineType = body.deadlineType;
+    if (body.deadline !== undefined && (body.deadline || '') !== (previousDeadline || '')) patch.deadline = body.deadline;
+    if (body.who && body.who !== previousWho) patch.who = body.who;
+
+    let updated = false;
+    if (Object.keys(patch).length > 0) {
+      const updateRes = await fetch(GAS_VISIT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updateFollowup', followupId: data.followupId, patch, token: env.PLANNER_API_TOKEN }),
+        redirect: 'follow',
+      });
+      const updateData = await updateRes.json();
+      if (updateData.success) {
+        updated = true;
+        await invalidateGvizCache_(env, env.SHEET_PLANNER, '待追蹤');
+      }
+    }
+
+    return json({
+      ok: true, success: true, duplicate: true, updated,
+      followupId: data.followupId,
+      previousDeadlineType, previousDeadline,
+      deadlineType: updated && patch.deadlineType !== undefined ? patch.deadlineType : previousDeadlineType,
+      deadline: updated && patch.deadline !== undefined ? patch.deadline : previousDeadline,
+      previousWho, who: updated && patch.who !== undefined ? patch.who : previousWho,
+    });
+  }
+
   return json({ ok: !!data.success, ...data });
 }
 

@@ -174,6 +174,29 @@ function daysBetweenClient(deadlineStr) {
   return Math.floor((now - d) / 86400000);
 }
 
+// 2026-11-04：gas-backend 的 addFollowup 防重複（同店同事項已有未完成待追蹤就不新增，commit
+// 3e98a30）會讓這次輸入的期限被忽略——Worker 補了一層，偵測到 duplicate 時如果期限不同會改用
+// updateFollowup 把既有那一筆改過來，並把前後差異回傳（見 worker.js handlePlannerFollowups）。
+// 這裡把回傳值轉成人看得懂的提示，回傳 true 代表已經顯示過提示，呼叫端不用再顯示「已新增」。
+function dedupDeadlineLabel_(deadlineType, deadline) {
+  if (deadlineType !== '指定日期前' || !deadline) return '下次經過';
+  const iso = gvizDateToIso(deadline) || deadline;
+  const d = new Date(String(iso).replace(/\//g, '-') + 'T00:00:00');
+  return isNaN(d) ? String(deadline) : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+function handleFollowupDedupToast_(resp, storeName) {
+  if (!resp || !resp.duplicate) return false;
+  if (resp.updated) {
+    const prev = dedupDeadlineLabel_(resp.previousDeadlineType, resp.previousDeadline);
+    const next = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}原本排 ${prev}，已改到 ${next}`);
+  } else {
+    const label = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}已經有這筆待追蹤（期限 ${label}），沒有重複新增`);
+  }
+  return true;
+}
+
 function editRowHtml(f) {
   return `<tr class="edit-form-row" data-id="${escapeHtml(f.followupId)}">
     <td colspan="7">
@@ -276,9 +299,10 @@ async function submitQuickAdd() {
   const who = document.getElementById('qa-who').value;
   const deadlineType = document.getElementById('qa-deadline-type').value;
   const deadline = deadlineType === '指定日期前' ? document.getElementById('qa-deadline').value : '';
+  const storeName = pickedStore.name;
   await withBusy(btn, '新增中…', async () => {
-    await post('/api/followups', { storeId: pickedStore.id, item, who, deadlineType, deadline, requestId: genRequestId() });
-    toast('已新增');
+    const resp = await post('/api/followups', { storeId: pickedStore.id, item, who, deadlineType, deadline, requestId: genRequestId() });
+    if (!handleFollowupDedupToast_(resp, storeName)) toast('已新增');
     pickedStore = null;
     document.getElementById('qa-store-input').value = '';
     document.getElementById('qa-item').value = '';

@@ -119,7 +119,7 @@
 <script src="planner-nav.js"></script>
 <script src="store-drawer.js"></script>
 <script>
-const { get, post, withBusy, toast, escapeHtml, genRequestId } = window.PlannerAPI;
+const { get, post, withBusy, toast, escapeHtml, genRequestId, gvizDateToIso } = window.PlannerAPI;
 window.SRNav.render({ active: 'new-store' });
 
 const STAGES_ORDER = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'];
@@ -234,6 +234,29 @@ function renderBoard() {
   });
 }
 
+// 2026-11-04：gas-backend 的 addFollowup 防重複（同店同事項已有未完成待追蹤就不新增，commit
+// 3e98a30）會讓這次輸入的期限被忽略——Worker 補了一層，偵測到 duplicate 時如果期限不同會改用
+// updateFollowup 把既有那一筆改過來，並把前後差異回傳（見 worker.js handlePlannerFollowups）。
+// 這裡把回傳值轉成人看得懂的提示，回傳 true 代表已經顯示過提示，呼叫端不用再顯示「已加入待追蹤」。
+function dedupDeadlineLabel_(deadlineType, deadline) {
+  if (deadlineType !== '指定日期前' || !deadline) return '下次經過';
+  const iso = gvizDateToIso(deadline) || deadline;
+  const d = new Date(String(iso).replace(/\//g, '-') + 'T00:00:00');
+  return isNaN(d) ? String(deadline) : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+function handleFollowupDedupToast_(resp, storeName) {
+  if (!resp || !resp.duplicate) return false;
+  if (resp.updated) {
+    const prev = dedupDeadlineLabel_(resp.previousDeadlineType, resp.previousDeadline);
+    const next = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}原本排 ${prev}，已改到 ${next}`);
+  } else {
+    const label = dedupDeadlineLabel_(resp.deadlineType, resp.deadline);
+    toast(`${storeName}已經有這筆待追蹤（期限 ${label}），沒有重複新增`);
+  }
+  return true;
+}
+
 // ---------- 排進某天：addFollowup，期限類型固定「指定日期前」，日期一定要使用者選 ----------
 function openScheduleModal(storeId, storeName) {
   const root = document.getElementById('modal-root');
@@ -259,11 +282,11 @@ function openScheduleModal(storeId, storeName) {
     if (!date) { errEl.textContent = '請選擇日期'; errEl.hidden = false; return; }
     await withBusy(e.target, '送出中…', async () => {
       try {
-        await post('/api/followups', {
+        const resp = await post('/api/followups', {
           storeId, item: `新店開發：${storeName}，請安排拜訪`, who: '篩選器',
           deadlineType: '指定日期前', deadline: date, requestId: genRequestId(),
         });
-        toast('已加入待追蹤');
+        if (!handleFollowupDedupToast_(resp, storeName)) toast('已加入待追蹤');
         closeModal();
       } catch (err) {
         errEl.textContent = '失敗：' + err.message;
