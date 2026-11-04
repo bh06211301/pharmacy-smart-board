@@ -224,6 +224,9 @@
   .route-stop-name { flex: 1; font-size: var(--sr-text-base); }
   .route-stop-name.anchor { font-weight: var(--sr-weight-bold); }
   .route-stop-tag { font-size: var(--sr-text-2xs); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); padding: 1px 6px; color: var(--sr-ink-2); }
+  .route-stop-method { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); flex-shrink: 0; white-space: nowrap; }
+  .route-stop-method.by-name { color: var(--sr-billing-soft); font-weight: var(--sr-weight-bold); }
+  .route-warning-banner { font-size: var(--sr-text-sm); color: var(--sr-danger); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); line-height: var(--sr-leading-tight); }
   .route-summary { margin-top: var(--sr-space-6); font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
 
   /* ---------- 地圖（A9，DESIGN.md 2.16） ---------- */
@@ -968,12 +971,19 @@ function loadGoogleMapsSdk() {
   });
 }
 
+// locateMethod：'coord'=客戶表座標／'address'=地址定位／'name'=只能用店名定位（見
+// resolveStoreLocation_）。用店名定位的最不可靠，字標黃色（--sr-billing-soft，專案裡色票最接近
+// 黃色的 token，design-tokens.css 沒有定義另一個黃色，2026-11-04）提醒使用者留意。
+function locateMethodLabel_(method) {
+  return method === 'coord' ? '座標' : method === 'address' ? '地址' : method === 'name' ? '店名' : '';
+}
 function routeListHtml(route) {
   if (!route || !route.length) return '<div class="empty-hint">在清單模式選好店家並按「計算路線」</div>';
   return route.map(s => `<div class="route-stop-row">
       <span class="route-stop-time">${s.arrival ? fmtMin(s.arrival) : ''}</span>
       <span class="route-stop-name ${s.isAnchor ? 'anchor' : ''}">${escapeHtml(s.name)}</span>
       ${s.isAnchor ? '<span class="route-stop-tag">錨點</span>' : ''}
+      ${s.locateMethod ? `<span class="route-stop-method${s.locateMethod === 'name' ? ' by-name' : ''}">用${locateMethodLabel_(s.locateMethod)}定位</span>` : ''}
     </div>`).join('');
 }
 function renderMapRoutePanel() {
@@ -1041,33 +1051,40 @@ async function renderMap() {
   srMapCircles.forEach(c => c.setMap(null)); srMapCircles = [];
   if (srMapPolyline) { srMapPolyline.setMap(null); srMapPolyline = null; }
 
-  const byId = {}; (allPharmaciesCache || []).forEach(p => { byId[p.id] = p; });
-  // 新店（篩選分頁）座標不在 /pharmacies，如果 /api/plan 自己帶了 lat/lng 就補進同一份查詢表
-  (planData?.recommended || []).forEach(item => { if (item.lat && item.lng && !byId[item.id]) byId[item.id] = item; });
+  const route = window._confirmedRoute || null;
+  const seqById = {}; (route || []).forEach(s => { seqById[s.id] = s.seq; });
+
+  // ①②③ 要畫的店統一先定位一次（跟 calcRoute 共用 resolveStoreLocation_，新店/只有地址的店
+  // 這裡也畫得出來；查過的存在 geocodeCache_，同一家店不會重複打 API，2026-11-04 使用者要求）。
+  const visible = visibleRecommendList();
+  const nameById_ = {};
+  anchors.forEach(a => { nameById_[a.id] = a.name; });
+  visible.forEach(item => { nameById_[item.id] = item.name; });
+  (planData?.recommended || []).forEach(item => { if (!nameById_[item.id]) nameById_[item.id] = item.name; });
+  const neededIds_ = new Set([...anchors.map(a => a.id), ...selectedCol2Ids, ...visible.map(item => item.id)]);
+  const locById = {};
+  await Promise.all([...neededIds_].map(async id => { locById[id] = await resolveStoreLocation_(id, nameById_[id] || id); }));
 
   const bounds = new google.maps.LatLngBounds();
   let anyBounds = false;
   function extend(lat, lng) { bounds.extend({ lat, lng }); anyBounds = true; }
 
-  const route = window._confirmedRoute || null;
-  const seqById = {}; (route || []).forEach(s => { seqById[s.id] = s.seq; });
-
   // ① 錨點：28px 深色圓、白色站號（還沒計算路線前沒有站號）＋ 2 公里範圍圈
   anchors.forEach(a => {
-    const ph = byId[a.id];
-    if (!ph?.lat || !ph?.lng) return;
+    const loc = locById[a.id];
+    if (!loc?.lat || !loc?.lng) return;
     const marker = new google.maps.Marker({
-      position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: a.name, zIndex: 20,
+      position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: a.name, zIndex: 20,
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-ink'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
       label: seqById[a.id] ? { text: String(seqById[a.id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
     });
     marker.addListener('click', () => openMapInfo(marker, { id: a.id, name: a.name, kind: 'anchor', anchorMeta: a }));
     srMapMarkers.push(marker);
-    extend(ph.lat, ph.lng);
+    extend(loc.lat, loc.lng);
     // 2 公里範圍圈：DESIGN.md 寫虛線，google.maps.Circle 不支援虛線樣式（要畫虛線得改用 Polygon
     // 近似圓形並掛 icons，複雜度高很多）——這次先用純色細圈代替，保守簡化，之後要再精緻化再改（WORKLOG 記錄）。
     const circle = new google.maps.Circle({
-      map: srMap, center: { lat: ph.lat, lng: ph.lng }, radius: RADIUS_KM * 1000,
+      map: srMap, center: { lat: loc.lat, lng: loc.lng }, radius: RADIUS_KM * 1000,
       strokeColor: cssVar('--sr-primary'), strokeOpacity: 0.8, strokeWeight: 2,
       fillColor: cssVar('--sr-primary-tint'), fillOpacity: 0.12, clickable: false,
     });
@@ -1075,41 +1092,40 @@ async function renderMap() {
   });
 
   // ② 補的站：已勾選加入路線、但不是錨點的店，28px primary 色圓
-  const visible = visibleRecommendList();
   const visibleById = {}; visible.forEach(x => { visibleById[x.id] = x; });
   selectedCol2Ids.forEach(id => {
-    const ph = byId[id];
-    if (!ph?.lat || !ph?.lng) return;
+    const loc = locById[id];
+    if (!loc?.lat || !loc?.lng) return;
     const item = visibleById[id] || (planData?.recommended || []).find(x => x.id === id);
     const marker = new google.maps.Marker({
-      position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: item?.name || id, zIndex: 15,
+      position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: item?.name || id, zIndex: 15,
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-primary'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
       label: seqById[id] ? { text: String(seqById[id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
     });
     marker.addListener('click', () => openMapInfo(marker, { id, name: item?.name || id, kind: 'selected', item }));
     srMapMarkers.push(marker);
-    extend(ph.lat, ph.lng);
+    extend(loc.lat, loc.lng);
   });
 
   // ③ 候選店（清單目前顯示、尚未勾選）：14px 小圓，正式客戶依 4.4 倍數分級上色，開發中空心圓
   visible.forEach(item => {
     if (selectedCol2Ids.has(item.id)) return; // ②已經畫過
-    const ph = byId[item.id];
-    if (!ph?.lat || !ph?.lng) return;
+    const loc = locById[item.id];
+    if (!loc?.lat || !loc?.lng) return;
     const isNewStore = item.type === 'new-store';
     const icon = isNewStore
       ? { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar('--sr-bg'), fillOpacity: 1, strokeColor: cssVar('--sr-ink'), strokeWeight: 2 }
       : { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar(ratioColorVar(ratioTierOf(item.ratio))), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1 };
-    const marker = new google.maps.Marker({ position: { lat: ph.lat, lng: ph.lng }, map: srMap, title: item.name, icon, zIndex: 10 });
+    const marker = new google.maps.Marker({ position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: item.name, icon, zIndex: 10 });
     marker.addListener('click', () => openMapInfo(marker, { id: item.id, name: item.name, kind: 'candidate', item }));
     srMapMarkers.push(marker);
-    extend(ph.lat, ph.lng);
+    extend(loc.lat, loc.lng);
   });
 
   // ④ 路線線：直線段連接目前已算好的站點順序，不是實際路網線（不解析 Routes API 回傳的
   // encoded polyline，避免多引入 Maps JavaScript 的 geometry library，保守簡化，WORKLOG 記錄）
   if (route && route.length > 1) {
-    const path = route.map(s => { const ph = byId[s.id]; return ph?.lat && ph?.lng ? { lat: ph.lat, lng: ph.lng } : null; }).filter(Boolean);
+    const path = route.map(s => { const loc = locById[s.id]; return loc?.lat && loc?.lng ? { lat: loc.lat, lng: loc.lng } : null; }).filter(Boolean);
     if (path.length > 1) {
       srMapPolyline = new google.maps.Polyline({ path, geodesic: true, strokeColor: cssVar('--sr-primary'), strokeOpacity: 0.9, strokeWeight: 4, map: srMap });
     }
@@ -1143,37 +1159,142 @@ function fmtMin(min) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 
-async function geocodeStore_(query) {
-  const bounds = '24.9,121.4|25.2,121.75';
-  const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query + ' 台灣')}&bounds=${bounds}&region=TW&key=${GMAPS_KEY}`);
+// 2026-11-04 使用者要求修正：原本 calcRoute() 只查 /pharmacies（正式客戶表），新店不在那張表
+// 就直接掉進「只用店名」查 Geocoding API——這把 GMAPS_KEY 設了 HTTP referrer 限制，Geocoding
+// API 這類「伺服器端」API 一律拒絕 referrer 限制的 key（不管誰呼叫都一樣，見下面 geocodeQuery_
+// 註解），所以舊版 geocodeStore_() 其實從來沒有成功查過，一律落入查無結果的 fallback（直接把
+// 店名字串當地址丟給 Routes API），是 Routes API 自己內部解析地址字串時選錯城市（查到外縣市
+// 同名藥局，例如「專心藥局」），不是我們自己查到錯的結果。統一定位邏輯：①客戶表緯度經度
+// （直接信任，這張表本身的資料品質由下面的「只讀檢查報告」另外處理，不在這裡驗證）→②地址
+// （客戶表 or planData.recommended 新店項目，哪裡有地址就用哪裡；地址開頭沒有縣市就自動補
+// 「縣市＋行政區」）→③最後才用店名。②③都要打 Places API (New) 拿到實際座標，並檢查是否落在
+// 服務範圍內（24.6~25.35, 120.9~122.0），超出範圍或查無結果就回傳 warning，呼叫端
+// （calcRoute/renderMap）負責不使用這個結果。calcRoute()／renderMap() 共用同一套，不要各自寫一份。
+const SERVICE_AREA_BOUNDS_ = { minLat: 24.6, maxLat: 25.35, minLng: 120.9, maxLng: 122.0 };
+function inServiceArea_(lat, lng) {
+  return lat >= SERVICE_AREA_BOUNDS_.minLat && lat <= SERVICE_AREA_BOUNDS_.maxLat &&
+         lng >= SERVICE_AREA_BOUNDS_.minLng && lng <= SERVICE_AREA_BOUNDS_.maxLng;
+}
+function extractCityFromAddress_(address) {
+  const m = String(address || '').match(/[一-龥]{2,3}[縣市]/);
+  return m ? m[0] : '不明縣市';
+}
+// 查地址/店名的座標，用 Places API (New) 的 Text Search，不是 Geocoding API——2026-11-04 實測
+// 發現這把 GMAPS_KEY 設了 HTTP referrer 限制，Geocoding API／舊版 Places API 這類「伺服器端」
+// API 一律拒絕 referrer 限制的 key（Google 平台規則，跟是誰呼叫、有沒有送 Referer header 都
+// 無關，連後端呼叫也一樣被擋，回應是「API keys with referer restrictions cannot be used with
+// this API」）；Places API (New) 才支援 referrer 限制的 key，但要先在 Google Cloud Console 把
+// 這把 key 的「API 限制」清單加上 Places API (New)，沒開會收到 API_KEY_SERVICE_BLOCKED。
+// locationBias 只是偏好提示（跟原本 Geocoding API 的 bounds 參數一樣不是硬性範圍），呼叫端要
+// 自己用 inServiceArea_() 檢查結果。
+async function geocodeQuery_(query) {
+  const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GMAPS_KEY,
+      'X-Goog-FieldMask': 'places.location,places.formattedAddress',
+    },
+    body: JSON.stringify({
+      textQuery: query,
+      languageCode: 'zh-TW',
+      regionCode: 'TW',
+      locationBias: { rectangle: { low: { latitude: 24.9, longitude: 121.4 }, high: { latitude: 25.2, longitude: 121.75 } } },
+    }),
+  });
   const d = await r.json();
-  if (d.results?.length) {
-    const { lat, lng } = d.results[0].geometry.location;
-    return { location: { latLng: { latitude: lat, longitude: lng } } };
+  const place = d.places?.[0];
+  if (!place?.location) return null;
+  return { lat: place.location.latitude, lng: place.location.longitude, formattedAddress: place.formattedAddress || '' };
+}
+
+// 查過的店存在這裡，同一次瀏覽（重新整理會清空）不重複打 API——calcRoute／renderMap 共用。
+const geocodeCache_ = {};
+
+// 回傳 { lat, lng, method: 'coord'|'address'|'name', warning: string|null }。
+// lat/lng 為 null 代表這家店這次定位失敗（超出範圍或查無結果），呼叫端要跳過、不要拿去算路線/畫地圖。
+async function resolveStoreLocation_(id, name) {
+  if (geocodeCache_[id]) return geocodeCache_[id];
+
+  const ph = (allPharmaciesCache || []).find(p => p.id === id);
+  // ① 客戶表座標：直接信任
+  if (ph?.lat && ph?.lng) {
+    const result = { lat: ph.lat, lng: ph.lng, method: 'coord', warning: null };
+    geocodeCache_[id] = result;
+    return result;
   }
-  return { address: query + ' 台灣' };
+
+  // ② 地址：客戶表 or planData.recommended（新店項目）哪裡有地址就用哪裡
+  const rec = (planData?.recommended || []).find(item => item.id === id);
+  let address = ph?.address || rec?.address || '';
+  const city = ph?.city || rec?.city || '';
+  const district = ph?.district || rec?.district || '';
+  if (address && city && !address.startsWith(city)) {
+    address = city + district + address; // 地址開頭沒有縣市，自動補上
+  }
+  if (address) {
+    const geo = await geocodeQuery_(address);
+    if (geo && inServiceArea_(geo.lat, geo.lng)) {
+      const result = { lat: geo.lat, lng: geo.lng, method: 'address', warning: null };
+      geocodeCache_[id] = result;
+      return result;
+    }
+    if (geo) {
+      // 地址查到了，但結果超出服務範圍——地址本身可能有問題，不要再退回去用店名猜（那正是原本
+      // 誤查到外縣市同名店的那條路），直接標可疑。
+      const result = {
+        lat: null, lng: null, method: 'address',
+        warning: `⚠ 定位可疑：${name}（查到${extractCityFromAddress_(geo.formattedAddress)}），請確認地址`,
+      };
+      geocodeCache_[id] = result;
+      return result;
+    }
+    // 地址完全查無結果（可能地址打錯/不完整），才退到用店名試最後一次
+  }
+
+  // ③ 店名
+  const geo = await geocodeQuery_(name + ' 台灣');
+  if (geo && inServiceArea_(geo.lat, geo.lng)) {
+    const result = { lat: geo.lat, lng: geo.lng, method: 'name', warning: null };
+    geocodeCache_[id] = result;
+    return result;
+  }
+  const result = {
+    lat: null, lng: null, method: 'name',
+    warning: geo
+      ? `⚠ 定位可疑：${name}（查到${extractCityFromAddress_(geo.formattedAddress)}），請確認地址`
+      : `⚠ 定位可疑：${name}（查無結果），請確認地址`,
+  };
+  geocodeCache_[id] = result;
+  return result;
 }
 
 async function calcRoute() {
   const btn = document.getElementById('btn-calc-route');
   const resultEl = document.getElementById('route-root');
-  const stops = [...anchors.map(a => ({ id: a.id, name: a.name, isAnchor: true })),
+  const allStops = [...anchors.map(a => ({ id: a.id, name: a.name, isAnchor: true })),
     ...(planData?.recommended || []).filter(item => selectedCol2Ids.has(item.id)).map(item => ({ id: item.id, name: item.name, isAnchor: false }))];
-  if (!stops.length) { alert('第①②欄還沒有選任何店家'); return; }
+  if (!allStops.length) { alert('第①②欄還沒有選任何店家'); return; }
 
   btn.disabled = true; btn.textContent = '計算中…';
   resultEl.innerHTML = '<div class="empty-hint">計算中…</div>';
   document.getElementById('btn-confirm-route').style.display = 'none';
   try {
-    const pharmaciesList = await loadAllPharmacies();
-    const byId = {}; pharmaciesList.forEach(p => { byId[p.id] = p; });
+    await loadAllPharmacies(); // 確保 allPharmaciesCache 已載好，resolveStoreLocation_ 才查得到客戶表座標/地址
 
-    const intermediates = await Promise.all(stops.map(s => {
-      const ph = byId[s.id];
-      if (ph?.lat && ph?.lng) return Promise.resolve({ location: { latLng: { latitude: ph.lat, longitude: ph.lng } } });
-      if (ph?.address) return Promise.resolve({ address: ph.address });
-      return geocodeStore_(s.name);
-    }));
+    // 統一定位邏輯（見 resolveStoreLocation_ 註解）：定位失敗（超出服務範圍或查無結果）的站不送進
+    // Routes API 算路線，改收進 warnings 顯示紅字提示，不讓一家店定位錯誤拖垮整條路線的計算。
+    const locations = await Promise.all(allStops.map(s => resolveStoreLocation_(s.id, s.name)));
+    const warnings = [];
+    const stops = [];
+    allStops.forEach((s, i) => {
+      const loc = locations[i];
+      if (loc.lat && loc.lng) stops.push({ ...s, loc });
+      else if (loc.warning) warnings.push(loc.warning);
+    });
+    if (!stops.length) throw new Error('所有站點都定位失敗，無法計算路線');
+
+    const intermediates = stops.map(s => ({ location: { latLng: { latitude: s.loc.lat, longitude: s.loc.lng } } }));
 
     const routeResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
@@ -1211,9 +1332,15 @@ async function calcRoute() {
     const lastLegMin = legs.length ? parseInt(legs[legs.length - 1]?.duration || '0') / 60 : 0;
     const homeArrival = arrivalTimes.length ? arrivalTimes[arrivalTimes.length - 1] + 30 + Math.round(lastLegMin) : cumMin;
 
-    window._confirmedRoute = reordered.map((s, i) => ({ id: s.id, name: s.name, isAnchor: s.isAnchor, seq: i + 1, arrival: arrivalTimes[i] || null }));
+    window._confirmedRoute = reordered.map((s, i) => ({
+      id: s.id, name: s.name, isAnchor: s.isAnchor, seq: i + 1, arrival: arrivalTimes[i] || null,
+      locateMethod: s.loc.method, // 'coord'｜'address'｜'name'，routeListHtml() 用來顯示小字
+    }));
 
-    resultEl.innerHTML = routeListHtml(window._confirmedRoute) +
+    const warningHtml = warnings.length
+      ? `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`
+      : '';
+    resultEl.innerHTML = warningHtml + routeListHtml(window._confirmedRoute) +
       `<div class="route-summary">共 ${reordered.length} 站・${totalKm} km</div>`;
     renderMapRoutePanel();
     if (viewMode === 'map') renderMap();
