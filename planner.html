@@ -1199,6 +1199,11 @@ function extractCityFromAddress_(address) {
   const m = String(address || '').match(/[一-龥]{2,3}[縣市]/);
   return m ? m[0] : '不明縣市';
 }
+// 「臺北市」(異體字) vs 「台北市」視為同一個，判斷地址開頭是否已經有縣市時要先正規化，
+// 不然會把「臺北市…」誤判成沒有縣市，又重複補一次「台北市」上去。
+function normalizeCityChar_(s) {
+  return String(s || '').replace(/臺/g, '台');
+}
 // 查地址/店名的座標，用 Places API (New) 的 Text Search，不是 Geocoding API——2026-11-04 實測
 // 發現這把 GMAPS_KEY 設了 HTTP referrer 限制，Geocoding API／舊版 Places API 這類「伺服器端」
 // API 一律拒絕 referrer 限制的 key（Google 平台規則，跟是誰呼叫、有沒有送 Referer header 都
@@ -1231,25 +1236,41 @@ async function geocodeQuery_(query) {
 // 查過的店存在這裡，同一次瀏覽（重新整理會清空）不重複打 API——calcRoute／renderMap 共用。
 const geocodeCache_ = {};
 
+// 新店定位查到之後存回 Worker（geo:<id> KV，不設過期），下次 /api/plan 會直接附上 lat/lng，
+// 地圖模式就不用每次重新整理都重打 Places API（每日上限 300 次）。失敗（例如剛好超過額度）
+// 不影響這次畫面，記個 console.warn 就好，下次還是會再查一次。不等它完成（fire-and-forget）。
+function saveGeoToServer_(id, address, lat, lng) {
+  post('/api/geo', { id, address: address || '', lat, lng }).catch(e => {
+    console.warn('/api/geo 存檔失敗（不影響這次畫面，下次會再查一次）', id, e);
+  });
+}
+
 // 回傳 { lat, lng, method: 'coord'|'address'|'name', warning: string|null }。
 // lat/lng 為 null 代表這家店這次定位失敗（超出範圍或查無結果），呼叫端要跳過、不要拿去算路線/畫地圖。
 async function resolveStoreLocation_(id, name) {
   if (geocodeCache_[id]) return geocodeCache_[id];
 
   const ph = (allPharmaciesCache || []).find(p => p.id === id);
-  // ① 客戶表座標：直接信任
+  const rec = (planData?.recommended || []).find(item => item.id === id);
+
+  // ① 客戶表座標，或 /api/plan 已經附上的新店座標（後端 geo:<id> 永久快取）：直接信任
   if (ph?.lat && ph?.lng) {
     const result = { lat: ph.lat, lng: ph.lng, method: 'coord', warning: null };
     geocodeCache_[id] = result;
     return result;
   }
+  if (rec?.lat && rec?.lng) {
+    const result = { lat: rec.lat, lng: rec.lng, method: 'coord', warning: null };
+    geocodeCache_[id] = result;
+    return result;
+  }
 
   // ② 地址：客戶表 or planData.recommended（新店項目）哪裡有地址就用哪裡
-  const rec = (planData?.recommended || []).find(item => item.id === id);
-  let address = ph?.address || rec?.address || '';
+  const originalAddress = ph?.address || rec?.address || '';
+  let address = originalAddress;
   const city = ph?.city || rec?.city || '';
   const district = ph?.district || rec?.district || '';
-  if (address && city && !address.startsWith(city)) {
+  if (address && city && !normalizeCityChar_(address).startsWith(normalizeCityChar_(city))) {
     address = city + district + address; // 地址開頭沒有縣市，自動補上
   }
   if (address) {
@@ -1257,11 +1278,12 @@ async function resolveStoreLocation_(id, name) {
     if (geo && inServiceArea_(geo.lat, geo.lng)) {
       const result = { lat: geo.lat, lng: geo.lng, method: 'address', warning: null };
       geocodeCache_[id] = result;
+      saveGeoToServer_(id, originalAddress, geo.lat, geo.lng);
       return result;
     }
     if (geo) {
       // 地址查到了，但結果超出服務範圍——地址本身可能有問題，不要再退回去用店名猜（那正是原本
-      // 誤查到外縣市同名店的那條路），直接標可疑。
+      // 誤查到外縣市同名店的那條路），直接標可疑。可疑的不存進永久快取，下次還是會再查一次。
       const result = {
         lat: null, lng: null, method: 'address',
         warning: `⚠ 定位可疑：${name}（查到${extractCityFromAddress_(geo.formattedAddress)}），請確認地址`,
@@ -1277,6 +1299,7 @@ async function resolveStoreLocation_(id, name) {
   if (geo && inServiceArea_(geo.lat, geo.lng)) {
     const result = { lat: geo.lat, lng: geo.lng, method: 'name', warning: null };
     geocodeCache_[id] = result;
+    saveGeoToServer_(id, originalAddress, geo.lat, geo.lng);
     return result;
   }
   const result = {
@@ -1285,7 +1308,7 @@ async function resolveStoreLocation_(id, name) {
       ? `⚠ 定位可疑：${name}（查到${extractCityFromAddress_(geo.formattedAddress)}），請確認地址`
       : `⚠ 定位可疑：${name}（查無結果），請確認地址`,
   };
-  geocodeCache_[id] = result;
+  geocodeCache_[id] = result; // 查無結果／可疑都不存進永久快取
   return result;
 }
 

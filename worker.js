@@ -297,6 +297,11 @@ export default {
         return await handleMonthOverview(request, env, ctx);
       }
 
+      // ★ 2026-11-04：新店定位永久快取（地圖模式用，避免每次重新整理都重打 Places API）
+      if (path === '/api/geo' && request.method === 'POST') {
+        return await handleSaveGeo(request, env);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -2661,6 +2666,23 @@ async function handlePlannerPlan(request, env, ctx) {
     });
   });
 
+  // 新店定位永久快取（見 handleSaveGeo 註解）：查 geo:<id>，地址跟目前這筆資料的地址一樣才附上
+  // lat/lng——地址不一樣（例如業務把地址改對了）就當作沒有記錄，讓前端 resolveStoreLocation_()
+  // 重新查一次。地址比對前先把「臺」正規化成「台」，不然同義異體字會被誤判成「地址改過」。
+  if (env.TODOS_KV) {
+    const newStoreItems = list.filter(item => item.type === 'new-store');
+    const geoEntries = await Promise.all(
+      newStoreItems.map(item => env.TODOS_KV.get(`geo:${item.id}`, 'json').catch(() => null))
+    );
+    newStoreItems.forEach((item, i) => {
+      const geo = geoEntries[i];
+      if (!geo) return;
+      if (normalizeCityChar_(geo.address || '') !== normalizeCityChar_(item.address || '')) return;
+      item.lat = geo.lat;
+      item.lng = geo.lng;
+    });
+  }
+
   // 每個項目標上屬於哪一類分區（A1「今天可以跑的區」用，2026-11-02）：前端「選這區」要知道
   // 這個區的新店有哪幾家，直接讀這個欄位去篩，不用在前端另外複製一份分區比對邏輯。
   list.forEach(item => {
@@ -2722,6 +2744,44 @@ async function handleSavePlan(request, env) {
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
   await env.TODOS_KV.put(`plan:${date}`, JSON.stringify({ anchors: anchors || [], route: route || null, savedAt: new Date().toISOString() }));
+  return json({ ok: true });
+}
+
+// ============================================================
+// 新店定位永久快取（2026-11-04）：地圖模式每次重新整理都會對沒有 lat/lng 的新店打一次 Places API
+// (New)，這把 key 每日上限 300 次，很快會打爆。前端 resolveStoreLocation_() 查到座標之後呼叫這支
+// 存進 KV（key: geo:<店家id>，不設過期），下次 /api/plan 回傳同一家新店時直接附上 lat/lng，
+// 前端就不用再查。只接受服務範圍內的座標（跟 planner.html 的 SERVICE_AREA_BOUNDS_ 同一組數字），
+// 範圍外直接拒絕——這不是試算表/GAS 寫入，只是 KV 快取，不需要另外的寫入金鑰（沿用這個 Worker
+// 其他直接寫 KV 的端點，例如 /calendar-plan、/api/plan POST，本來就沒有 token 機制，用資料本身的
+// 驗證把關；這裡用範圍檢查）。
+const GEO_CACHE_BOUNDS_ = { minLat: 24.6, maxLat: 25.35, minLng: 120.9, maxLng: 122.0 };
+// 「臺北市」(異體字) vs 「台北市」比地址字串用，跟 planner.html 同名函式邏輯一致。
+function normalizeCityChar_(s) {
+  return String(s || '').replace(/臺/g, '台');
+}
+async function handleSaveGeo(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: '請求格式錯誤' }, 400);
+  }
+  const { id, address, lat, lng } = body || {};
+  if (!id || typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+    return json({ error: '缺少必要欄位（id/lat/lng）' }, 400);
+  }
+  if (lat < GEO_CACHE_BOUNDS_.minLat || lat > GEO_CACHE_BOUNDS_.maxLat ||
+      lng < GEO_CACHE_BOUNDS_.minLng || lng > GEO_CACHE_BOUNDS_.maxLng) {
+    return json({ error: '座標超出服務範圍，拒絕儲存' }, 400);
+  }
+  if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
+  try {
+    await env.TODOS_KV.put(`geo:${id}`, JSON.stringify({ address: address || '', lat, lng, savedAt: Date.now() }));
+  } catch (e) {
+    console.warn('/api/geo 寫入 KV 失敗', id, e && e.message || e);
+    return json({ error: 'KV 寫入失敗' }, 500);
+  }
   return json({ ok: true });
 }
 
