@@ -103,6 +103,9 @@
   }
   .region-card-btn:hover { background: var(--sr-bg-subtle); }
   .region-card.empty { opacity: 0.5; }
+  .region-card.selected { border: 1px solid var(--sr-primary); background: var(--sr-primary-tint); }
+  .region-card-btn.selected { background: var(--sr-primary); border-color: var(--sr-primary); color: var(--sr-on-dark); }
+  .region-card-btn.selected:hover { background: var(--sr-primary-hover); }
 
   /* ---------- 篩選膠囊（DESIGN.md 2.4） ---------- */
   .filter-pills { display: flex; gap: var(--sr-space-3); margin-bottom: var(--sr-space-6); }
@@ -509,6 +512,13 @@ function gvizDateToIso(s) {
   const d = new Date(String(s).replace(/\//g, '-'));
   return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// 2026-11-05：待追蹤期限顯示用「M/D」不是完整 ISO——跟 weekly.html/followups.html/funnel.html
+// 的 dedupDeadlineLabel_ 同一套做法（故意複製，這個檔案沒載 planner-shared.js）。
+function deadlineMdLabel_(raw) {
+  const iso = gvizDateToIso(raw) || raw;
+  const d = new Date(String(iso).replace(/\//g, '-') + 'T00:00:00');
+  return isNaN(d) ? String(raw) : `${d.getMonth() + 1}/${d.getDate()}`;
+}
 
 // 2026-10-28：任何會寫入資料的按鈕都要經過這裡——按下立刻 disabled + 改文字，避免使用者看不到反應
 // 連點好幾次（實測踩到：A8 新增待追蹤連點5次，因為按鈕沒變化，以為沒反應，結果建了5筆一樣的資料）。
@@ -625,6 +635,11 @@ document.body.addEventListener('drop', (e) => {
 let planData = null;       // /api/plan 的完整回應
 let anchors = [];          // 第①欄目前的錨點清單（系統自動＋手動加入的，含寄賣/對帳「加入今天」移過來的）
 let selectedCol2Ids = new Set(); // 第②欄目前勾選、要排進路線的店家 id
+// 2026-11-05「選這區」重做：一次只能選一區，選取時把這區的新店/前5家客戶自動勾進②（不再加進①）。
+// regionAutoCheckedIds 記錄「因為選這區而自動勾」的 id，取消選區只取消這些——使用者自己手動碰過
+// 的勾選（不管是勾或取消）一律從這個 Set 移除（見 toggleCol2），之後取消選區就不會動到它。
+let selectedRegionKey = null;
+let regionAutoCheckedIds = new Set();
 
 function anchorIds() { return new Set(anchors.map(a => a.id)); }
 
@@ -745,6 +760,7 @@ function toggleGroupExpand(groupKey) {
 
 function setFilterMode(mode) {
   if (mode === 'radius' && !anchors.length) return; // 沒有錨點時這顆膠囊是灰的，點了也不動作
+  if (mode === 'region' && !selectedRegionKey) return; // 沒選區時這顆膠囊不存在，防禦性擋一下
   filterMode = mode;
   renderRecommend();
   if (viewMode === 'map') renderMap();
@@ -756,10 +772,13 @@ function renderRecommend() {
   const excludeIds = anchorIds();
   let list = (planData.recommended || []).filter(item => !excludeIds.has(item.id));
   if (filterMode === 'radius') list = list.filter(item => withinAnchorRadius(item.id));
+  else if (filterMode === 'region' && selectedRegionKey) list = list.filter(item => item.region === selectedRegionKey);
 
+  const regionGroup = selectedRegionKey ? (planData.todayRegions || []).find(g => g.key === selectedRegionKey) : null;
   const pillsHtml = `<div class="filter-pills">
     <button class="filter-pill ${filterMode === 'all' ? 'active' : ''}" data-action="set-filter-mode" data-mode="all">全部</button>
     <button class="filter-pill ${filterMode === 'radius' ? 'active' : ''}" ${anchors.length ? '' : 'disabled'} data-action="set-filter-mode" data-mode="radius">錨點 ${RADIUS_KM} 公里內</button>
+    ${selectedRegionKey ? `<button class="filter-pill ${filterMode === 'region' ? 'active' : ''}" data-action="set-filter-mode" data-mode="region">${escapeHtml(regionGroup?.label || selectedRegionKey)}</button>` : ''}
   </div>`;
 
   if (!list.length) { root.innerHTML = pillsHtml + '<div class="empty-hint">沒有符合條件的推薦店家</div>'; return; }
@@ -774,8 +793,10 @@ function renderRecommend() {
 }
 
 // ══════════════════════════════
-// 今天可以跑的區（2026-11-02，SPEC/docs/PROPOSAL-today-region.md）
+// 今天可以跑的區（2026-11-02，SPEC/docs/PROPOSAL-today-region.md；2026-11-05 改版）
 // 系統不自動選區、不決定日期，純粹幫忙快速看完每區概況，由使用者自己判斷選哪一區。
+// 2026-11-05：一次只能選一區，按下變「已選」狀態，再按一次取消；選取時自動把這區的新店全部、
+// 正式客戶依②排序取倍數≥1的前5家勾進②（不再加進①），規則擋住的／已經在①的不算、不勾。
 // ══════════════════════════════
 function renderRegionOverview() {
   const root = document.getElementById('region-overview-root');
@@ -784,30 +805,68 @@ function renderRegionOverview() {
   if (!groups.length) { root.innerHTML = '<div class="empty-hint">沒有資料</div>'; return; }
   root.innerHTML = groups.map(g => {
     const isEmpty = !g.newStoreCount && !g.customerDueCount && !g.deliveryCount;
+    const isSelected = selectedRegionKey === g.key;
     const minutesText = g.estimateMinutes === null ? '' : `車程約 ${g.estimateMinutes} 分鐘（直線距離估算，僅供參考）`;
-    return `<div class="region-card ${isEmpty ? 'empty' : ''}">
+    return `<div class="region-card ${isEmpty ? 'empty' : ''} ${isSelected ? 'selected' : ''}">
       <div class="region-card-main">
         <div class="region-card-label">${escapeHtml(g.label)}</div>
         <div class="region-card-stats">新店 ${g.newStoreCount} 家${g.maxRatio ? '（最高倍數 ' + g.maxRatio + '）' : ''}　送貨 ${g.deliveryCount} 家　客戶該去 ${g.customerDueCount} 家</div>
         <div class="region-card-minutes">${escapeHtml(minutesText)}</div>
       </div>
-      <button class="region-card-btn" data-action="pick-region" data-key="${escapeHtml(g.key)}" ${g.newStoreCount ? '' : 'disabled title="這區目前沒有新店候選"'}>選這區</button>
+      <button class="region-card-btn ${isSelected ? 'selected' : ''}" data-action="pick-region" data-key="${escapeHtml(g.key)}">${isSelected ? '已選 ✓' : '選這區'}</button>
     </div>`;
   }).join('');
 }
 
-// 「選這區」：把這個分區的新店候選加入今天一定要去（送貨本來就不分區自動加進來了，客戶該去
-// 家數留給使用者自己在②欄挑，不強制整批加入——避免一次塞進太多店）。
+// 取消目前選區時，只取消「因為選這區而自動勾」的 id（regionAutoCheckedIds），使用者自己手動
+// 勾/取消過的（不管是不是同一批店）已經從這個 Set 移除（見 toggleCol2），不會被這裡動到。
+function undoRegionAutoCheck_() {
+  regionAutoCheckedIds.forEach(id => selectedCol2Ids.delete(id));
+  regionAutoCheckedIds.clear();
+}
+
 async function pickRegion(key) {
-  const items = (planData.recommended || []).filter(x => x.type === 'new-store' && x.region === key);
-  for (const item of items) {
-    await addAnchor({ id: item.id, name: item.name, source: '今天可以跑的區', item: '新店開發', deadline: null });
+  if (selectedRegionKey === key) {
+    undoRegionAutoCheck_();
+    selectedRegionKey = null;
+    if (filterMode === 'region') filterMode = 'all';
+    renderRegionOverview();
+    renderRecommend();
+    if (viewMode === 'map') renderMap();
+    await syncTodayList_();
+    toast('已取消選區');
+    return;
   }
-  toast(`已加入「${key}」的新店候選 ${items.length} 家`);
+  if (selectedRegionKey) undoRegionAutoCheck_(); // 一次一區：切到別區前先復原前一區的自動勾選
+
+  selectedRegionKey = key;
+  filterMode = 'region';
+  const anchorIdSet = anchorIds();
+  const items = (planData.recommended || []).filter(x => x.region === key);
+  const notBlockedOrAnchored = item => !anchorIdSet.has(item.id) && item.ruleStatus?.status !== '擋住';
+
+  const newStoreCandidates = items.filter(x => x.type === 'new-store' && notBlockedOrAnchored(x));
+  // 「依②排序」＝ planData.recommended 原本的順序（後端已經依倍數≥1優先、組內 score 遞減排好），
+  // 這裡用 filter 不會打亂順序，直接取前5家即可，不用再自己排一次。
+  const customerCandidates = items.filter(x => x.type === 'customer' && x.ratio >= 1 && notBlockedOrAnchored(x)).slice(0, 5);
+
+  newStoreCandidates.forEach(item => {
+    if (!selectedCol2Ids.has(item.id)) { selectedCol2Ids.add(item.id); regionAutoCheckedIds.add(item.id); }
+  });
+  customerCandidates.forEach(item => {
+    if (!selectedCol2Ids.has(item.id)) { selectedCol2Ids.add(item.id); regionAutoCheckedIds.add(item.id); }
+  });
+
+  renderRegionOverview();
+  renderRecommend();
+  if (viewMode === 'map') renderMap();
+  await syncTodayList_();
+  toast(`已選 ${key}：勾了 ${customerCandidates.length} 家客戶、${newStoreCandidates.length} 家新店，可在②調整`);
 }
 
 function toggleCol2(id) {
   if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
+  regionAutoCheckedIds.delete(id); // 使用者自己動過這顆，之後取消選區不會再動它
   renderRecommend();
   if (viewMode === 'map') renderMap();
   syncTodayList_();
@@ -882,7 +941,7 @@ function renderAnchors() {
         <span class="anchor-name">${escapeHtml(a.name)}</span>
         <span class="anchor-type">${escapeHtml(anchorTypeLabel(a))}</span>
       </div>
-      <div class="anchor-line2">${escapeHtml(anchorAreaNote(a))}${a.deadline ? '　期限：' + escapeHtml(a.deadline) : ''}</div>
+      <div class="anchor-line2">${escapeHtml(anchorAreaNote(a))}${a.deadline ? '　期限：' + escapeHtml(deadlineMdLabel_(a.deadline)) : ''}</div>
       <div class="anchor-line3">來源：${escapeHtml(a.item || a.source || '手動')}</div>
       ${dadReminderHtml(a.id)}
     </div>`).join('');
@@ -1554,8 +1613,10 @@ function reorderTodayListManually_(targetId) {
   orderMode = 'manual';
   lastRouteLegMinutes = null;
   lastRouteResolvedIds = null;
-  todayList.forEach(row => { row.arrival = null; });
-  renderTodayList_();
+  // 2026-11-05 修正：重算期間（debounce 1 秒＋Routes API 回應，大約1~4秒）「預估收工」不能停在
+  // 拖曳前的舊數字——recomputeTodayListTimes_() 在 lastRouteLegMinutes 是 null 時會把
+  // #finish-time-value 清成「—」，原本這裡只呼叫 renderTodayList_()，沒有同步清掉那個欄位。
+  recomputeTodayListTimes_();
   scheduleManualRecalc_();
 }
 function scheduleManualRecalc_() {

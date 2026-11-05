@@ -207,3 +207,14 @@ a:hover { color: var(--sr-primary-hover); }
   .nav-divider { display: none; }
   .nav-manage-label { display: block; padding: var(--sr-space-4) var(--sr-space-6) 0; }
 }
+
+/* 全站共用：disabled 按鈕要看得出來是停用的（灰底灰字＋not-allowed 游標），不要只靠半透明
+   opacity 讓人誤以為是正常可按的按鈕。各頁個別按鈕類別（例如 .btn-calc-route:disabled）的既有
+   規則 specificity 比這條高，會照常覆蓋這裡的預設值，這條只補那些目前完全沒有停用樣式的按鈕。 */
+button:disabled {
+  background: var(--sr-bg-subtle) !important;
+  color: var(--sr-ink-3) !important;
+  border-color: var(--sr-line) !important;
+  cursor: not-allowed !important;
+  opacity: 1;
+}
