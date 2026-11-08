@@ -78,6 +78,7 @@
   }
   .step-label { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
   .tl-save-status { margin-left: auto; font-size: var(--sr-text-2xs); color: var(--sr-ink-3); font-weight: normal; }
+  .tl-save-status.dirty { color: var(--sr-ink-2); font-weight: var(--sr-weight-bold); }
   .tl-save-status.error { color: var(--sr-danger); font-weight: var(--sr-weight-bold); cursor: pointer; text-decoration: underline; }
 
   .empty-hint {
@@ -479,7 +480,7 @@ function initHeader() {
     const ds = document.getElementById('plan-date-input').value;
     const url2 = new URL(location.href);
     url2.searchParams.set('date', ds);
-    location.href = url2.toString();
+    flushBeforeNavigate_().then(() => { location.href = url2.toString(); });
   });
 }
 
@@ -908,7 +909,7 @@ function renderMiniCal() {
 function goToDate(ds) {
   const url = new URL(location.href);
   url.searchParams.set('date', ds);
-  location.href = url.toString();
+  flushBeforeNavigate_().then(() => { location.href = url.toString(); });
 }
 
 function anchorTypeLabel(a) {
@@ -1261,6 +1262,13 @@ let lastRouteStopIds = null;    // 算出 lastRouteLegMinutes 時的站點 id �
 let dayConfirmed = false;        // 整天的狀態（不是每列各自的），按「確定今天的行程」才變 true
 let lastTodayPlanUpdatedAt_ = null; // 下次存檔要帶的 clientUpdatedAt 基準值（衝突判斷用）
 let todaySaveTimer_ = null;      // debounce 2 秒用
+// 2026-11-08 使用者實測抓到：debounce 2秒＋Worker↔GAS來回約3秒，這段時間內切頁（點導覽列/換日期/
+// 切到背景分頁/關頁）那次變更就遺失了（例如①按✕移除某店後立刻切到本週，重新整理後那家店又回來）。
+// todayPlanDirty_ 記「有沒有還沒送出的變更」，todaySavePromise_ 記「目前這次存檔的 promise」——
+// 離開前的各種時機（導覽列/換日期/visibilitychange/pagehide）都呼叫 flushTodayPlanSave_()
+// 立刻送出，不等 debounce；已經有一次存檔在跑時沿用同一個 promise，不疊加送出第二次。
+let todayPlanDirty_ = false;
+let todaySavePromise_ = null;
 // 還原讀到的資料時先關掉自動存檔，避免「剛讀進來」就立刻存一次——用計數器不是布林值，因為
 // restoreTodayPlanState_() 會呼叫 applyTodayPlanRows_()，兩層都各自管一次「關掉/恢復」，
 // 如果用布林值，內層那支自己的 finally 一結束就會把布林值改回 false，等於還沒輪到外層結束，
@@ -1612,30 +1620,60 @@ function renderTodaySaveStatus_(state) {
   const el = document.getElementById('today-save-status');
   if (!el) return;
   el.classList.toggle('error', state === 'error');
-  if (state === 'pending' || state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
+  el.classList.toggle('dirty', state === 'dirty');
+  if (state === 'dirty') { el.textContent = '未存檔'; el.onclick = null; }
+  else if (state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
   else if (state === 'saved') {
     const now = new Date();
     el.textContent = `已存檔 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     el.onclick = null;
   } else if (state === 'conflict') { el.textContent = '外勤模式有更新，已載入最新版本'; el.onclick = null; }
-  else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => saveTodayPlanNow_(); }
+  else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => flushTodayPlanSave_(); }
 }
 
 function scheduleTodayPlanSave_() {
+  todayPlanDirty_ = true;
   clearTimeout(todaySaveTimer_);
-  renderTodaySaveStatus_('pending');
-  todaySaveTimer_ = setTimeout(() => { saveTodayPlanNow_(); }, 2000);
+  renderTodaySaveStatus_('dirty');
+  todaySaveTimer_ = setTimeout(() => { flushTodayPlanSave_(); }, 2000);
 }
 
-async function saveTodayPlanNow_() {
+// 2026-11-08：切頁/換日期/visibilitychange(hidden)/pagehide 前都要呼叫這支，立刻送出還沒存的
+// 變更，不等 2 秒 debounce——實測抓到：①按✕移除某店後立刻切到本週，debounce 還沒跑完那次移除
+// 就遺失了。已經有一次存檔在跑時直接回傳同一個 promise，不疊加送出第二次（疊加送出會造成兩次
+// 存檔用不同的 clientUpdatedAt 互相衝突，見 syncTodayList_ 併發問題的教訓）。
+// opts.useKeepalive：pagehide/visibilitychange(hidden) 這類「頁面可能馬上被砍掉」的時機用，
+// fetch 用 keepalive:true 確保請求能在頁面卸載後繼續送完，但也因此沒辦法等/讀回應——送出後
+// 就把 dirty 清掉（已經盡力送出，不能無限期把 UI 卡在「未存檔」）。
+function flushTodayPlanSave_(opts) {
+  clearTimeout(todaySaveTimer_);
+  if (todaySavePromise_) return todaySavePromise_;
+  if (!todayPlanDirty_) return Promise.resolve();
+  todaySavePromise_ = saveTodayPlanNow_(opts).finally(() => { todaySavePromise_ = null; });
+  return todaySavePromise_;
+}
+
+async function saveTodayPlanNow_(opts) {
   clearTimeout(todaySaveTimer_);
   renderTodaySaveStatus_('saving');
+  const rows = todayList.map((row, i) => todayListRowToPayload_(row, i))
+    .concat(removedAnchorMarkers_.map(todayListRemovedRowPayload_));
+  const payload = { date: getPlanDate(), rows, clientUpdatedAt: lastTodayPlanUpdatedAt_ };
+  if (opts && opts.useKeepalive) {
+    try {
+      fetch(WORKER + '/api/today-plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), keepalive: true,
+      });
+    } catch (e) { console.warn('keepalive 存檔送出失敗', e); }
+    todayPlanDirty_ = false; // 頁面要離開了，沒辦法等回應確認成功，盡力送出後就不再視為未存檔
+    return;
+  }
   try {
-    const rows = todayList.map((row, i) => todayListRowToPayload_(row, i))
-      .concat(removedAnchorMarkers_.map(todayListRemovedRowPayload_));
-    const resp = await post('/api/today-plan', { date: getPlanDate(), rows, clientUpdatedAt: lastTodayPlanUpdatedAt_ });
+    const resp = await post('/api/today-plan', payload);
     if (resp.conflict) {
       await applyTodayPlanRows_(resp.rows || []);
+      todayPlanDirty_ = false;
       renderTodaySaveStatus_('conflict');
       toast('外勤模式有更新，已載入最新版本');
       return;
@@ -1644,12 +1682,41 @@ async function saveTodayPlanNow_() {
     // 時，post() 本身不會丟例外（HTTP 狀態是 200），這裡要自己判斷，不然會誤顯示「已存檔」。
     if (!resp.success) throw new Error(resp.error || '存檔失敗（伺服器回應沒有 success）');
     lastTodayPlanUpdatedAt_ = resp.updatedAt || lastTodayPlanUpdatedAt_;
+    todayPlanDirty_ = false;
     renderTodaySaveStatus_('saved');
   } catch (e) {
     console.error('今日行程存檔失敗', e);
-    renderTodaySaveStatus_('error');
+    renderTodaySaveStatus_('error'); // todayPlanDirty_ 保持 true，之後還會再試一次（點擊重試/下次切頁flush）
   }
 }
+
+// 點導覽列連結／換日期前呼叫：有未存變更就先 flush，最多等 5 秒；逾時或失敗都照常導覽
+// （留 console.warn），不能讓使用者被卡在原地動彈不得。
+async function flushBeforeNavigate_() {
+  if (!todayPlanDirty_ && !todaySavePromise_) return;
+  try {
+    await Promise.race([
+      flushTodayPlanSave_(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('存檔逾時(5秒)')), 5000)),
+    ]);
+  } catch (e) {
+    console.warn('切頁前存檔沒能在時限內完成，照常跳頁', e);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('#app-nav a[href]');
+  if (!a) return;
+  if (!todayPlanDirty_ && !todaySavePromise_) return; // 沒有要存的，讓連結照正常方式導覽
+  e.preventDefault();
+  const href = a.href;
+  flushBeforeNavigate_().then(() => { location.href = href; });
+}, true);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushTodayPlanSave_({ useKeepalive: true });
+});
+window.addEventListener('pagehide', () => { flushTodayPlanSave_({ useKeepalive: true }); });
 
 // 系統自動帶入的項目（送貨/待追蹤/本週排/寄賣對帳）被①的✕拿掉時記在這裡（見 removeTodayListRow_），
 // 下次存檔要把它們也送出去（狀態=移除），不然 GAS 整天覆蓋會把之前存的「移除」標記一起洗掉，
@@ -1735,6 +1802,14 @@ async function restoreTodayPlanState_(plan) {
     window._confirmedRoute = null;
     departMin = typeof plan.savedDepartMin === 'number' ? plan.savedDepartMin : START_MIN;
 
+    // 2026-11-27 使用者實測抓到：worker.js /api/plan 回的 anchors 已經正確排除「移除」標記的店，
+    // 但 loadPlan() 在這之前呼叫的 mergeWeeklyAnchors() 會直接從 /api/followups 重新抓「今天到期
+    // 的待追蹤」加進 anchors，完全不知道這家店剛被使用者用①的✕標記移除過——結果移除標記在
+    // 伺服器端是對的，syncTodayList_() 卻又因為 anchors 裡混進這筆而把它加回今日清單。這裡是
+    // 最後一道防線：不管是哪個來源把已移除的 id 混進 anchors，重建清單前都先剔除。
+    const removedIdSet_ = new Set((plan.todayPlanRemovedIds || []).map(m => m.storeId));
+    if (removedIdSet_.size) anchors = anchors.filter(a => !removedIdSet_.has(a.id));
+
     const removedAsRows = (plan.todayPlanRemovedIds || []).map(m => ({ ...m, status: '移除' }));
     await applyTodayPlanRows_([...(plan.todayPlanRows || []), ...removedAsRows]);
 
@@ -1759,7 +1834,8 @@ async function confirmTodayPlan() {
   const btn = document.getElementById('btn-confirm-route');
   await withBusy(btn, '存檔中…', async () => {
     dayConfirmed = true;
-    await saveTodayPlanNow_();
+    todayPlanDirty_ = true; // 確保走 flushTodayPlanSave_ 的單一在途存檔保護，不會跟debounce疊加送出
+    await flushTodayPlanSave_();
     toast('已確定今天的行程');
   });
 }
