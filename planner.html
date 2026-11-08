@@ -77,6 +77,8 @@
     font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); flex-shrink: 0;
   }
   .step-label { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
+  .tl-save-status { margin-left: auto; font-size: var(--sr-text-2xs); color: var(--sr-ink-3); font-weight: normal; }
+  .tl-save-status.error { color: var(--sr-danger); font-weight: var(--sr-weight-bold); cursor: pointer; text-decoration: underline; }
 
   .empty-hint {
     font-size: var(--sr-text-sm); color: var(--sr-ink-3);
@@ -374,7 +376,10 @@
 
   <div class="col col-3">
     <div class="col-body">
-      <div class="step-title"><span class="step-num">③</span><span class="step-label">今日清單</span></div>
+      <div class="step-title">
+        <span class="step-num">③</span><span class="step-label">今日清單</span>
+        <span id="today-save-status" class="tl-save-status"></span>
+      </div>
       <div id="today-list-summary" class="tl-summary"><div class="empty-hint">還沒有任何店家</div></div>
       <div class="tl-actions">
         <button class="btn-calc-route" id="btn-calc-route" onclick="calcRouteClicked_()">計算路線</button>
@@ -383,7 +388,7 @@
       </div>
       <div id="today-list-warnings"></div>
       <div id="today-list-root" style="margin-top:10px"><div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div></div>
-      <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmRoute()">確定，送到手機外勤模式</button>
+      <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmTodayPlan()">確定今天的行程</button>
     </div>
   </div>
 </div>
@@ -958,8 +963,10 @@ async function removeAnchor(id) {
   renderRecommend();
   renderSuggest();
   if (viewMode === 'map') renderMap();
+  // 2026-11-06：今日清單階段二之後，①的異動是透過 syncTodayList_() → renderTodayList_() →
+  // scheduleTodayPlanSave_() 存進「今日行程」表，不再呼叫 savePlanState()（那支現在存的是
+  // departMin/orderMode，跟這裡的異動無關）。
   await syncTodayList_();
-  await savePlanState();
   toast('已移除');
 }
 
@@ -971,7 +978,6 @@ async function addAnchor(a) {
   renderSuggest();
   if (viewMode === 'map') renderMap();
   await syncTodayList_();
-  await savePlanState();
   toast('已加入今天');
 }
 
@@ -1046,7 +1052,9 @@ async function pickManualAdd(p) {
 }
 
 // ══════════════════════════════
-// 存檔（KV）：anchors 或 route 任何變動都存一次，重新整理頁面能恢復
+// 存檔（KV plan:{date}）：這天的畫面設定——出發時間／順序模式。2026-11-06 今日清單階段二之後
+// anchors/route 不再存這裡，改存「今日行程」表（見 scheduleTodayPlanSave_／saveTodayPlanNow_），
+// 這支改名換血但保留同一個名字跟既有的 savingPlan/savePending 排隊機制，少改一處呼叫端。
 // ══════════════════════════════
 let savingPlan = false;
 let savePending = false; // 存檔中又有新的變動進來時，不要默默丟掉——記下來，這次存完立刻再存一次最新狀態
@@ -1054,7 +1062,7 @@ async function savePlanState() {
   if (savingPlan) { savePending = true; return; }
   savingPlan = true;
   try {
-    await post('/api/plan', { date: getPlanDate(), anchors, route: window._confirmedRoute || null });
+    await post('/api/plan', { date: getPlanDate(), departMin, orderMode });
   } catch (e) {
     console.error('存檔失敗', e);
     throw e;
@@ -1114,25 +1122,19 @@ async function loadPlan() {
     if (Array.isArray(plan.config?.visitPurposes) && plan.config.visitPurposes.length) {
       VISIT_PURPOSES = plan.config.visitPurposes; // 正本在 planner-config.js，API 讀得到就優先用這份
     }
-    anchors = planData.anchors || [];
-    await mergeWeeklyAnchors();
+    anchors = planData.anchors || []; // 伺服器已經把今日行程表存過的錨點類列合併回來（見 worker.js）
+    await mergeWeeklyAnchors(); // 再補上「存檔之後才新排進本週頁」的待追蹤，這支本來就會跳過已經在 anchors 裡的
     showDataTime_(plan.cachedAt, loadPlan);
     renderMiniCal();
     renderAnchors();
-    renderRecommend();
     renderSuggest();
     renderRegionOverview();
+    // 2026-11-06 今日清單階段二：②勾選（含選區自動勾）、拜訪目的、目的備註、手動停留分鐘、
+    // 拖曳後的順序、出發時間——全部從 planData.todayPlanRows／todayPlanRemovedIds（今日行程表）
+    // 跟 savedDepartMin／savedOrderMode（KV）還原，不再是空的（這是這次補的已知問題：今天頁
+    // 切到本週再回來，這些全部會遺失）。這支內部會呼叫 renderRecommend() 讓②勾選狀態畫出來。
+    await restoreTodayPlanState_(plan);
     if (viewMode === 'map') renderMap();
-    // 換日期/重新整理：今日清單整個重新合成。跟原本「按計算路線前都顯示空白提示」的行為一致——
-    // plan:{date} 存的 route 沒有附車程分鐘數，重開頁面後沒辦法不重打 Routes API 就還原到達時間，
-    // 所以跟原本 route-root 一樣，重新整理後要重新按一次「計算路線」才會有順序跟時間（不是退步，
-    // 是這次之前本來就沒做到的事，stage 1 規格也沒有要求要做這塊，不在這次範圍內）。
-    todayList = [];
-    orderMode = 'unordered';
-    lastRouteLegMinutes = null;
-    lastRouteTotalKm = null;
-    window._confirmedRoute = null;
-    await syncTodayList_();
   } catch (e) {
     document.getElementById('recommend-root').innerHTML =
       `<div class="empty-hint">載入失敗：${e.message}</div>`;
@@ -1254,6 +1256,20 @@ let lastRouteStopIds = null;    // 算出 lastRouteLegMinutes 時的站點 id �
                                  // 拼接）——①②欄變動把站點加進/移出清單後，跟這份不一樣就代表
                                  // lastRouteLegMinutes 已經過期，不能再拿來算時間，見 invalidateRouteIfStopsChanged_。
 
+// 今日清單階段二（2026-11-06，docs/今日清單_規格.md 第2節）：今日清單存進「今日行程」表，
+// 不再是純前端易失狀態——這幾個變數管「存檔」這件事。
+let dayConfirmed = false;        // 整天的狀態（不是每列各自的），按「確定今天的行程」才變 true
+let lastTodayPlanUpdatedAt_ = null; // 下次存檔要帶的 clientUpdatedAt 基準值（衝突判斷用）
+let todaySaveTimer_ = null;      // debounce 2 秒用
+// 還原讀到的資料時先關掉自動存檔，避免「剛讀進來」就立刻存一次——用計數器不是布林值，因為
+// restoreTodayPlanState_() 會呼叫 applyTodayPlanRows_()，兩層都各自管一次「關掉/恢復」，
+// 如果用布林值，內層那支自己的 finally 一結束就會把布林值改回 false，等於還沒輪到外層結束，
+// 自動存檔就已經被打開，外層剩下的程式碼（例如還原 orderMode 後的那次 renderTodayList_()）
+// 還是會誤觸發一次多餘的存檔。計數器只有真的回到 0 才算「完全沒有人要求關閉」。
+let suppressAutoSaveDepth_ = 0;
+function pushSuppressAutoSave_() { suppressAutoSaveDepth_++; }
+function popSuppressAutoSave_() { suppressAutoSaveDepth_ = Math.max(0, suppressAutoSaveDepth_ - 1); }
+
 // 站點集合（誰在今日清單裡）跟上次算路線時不一樣了，就讓「依路線順序」的時間資料整組失效，
 // 改回「未排序」並提示使用者重新按「計算路線」——寧可不顯示時間，也不要顯示用錯的站點組合算出來、
 // 看起來正常但其實不對的到達時間。
@@ -1271,9 +1287,9 @@ function invalidateRouteIfStopsChanged_() {
   lastRouteResolvedIds = null;
   lastRouteTotalKm = null;
   todayList.forEach(row => { row.arrival = null; });
-  if (!todayList.length) { orderMode = 'unordered'; return; }
-  if (orderMode === 'route') { orderMode = 'unordered'; return; }
-  scheduleManualRecalc_(); // orderMode === 'manual'：順序保留，debounce 後補新時間
+  if (!todayList.length) { orderMode = 'unordered'; savePlanState(); return; }
+  if (orderMode === 'route') { orderMode = 'unordered'; savePlanState(); return; }
+  scheduleManualRecalc_(); // orderMode === 'manual'：順序保留，debounce 後補新時間，orderMode 沒變不用存
 }
 
 function anchorSourceTag_(source) {
@@ -1417,7 +1433,20 @@ async function refreshTodayListRowMeta_(row) {
 // ①②欄只留一列（用店家代號去重，規格提到的「新開店家沒代號用地址判斷」在目前所有加入①②欄的
 // 路徑裡都一定會帶 id，沒有真的會發生的 id-less 情況，先不多寫一套用不到的分支；如果之後有新的
 // 「直接輸入店名/地址、完全不經過既有清單」的加入方式，要在這裡補上地址去重）。
-async function syncTodayList_() {
+//
+// 2026-11-08 修正：這支內部有好幾個 await（buildTodayListRow_/refreshTodayListRowMeta_），toggleCol2
+// 又是 fire-and-forget 呼叫（不 await，因為它自己不是 async），連續快速勾多個②欄 checkbox 時會疊出
+// 多個還在跑的 syncTodayList_() 同時讀寫同一份 todayList，互相蓋掉彼此的結果（實際症狀：拖曳/目的/
+// 備註/停留分鐘存檔後重新整理對不起來，而且同一次操作送出兩次內容不一致的存檔，GAS 的
+// clientUpdatedAt 衝突判斷因此被觸發）。改成用一條 Promise 佇列把所有呼叫序列化，不管呼叫端是否
+// await，同一時間永遠只有一個真正在跑，下一個等上一個完全做完才開始——呼叫端的寫法完全不用改。
+let syncTodayListQueue_ = Promise.resolve();
+function syncTodayList_() {
+  const run = syncTodayListQueue_.then(() => syncTodayListImpl_());
+  syncTodayListQueue_ = run.catch(e => console.error('syncTodayList_ 失敗（佇列繼續往下走）', e));
+  return run;
+}
+async function syncTodayListImpl_() {
   const desiredIds = new Set([...anchors.map(a => a.id), ...selectedCol2Ids]);
   todayList = todayList.filter(row => desiredIds.has(row.id));
 
@@ -1515,9 +1544,224 @@ function todayListRowHtml_(row, index) {
 function renderTodayList_() {
   renderTodayListSummary_();
   const root = document.getElementById('today-list-root');
-  if (!root) return;
-  if (!todayList.length) { root.innerHTML = '<div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div>'; return; }
-  root.innerHTML = todayList.map((row, i) => todayListRowHtml_(row, i)).join('');
+  const confirmBtn = document.getElementById('btn-confirm-route');
+  // 2026-11-06：「確定今天的行程」不綁計算路線成不成功——按下＝立即存檔並標這天已確定，
+  // 有清單就能按，不用先算過路線。
+  if (confirmBtn) confirmBtn.style.display = todayList.length ? '' : 'none';
+  if (root) {
+    if (!todayList.length) root.innerHTML = '<div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div>';
+    else root.innerHTML = todayList.map((row, i) => todayListRowHtml_(row, i)).join('');
+  }
+  // 2026-11-06：單一存檔觸發點——所有會改到今日清單內容的路徑最終都會呼叫 renderTodayList_()，
+  // 不用在每個改動的地方各自補一次「存檔」呼叫、容易漏掉。唯一要排除的是「剛從伺服器讀進來、
+  // 還原畫面」這個情境（restoreTodayPlanState_／applyTodayPlanRows_ 會用 pushSuppressAutoSave_
+  // 關掉），否則每次開頁都會立刻多打一次一模一樣的存檔請求。
+  if (suppressAutoSaveDepth_ === 0) scheduleTodayPlanSave_();
+}
+
+// ══════════════════════════════
+// 今日清單階段二：存進「今日行程」表（debounce 2 秒），不再是純前端易失狀態
+// ══════════════════════════════
+function parseHHMM_(s) {
+  const m = String(s || '').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+
+// 這一列在「今日行程」表要記成哪個「來源」（單一值，不是畫面上可複選的「類型」標籤）：
+// 在①（anchors）就用那個錨點自己的來源字串對應的類別；不然就看是不是「選這區」自動勾的。
+function todayListRowSource_(id) {
+  const anchor = anchors.find(a => a.id === id);
+  if (anchor) return anchorSourceTag_(anchor.source);
+  return regionAutoCheckedIds.has(id) ? '選區' : '第②欄';
+}
+// 金額只有寄賣/合約對帳有（跟 todayListBillingTotal_／buildAutoTask_ 同一套算法）；送貨目前沒有
+// 單日訂單金額可用（見 buildAutoTask_ 註解），留空不是漏填。
+function todayListRowAmount_(row) {
+  const rec = (planData?.recommended || []).find(x => x.id === row.id);
+  if (!rec) return '';
+  const cb = consignmentBadge(rec);
+  if (!cb.triggered) return '';
+  return rec.consignmentStaleCount > 0 ? (rec.consignmentStaleTotal || 0) : (rec.consignmentAllTotal || 0);
+}
+// 「其他」這個目的如果有自填文字，存成「其他:xxx」（docs/今日清單_規格.md B0 的格式），
+// 不是另外存一個獨立欄位——還原時 applyTodayPlanRows_ 會反過來拆解。
+function todayListRowToPayload_(row, index) {
+  const purposesOut = row.purposes.map(p => (p === '其他' && row.otherPurposeText) ? `其他:${row.otherPurposeText}` : p);
+  return {
+    seq: index + 1, storeId: row.id, name: row.name, address: row.address || '',
+    types: row.typeTags, purposes: purposesOut, purposeNote: row.purposeNote || '',
+    autoTask: row.autoTask || '', amount: todayListRowAmount_(row),
+    stayMin: effectiveStayMin_(row), stayManual: row.manualStayMin != null,
+    arrival: row.arrival != null ? fmtMin(row.arrival) : '',
+    source: todayListRowSource_(row.id),
+    confirmed: dayConfirmed, status: row.status || '待去', note: '',
+  };
+}
+// 「移除」標記列：被①的✕拿掉的系統自動項目，不是今日清單目前的一員，只帶最基本的欄位讓
+// GAS 整天覆蓋時不會把這個標記洗掉（見 removeTodayListRow_／removedAnchorMarkers_ 註解）。
+function todayListRemovedRowPayload_(m) {
+  return {
+    seq: '', storeId: m.storeId, name: m.name || '', address: '',
+    types: [], purposes: [], purposeNote: '', autoTask: '', amount: '',
+    stayMin: '', stayManual: false, arrival: '',
+    source: m.source || '錨點', confirmed: dayConfirmed, status: '移除', note: '',
+  };
+}
+
+function renderTodaySaveStatus_(state) {
+  const el = document.getElementById('today-save-status');
+  if (!el) return;
+  el.classList.toggle('error', state === 'error');
+  if (state === 'pending' || state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
+  else if (state === 'saved') {
+    const now = new Date();
+    el.textContent = `已存檔 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    el.onclick = null;
+  } else if (state === 'conflict') { el.textContent = '外勤模式有更新，已載入最新版本'; el.onclick = null; }
+  else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => saveTodayPlanNow_(); }
+}
+
+function scheduleTodayPlanSave_() {
+  clearTimeout(todaySaveTimer_);
+  renderTodaySaveStatus_('pending');
+  todaySaveTimer_ = setTimeout(() => { saveTodayPlanNow_(); }, 2000);
+}
+
+async function saveTodayPlanNow_() {
+  clearTimeout(todaySaveTimer_);
+  renderTodaySaveStatus_('saving');
+  try {
+    const rows = todayList.map((row, i) => todayListRowToPayload_(row, i))
+      .concat(removedAnchorMarkers_.map(todayListRemovedRowPayload_));
+    const resp = await post('/api/today-plan', { date: getPlanDate(), rows, clientUpdatedAt: lastTodayPlanUpdatedAt_ });
+    if (resp.conflict) {
+      await applyTodayPlanRows_(resp.rows || []);
+      renderTodaySaveStatus_('conflict');
+      toast('外勤模式有更新，已載入最新版本');
+      return;
+    }
+    // GAS/Worker 回 200 但內容是 {success:false,...} 或 {error:...}（例如 action 不認得、GAS 端拒絕寫入）
+    // 時，post() 本身不會丟例外（HTTP 狀態是 200），這裡要自己判斷，不然會誤顯示「已存檔」。
+    if (!resp.success) throw new Error(resp.error || '存檔失敗（伺服器回應沒有 success）');
+    lastTodayPlanUpdatedAt_ = resp.updatedAt || lastTodayPlanUpdatedAt_;
+    renderTodaySaveStatus_('saved');
+  } catch (e) {
+    console.error('今日行程存檔失敗', e);
+    renderTodaySaveStatus_('error');
+  }
+}
+
+// 系統自動帶入的項目（送貨/待追蹤/本週排/寄賣對帳）被①的✕拿掉時記在這裡（見 removeTodayListRow_），
+// 下次存檔要把它們也送出去（狀態=移除），不然 GAS 整天覆蓋會把之前存的「移除」標記一起洗掉，
+// 等於使用者按過的✕又在下次重新整理時復活。每次還原/衝突重整都會用伺服器的權威資料整組換新，
+// 不是累加——見 applyTodayPlanRows_。
+let removedAnchorMarkers_ = [];
+// 跟 worker.js 的 TODAY_PLAN_ANCHOR_SOURCES_、gas-backend/PlannerSetup.js 的
+// PLANNER_TODAY_PLAN_SOURCES 同一組「錨點類」來源值（沒有共用模組，三處各自維護同一份常數）。
+const TODAY_PLAN_ANCHOR_SOURCES_ = ['錨點', '送貨', '待追蹤', '本週排', '寄賣對帳'];
+
+// 把一組「今日行程」列（API 回來的英文鍵物件，不管是 /api/plan 的 todayPlanRows+
+// todayPlanRemovedIds、/api/today-plan 的 rows，還是存檔衝突回傳的 rows，三處欄名都一致）套回
+// 畫面狀態：selectedCol2Ids／regionAutoCheckedIds／todayList 每列的目的/備註/手動停留/到達時間/
+// 順序／removedAnchorMarkers_。跟 syncTodayList_() 不一樣的地方：這支是「用伺服器的資料蓋過
+// 畫面」（初次還原、衝突重新整理都是這個情境），不是「畫面變動後重新合成」。
+// allRows 可能混著狀態＝「移除」的列（衝突回傳就是整包都有）——這些不是活躍的今日清單項目，
+// 先濾掉再處理，另外收進 removedAnchorMarkers_。
+async function applyTodayPlanRows_(allRows) {
+  const rows = allRows.filter(r => r.status !== '移除');
+  removedAnchorMarkers_ = allRows.filter(r => r.status === '移除')
+    .map(r => ({ storeId: r.storeId, name: r.name, source: r.source }));
+
+  selectedCol2Ids = new Set();
+  regionAutoCheckedIds = new Set();
+  rows.forEach(r => {
+    if (!r.storeId) return;
+    if (r.source === '第②欄' || r.source === '選區') {
+      selectedCol2Ids.add(r.storeId);
+      if (r.source === '選區') regionAutoCheckedIds.add(r.storeId);
+    }
+  });
+  lastTodayPlanUpdatedAt_ = rows.reduce((max, r) => (r.updatedAt && (!max || r.updatedAt > max)) ? r.updatedAt : max, null);
+  dayConfirmed = rows.some(r => r.confirmed);
+
+  // 選區膠囊/已選卡片狀態：用「來源＝選區」的第一筆店家，反查它屬於哪個 region key
+  // （同一次「選這區」動作加進去的理論上都是同一個 region，用第一筆代表就好）。
+  selectedRegionKey = null;
+  const regionRow = rows.find(r => r.source === '選區');
+  if (regionRow) {
+    const rec = (planData?.recommended || []).find(item => item.id === regionRow.storeId);
+    if (rec) { selectedRegionKey = rec.region; filterMode = 'region'; }
+  }
+  if (!selectedRegionKey && filterMode === 'region') filterMode = 'all';
+
+  pushSuppressAutoSave_();
+  try {
+    await syncTodayList_(); // 用剛還原好的 anchors/selectedCol2Ids 建出基本列（自動預選目的、規則狀態…）
+    const byId = {}; rows.forEach(r => { if (r.storeId) byId[r.storeId] = r; });
+    todayList.forEach(row => {
+      const r = byId[row.id];
+      if (!r) return;
+      if (r.purposes && r.purposes.length) {
+        row.purposesTouched = true;
+        row.purposes = r.purposes.map(p => p.startsWith('其他:') ? '其他' : p);
+        const otherEntry = r.purposes.find(p => p.startsWith('其他:'));
+        row.otherPurposeText = otherEntry ? otherEntry.slice(3) : '';
+      }
+      row.purposeNote = r.purposeNote || '';
+      if (r.stayManual && r.stayMin) row.manualStayMin = parseInt(r.stayMin, 10) || null;
+      row.arrival = parseHHMM_(r.arrival);
+      row.status = r.status || '待去';
+    });
+    const seqOf = id => { const r = byId[id]; return r && r.seq != null ? (parseInt(r.seq, 10) || 9999) : 9999; };
+    todayList.sort((a, b) => seqOf(a.id) - seqOf(b.id));
+    renderRecommend(); // ②欄checkbox的勾選狀態要重畫才看得到還原結果
+    // 這個 renderTodayList_() 一定要在還是「關閉自動存檔」的狀態下呼叫，不然還原剛讀進來的
+    // 資料就會立刻觸發一次存檔（重寫一份內容完全相同的資料，浪費又多餘）。
+    renderTodayList_();
+  } finally {
+    popSuppressAutoSave_();
+  }
+}
+
+// 開頁/切日期：還原②勾選（含選區自動勾）、拜訪目的、目的備註、手動停留分鐘、拖曳後的順序、
+// 出發時間——全部從 planData.todayPlanRows（今日行程表）跟 KV 的 savedDepartMin/savedOrderMode
+// 還原，不再是空的（2026-11-06 之前的已知問題：今天頁切到本週再回來，這些全部會遺失）。
+async function restoreTodayPlanState_(plan) {
+  pushSuppressAutoSave_();
+  try {
+    todayList = [];
+    orderMode = 'unordered';
+    lastRouteLegMinutes = null; lastRouteResolvedIds = null; lastRouteStopIds = null; lastRouteTotalKm = null;
+    window._confirmedRoute = null;
+    departMin = typeof plan.savedDepartMin === 'number' ? plan.savedDepartMin : START_MIN;
+
+    const removedAsRows = (plan.todayPlanRemovedIds || []).map(m => ({ ...m, status: '移除' }));
+    await applyTodayPlanRows_([...(plan.todayPlanRows || []), ...removedAsRows]);
+
+    // orderMode 本身存在 KV（跟 region 同一個 plan:{date} key），不是今日行程表的欄位——今日行程
+    // 表有存每列的「預計到達」，所以即使沒有車程資料（lastRouteLegMinutes 沒有持久化），也能直接
+    // 顯示還原的到達時間，不用重新打一次 Routes API，只是之後改任何時間相關設定都要重新計算。
+    if ((plan.savedOrderMode === 'route' || plan.savedOrderMode === 'manual') && todayList.some(r => r.arrival != null)) {
+      orderMode = plan.savedOrderMode;
+      // applyTodayPlanRows_ 剛剛已經畫過一次（orderMode 還是舊值），這裡 orderMode 改了要再畫一次
+      // 讓小計列的「依路線順序／順序已手動調整」字樣對得上，一樣要在關閉自動存檔的狀態下做。
+      renderTodayList_();
+    }
+  } finally {
+    popSuppressAutoSave_();
+  }
+}
+
+// 「確定今天的行程」：立即存檔（不等 debounce）＋整天標已確定。不綁計算路線成不成功，
+// 有清單就能按（跟外勤模式對接是階段三的事，這裡先只處理存檔跟標記）。
+async function confirmTodayPlan() {
+  if (!todayList.length) return;
+  const btn = document.getElementById('btn-confirm-route');
+  await withBusy(btn, '存檔中…', async () => {
+    dayConfirmed = true;
+    await saveTodayPlanNow_();
+    toast('已確定今天的行程');
+  });
 }
 
 // 只重算時間，不重打 Routes API（除非是手動拖曳剛發生，見 recalcManualOrderTimes_ 那支才會打）——
@@ -1552,15 +1796,24 @@ function recomputeTodayListTimes_() {
 }
 
 async function removeTodayListRow_(id) {
+  // 系統自動帶入的項目（送貨/待追蹤/本週排/寄賣對帳）被拿掉時要留「移除」標記，下次存檔才不會
+  // 被 Worker 的 /api/plan 又當成預設值重新加回來；使用者自己手動勾的②項目（第②欄/選區）
+  // 直接刪除那一列就好，不用留標記（規格 2026-11-06 補充第2點）。
+  const row = todayList.find(r => r.id === id);
+  const source = todayListRowSource_(id);
+  if (row && TODAY_PLAN_ANCHOR_SOURCES_.includes(source)) {
+    removedAnchorMarkers_.push({ storeId: id, name: row.name, source });
+  }
+
   const ai = anchors.findIndex(a => a.id === id);
   if (ai >= 0) anchors.splice(ai, 1);
   selectedCol2Ids.delete(id);
+  regionAutoCheckedIds.delete(id);
   todayList = todayList.filter(r => r.id !== id);
   renderAnchors(); renderRecommend(); renderSuggest();
   if (viewMode === 'map') renderMap();
   invalidateRouteIfStopsChanged_();
   recomputeTodayListTimes_();
-  await savePlanState();
   toast('已從今日清單移除');
 }
 
@@ -1593,6 +1846,7 @@ function setDepartTime_(val) {
   if (!m) return;
   departMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
   recomputeTodayListTimes_();
+  savePlanState(); // 出發時間存在 KV plan:{date}（跟 region 同一個 key），不是今日行程表的欄位
 }
 
 // 手動拖曳改順序：HTML5 原生 drag/drop，委派在 document.body（今日清單整段 innerHTML 重繪也不用
@@ -1611,6 +1865,7 @@ function reorderTodayListManually_(targetId) {
   const [moved] = todayList.splice(fromIdx, 1);
   todayList.splice(toIdx, 0, moved);
   orderMode = 'manual';
+  savePlanState(); // orderMode 存在 KV plan:{date}，順序本身存在今日行程表（renderTodayList_ 的 scheduleTodayPlanSave_）
   lastRouteLegMinutes = null;
   lastRouteResolvedIds = null;
   // 2026-11-05 修正：重算期間（debounce 1 秒＋Routes API 回應，大約1~4秒）「預估收工」不能停在
@@ -2025,7 +2280,6 @@ async function calcRoute() {
 
   btn.disabled = true; btn.textContent = '計算中…';
   if (warnEl) warnEl.innerHTML = '';
-  document.getElementById('btn-confirm-route').style.display = 'none';
   try {
     await loadAllPharmacies(); // 確保 allPharmaciesCache 已載好，resolveStoreLocation_ 才查得到客戶表座標/地址
 
@@ -2080,6 +2334,7 @@ async function calcRoute() {
     todayList = [...resolvedRows, ...unresolvedRows];
     todayList.forEach(row => { row.locateMethod = locateMethodById[row.id] || null; });
     orderMode = 'route';
+    savePlanState(); // orderMode 存在 KV plan:{date}
     lastRouteResolvedIds = new Set(resolvedIds);
     lastRouteStopIds = todayList.map(r => r.id).sort().join(',');
 
@@ -2095,7 +2350,6 @@ async function calcRoute() {
     if (warnEl && warnings.length) {
       warnEl.innerHTML = `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
     }
-    document.getElementById('btn-confirm-route').style.display = '';
   } catch (e) {
     if (warnEl) warnEl.innerHTML = `<div class="empty-hint">路線計算失敗：${escapeHtml(e.message)}</div>`;
   } finally {
@@ -2103,14 +2357,6 @@ async function calcRoute() {
   }
 }
 
-async function confirmRoute() {
-  if (!window._confirmedRoute) return;
-  const btn = document.getElementById('btn-confirm-route');
-  await withBusy(btn, '存檔中…', async () => {
-    await savePlanState();
-    toast('已存檔（手機外勤模式讀取這份路線的部分之後會另外接）');
-  });
-}
 </script>
 <script src="store-drawer.js"></script>
 

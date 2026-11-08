@@ -236,6 +236,14 @@ export default {
         return await handleSavePlan(request, env);
       }
 
+      // ★ 今日清單階段二：今日行程（唯一正本，anchors/route 不再存 KV）
+      if (path === '/api/today-plan' && request.method === 'GET') {
+        return await handleGetTodayPlan(request, env, ctx);
+      }
+      if (path === '/api/today-plan' && request.method === 'POST') {
+        return await handleSaveTodayPlan(request, env);
+      }
+
       // ★ 2026-10-27 新增：客戶叫貨健康度分級（只讀分析，跟 /api/plan 完全獨立、不影響 SmartRoute 評分）
       // 只在 wrangler dev 本機測，還沒決定要不要留、要不要 commit
       if (path === '/api/customer-tiers' && request.method === 'GET') {
@@ -2541,6 +2549,65 @@ function buildTodayRegions_(list, anchors, allPharmacies) {
   return groups;
 }
 
+// ============================================================
+// 今日清單階段二（2026-11-06）：「今日行程」表讀寫共用設定與輔助函式
+// ============================================================
+// 測試階段固定讀寫 TEST 分頁，B2/B3 驗收通過、使用者同意後才改成 '今日行程'（正式）。
+const TODAY_PLAN_SHEET_NAME = '今日行程_TEST';
+const TODAY_PLAN_COLS_ = [
+  '日期', '順序', '店家代號', '店名', '地址', '類型', '拜訪目的', '目的備註', '要做的事', '金額',
+  '停留分鐘', '停留手動', '預計到達', '來源', '已確定', '狀態', '備註', '更新時間',
+];
+// 「來源」是「這筆資料當初怎麼進今日清單」的單一值，跟 gas-backend/PlannerSetup.js 的
+// PLANNER_TODAY_PLAN_SOURCES 同一組值——錨點類（會還原進 anchors）：錨點/送貨/待追蹤/本週排/
+// 寄賣對帳；第②欄類（還原進 selectedCol2Ids，不進 anchors）：第②欄/選區。
+const TODAY_PLAN_ANCHOR_SOURCES_ = ['錨點', '送貨', '待追蹤', '本週排', '寄賣對帳'];
+
+async function fetchTodayPlanRows_(env, ctx, cacheMeta) {
+  if (!env.SHEET_PLANNER) return [];
+  return await fetchGvizRows(env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME, env, ctx, cacheMeta);
+}
+function todayPlanRowToObj_(r) {
+  return {
+    date: r.get('日期'), seq: r.get('順序'), storeId: r.get('店家代號'), name: r.get('店名'),
+    address: r.get('地址'),
+    types: String(r.get('類型') || '').split('、').filter(Boolean),
+    purposes: String(r.get('拜訪目的') || '').split('、').filter(Boolean),
+    purposeNote: r.get('目的備註') || '', autoTask: r.get('要做的事') || '',
+    amount: r.get('金額') || '', stayMin: r.get('停留分鐘') || '',
+    stayManual: r.get('停留手動') === 'TRUE', arrival: r.get('預計到達') || '',
+    source: r.get('來源') || '', confirmed: r.get('已確定') === 'TRUE',
+    status: r.get('狀態') || '待去', note: r.get('備註') || '',
+    updatedAt: r.get('更新時間') || '',
+  };
+}
+// 把今日清單一列的畫面狀態（planner.html 的 todayList row）轉成要存進「今日行程」的欄位物件
+// （給 POST /api/today-plan 轉送 GAS 用，欄位名稱對齊 TODAY_PLAN_COLS_，日期/更新時間由 GAS 補）。
+function todayPlanRowFromClient_(r) {
+  return {
+    順序: r.seq ?? '', 店家代號: r.storeId || '', 店名: r.name || '', 地址: r.address || '',
+    類型: Array.isArray(r.types) ? r.types.join('、') : (r.types || ''),
+    拜訪目的: Array.isArray(r.purposes) ? r.purposes.join('、') : (r.purposes || ''),
+    目的備註: r.purposeNote || '', 要做的事: r.autoTask || '', 金額: r.amount ?? '',
+    停留分鐘: r.stayMin ?? '', 停留手動: r.stayManual ? 'TRUE' : 'FALSE',
+    預計到達: r.arrival || '', 來源: r.source || '',
+    已確定: r.confirmed ? 'TRUE' : 'FALSE', 狀態: r.status || '待去', 備註: r.note || '',
+  };
+}
+// 當天最後一站「離開時間」當作「收工」的近似值（最後一站預計到達 + 它的停留分鐘）——不是真正
+// 到家的時間，因為「今日行程」表沒有存最後一段回程的車程分鐘數（規格 B0 沒有這個欄位，純前端
+// 算路線時的車程資料也不會持久化）。weekly.html／monthly.html 顯示時都用這個近似值。
+function approxFinishTimeFromRows_(rows) {
+  if (!rows.length) return null;
+  const last = rows[rows.length - 1];
+  const m = String(last.arrival || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const stay = parseInt(last.stayMin, 10) || 0;
+  const totalMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + stay;
+  const h = Math.floor(totalMin / 60) % 24, mm = totalMin % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
 async function handlePlannerPlan(request, env, ctx) {
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date');
@@ -2699,17 +2766,46 @@ async function handlePlannerPlan(request, env, ctx) {
     return (b.score - a.score) || ((b.avgMonthly || 0) - (a.avgMonthly || 0));
   });
 
-  // Phase 2：A1 第①③欄一旦存過檔（POST /api/plan），這裡直接蓋掉 anchors／補上 route，
-  // 讓重新整理頁面時能恢復今天已經決定好的錨點清單與確定路線，不會每次都退回系統剛算出來的預設值。
+  // 今日清單階段二（2026-11-06）：anchors/route 不再存 KV，改用「今日行程」表當正本。
+  //   1. 任何 id 只要今日行程已經有一列（不管狀態，含「移除」），就不要再用現場算出來的送貨/
+  //      待追蹤到期/本週排預設值蓋過去——使用者已經對這家店做過決定了（見規格 B 補充第2點）。
+  //   2. 今日行程裡「來源」是錨點類、狀態不是「移除」的列，還原回 anchors。
+  // 第②欄勾選（來源=第②欄/選區）跟每列的拜訪目的/備註/停留分鐘/順序，純前端狀態，整份
+  // todayPlanRows 原始資料回給前端自己還原（見 planner.html loadPlan()），不在這裡處理。
   const dateKey = planDate.toISOString().slice(0, 10);
-  let route = null;
-  let savedRegion = null; // 2026-11-02：A5「本週」存的「這天跑哪區」，讓 A1 開啟那一天時能預先標示
+  const todayPlanAllRows = (await fetchTodayPlanRows_(env, ctx, cacheMeta))
+    .map(todayPlanRowToObj_)
+    .filter(r => r.date === dateKey);
+  const todayPlanIds = new Set(todayPlanAllRows.map(r => r.storeId).filter(Boolean));
+
+  const keptAnchors = anchors.filter(a => !todayPlanIds.has(a.id));
+  anchors.length = 0;
+  anchors.push(...keptAnchors);
+  todayPlanAllRows.forEach(r => {
+    if (!TODAY_PLAN_ANCHOR_SOURCES_.includes(r.source) || r.status === '移除') return;
+    if (anchors.some(a => a.id === r.storeId)) return;
+    anchors.push({ id: r.storeId, name: r.name, source: r.source, item: r.autoTask || r.purposeNote || '', deadline: null });
+  });
+  const todayPlanRows = todayPlanAllRows.filter(r => r.status !== '移除').sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
+  // 狀態＝「移除」的列本身不顯示在畫面上，但前端存檔（整天覆蓋）時要知道它們存在，不然下次
+  // 存檔送出的 rows 沒帶這幾筆，GAS 整天覆蓋會把它們一起刪掉，等於使用者按過的✕又復活了。
+  const todayPlanRemovedIds = todayPlanAllRows.filter(r => r.status === '移除').map(r => ({ storeId: r.storeId, name: r.name, source: r.source }));
+
+  // route（確定路線的站序陣列）這個舊概念被「今日行程」表的『順序』欄＋每列『預計到達』取代，
+  // 固定回 null；實際順序/時間請讀 todayPlanRows。
+  const route = null;
+  let savedRegion = null, savedDepartMin = null, savedOrderMode = null;
   if (env.TODOS_KV) {
     const saved = await env.TODOS_KV.get(`plan:${dateKey}`, 'json');
+    // 防呆（規格 B 補充第4點）：plan:{date} 如果還留著改版前的 anchors/route 欄位，只記警告、
+    // 不使用——這個 key 現在只存這天的畫面設定（region/出發時間/順序模式）。
+    if (saved && (saved.anchors || saved.route)) {
+      console.warn(`plan:${dateKey} KV 裡還有舊的 anchors/route 欄位，已忽略不使用（今日清單階段二之後這兩個欄位只存在「${TODAY_PLAN_SHEET_NAME}」表）`);
+    }
     if (saved) {
-      if (Array.isArray(saved.anchors)) anchors.length = 0, anchors.push(...saved.anchors);
-      if (Array.isArray(saved.route)) route = saved.route;
-      if (saved.region) savedRegion = saved.region;
+      savedRegion = saved.region || null;
+      savedDepartMin = typeof saved.departMin === 'number' ? saved.departMin : null;
+      savedOrderMode = saved.orderMode || null;
     }
   }
 
@@ -2729,6 +2825,7 @@ async function handlePlannerPlan(request, env, ctx) {
     date: dateKey,
     recommended: list,
     anchors, route, savedRegion,
+    savedDepartMin, savedOrderMode, todayPlanRows, todayPlanRemovedIds,
     todayRegions,
     badges: { customers: badgeCustomers, newStoreStuck: badgeNewStoreStuck, followupsDueSoon: badgeFollowupsDueSoon },
     p70AvgMonthly, medianAvgMonthly,
@@ -2740,14 +2837,79 @@ async function handlePlannerPlan(request, env, ctx) {
   });
 }
 
-// Phase 2：儲存當天的錨點清單＋確定路線（A1「確定，送到手機外勤模式」或任何加入/移除錨點的動作都呼叫這支）
+// 2026-11-06 今日清單階段二：anchors/route 不再存這裡（改存「今日行程」表，見 /api/today-plan），
+// 這支改成只存這天的畫面設定——出發時間（departMin，分鐘數）／順序模式（orderMode）。跟
+// handleSaveWeekDay 一樣是讀取→合併→寫回，不會洗掉另一邊已經存的 region 欄位（這個 key 現在
+// 三個欄位 region/departMin/orderMode 各自獨立讀寫，不是整包覆蓋）。
 async function handleSavePlan(request, env) {
   const body = await request.json();
-  const { date, anchors, route } = body;
+  const { date, departMin, orderMode } = body;
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
-  await env.TODOS_KV.put(`plan:${date}`, JSON.stringify({ anchors: anchors || [], route: route || null, savedAt: new Date().toISOString() }));
+  const existing = (await env.TODOS_KV.get(`plan:${date}`, 'json')) || {};
+  if (typeof departMin === 'number') existing.departMin = departMin;
+  if (orderMode) existing.orderMode = orderMode;
+  delete existing.anchors; delete existing.route; // 清掉舊版殘留欄位，不要讓防呆 log 一直噴警告
+  existing.savedAt = new Date().toISOString();
+  await env.TODOS_KV.put(`plan:${date}`, JSON.stringify(existing));
   return json({ ok: true });
+}
+
+// 今日清單階段二：GET 讀當天的今日行程（純讀取，走 fetchGvizRows 的 SWR 快取，跟待追蹤/
+// 店家規則同一套，GAS 的 doGet 完全不用動）。排除狀態=「移除」的列，畫面本來就不該顯示它們；
+// 這支是給 planner.html 重新整理/切日期時單獨還原用，/api/plan 本身也會回同一份 todayPlanRows
+// （拿去還原 anchors），兩邊共用 todayPlanRowToObj_ 同一套轉換，不會兜不起來。
+async function handleGetTodayPlan(request, env, ctx) {
+  const url = new URL(request.url);
+  const date = url.searchParams.get('date');
+  if (!date) return json({ error: '缺少 date' }, 400);
+  const cacheMeta = { oldest: Infinity };
+  const rows = (await fetchTodayPlanRows_(env, ctx, cacheMeta))
+    .map(todayPlanRowToObj_)
+    .filter(r => r.date === date && r.status !== '移除')
+    .sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
+  return json({ ok: true, date, rows, cachedAt: cacheMetaCachedAt_(cacheMeta) });
+}
+
+// POST 轉送 GAS 的 saveTodayPlan action（token 由 Worker 代填，前端永遠不會看到密鑰）。
+// body: { date, rows, clientUpdatedAt }——rows 是前端 todayList 的畫面狀態，這裡轉成欄位名稱
+// 對齊「今日行程」表的物件再送出（todayPlanRowFromClient_）。conflict 原樣轉給前端，由前端
+// 決定要不要用試算表目前的資料覆蓋畫面；寫入成功（非 conflict）才清快取，避免使用者剛存檔
+// 卻在幾分鐘內的 SWR 視窗看到舊資料。
+async function handleSaveTodayPlan(request, env) {
+  const body = await request.json();
+  const { date, rows, clientUpdatedAt } = body;
+  if (!date) return json({ error: '缺少 date' }, 400);
+  if (!Array.isArray(rows)) return json({ error: 'rows 必須是陣列' }, 400);
+  const res = await fetch(GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'saveTodayPlan', sheetName: TODAY_PLAN_SHEET_NAME, date,
+      rows: rows.map(todayPlanRowFromClient_), clientUpdatedAt,
+      token: env.PLANNER_API_TOKEN,
+    }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  // conflict 回傳的 rows 是 GAS 那邊用中文欄名組的物件（todayPlanRowToObject_），跟這支 Worker
+  // 自己 GET /api/today-plan、/api/plan 用的 todayPlanRowToObj_ 欄名不一樣——轉成同一套形狀，
+  // 前端不用自己判斷「這份資料是從哪條路徑來的，欄名長怎樣」。
+  if (data.conflict && Array.isArray(data.rows)) data.rows = data.rows.map(todayPlanObjFromGasRow_);
+  if (data.success && !data.conflict) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  return json(data);
+}
+function todayPlanObjFromGasRow_(o) {
+  return {
+    date: o['日期'], seq: o['順序'], storeId: o['店家代號'], name: o['店名'], address: o['地址'],
+    types: String(o['類型'] || '').split('、').filter(Boolean),
+    purposes: String(o['拜訪目的'] || '').split('、').filter(Boolean),
+    purposeNote: o['目的備註'] || '', autoTask: o['要做的事'] || '',
+    amount: o['金額'] || '', stayMin: o['停留分鐘'] || '',
+    stayManual: o['停留手動'] === 'TRUE', arrival: o['預計到達'] || '',
+    source: o['來源'] || '', confirmed: o['已確定'] === 'TRUE',
+    status: o['狀態'] || '待去', note: o['備註'] || '', updatedAt: o['更新時間'] || '',
+  };
 }
 
 // ============================================================
@@ -3022,13 +3184,27 @@ async function handleWeekOverview(request, env, ctx) {
 
   // 7 天的「跑哪區／已確定路線」：原生讀 plan:{date} KV，不跑 handlePlannerPlan 整套評分（7 天各跑一次
   // 太貴，且這兩個欄位本來就是 handleSaveWeekDay/handleSavePlan 存的現成資料）。
+  // 今日清單階段二（2026-11-06）：「已確定路線」標籤跟 hasRoute/savedAt 這套 KV 概念一起退休，
+  // 改用「今日行程」表——一次抓整張表（走 fetchGvizRows 的 SWR 快取），7 天份用日期分組，
+  // 不是每天各打一次 gviz（那樣 7 天會重複抓同一份東西 7 次）。
+  const todayPlanAllRows = (await fetchTodayPlanRows_(env, ctx, cacheMeta)).map(todayPlanRowToObj_);
+  const todayPlanByDate_ = {};
+  todayPlanAllRows.forEach(r => { (todayPlanByDate_[r.date] = todayPlanByDate_[r.date] || []).push(r); });
+
   const days = await Promise.all(dateKeys.map(async dateKey => {
     const saved = env.TODOS_KV ? await env.TODOS_KV.get(`plan:${dateKey}`, 'json') : null;
+    const dayRows = (todayPlanByDate_[dateKey] || [])
+      .filter(r => r.status !== '移除')
+      .sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
     return {
       date: dateKey,
       region: saved?.region || null,
-      hasRoute: !!(saved && Array.isArray(saved.route) && saved.route.length),
-      savedAt: saved?.savedAt || null,
+      todayPlan: {
+        rows: dayRows.map(r => ({ seq: r.seq, name: r.name, storeId: r.storeId })),
+        confirmed: dayRows.some(r => r.confirmed),
+        // 近似值，不是精確到家時間，見 approxFinishTimeFromRows_ 註解
+        finishTime: approxFinishTimeFromRows_(dayRows),
+      },
       calendarEvents: calendarEvents.filter(e => e.date === dateKey),
       weather: weatherByDate[dateKey] || null, // 超出氣象署7天範圍時是 null，前端不顯示天氣小卡
     };
@@ -3197,12 +3373,20 @@ async function handleMonthOverview(request, env, ctx) {
   const prevMonthKey = formatYearMonth_(prevMonthDate);
   const nextMonthKey = formatYearMonth_(nextMonthDate);
 
-  const [pharmaciesRes, visitsRes, followupRows, weatherByDate] = await Promise.all([
+  const [pharmaciesRes, visitsRes, followupRows, weatherByDate, todayPlanRowsAll] = await Promise.all([
     handleGetPharmacies(null, env, ctx).then(r => r.json()),
     handleAllVisits(env).then(r => r.json()),
     env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx) : Promise.resolve([]),
     fetchWeatherForecast_(env).catch(() => ({})),
+    fetchTodayPlanRows_(env, ctx),
   ]);
+  // 今日清單階段二（2026-11-06）：未來天的家數改從「今日行程」表算，不是只顯示「預計區域」文字
+  // ——一次抓整張表分組，不是每天各打一次 gviz。
+  const todayPlanByDate2_ = {};
+  todayPlanRowsAll.map(todayPlanRowToObj_).forEach(r => {
+    if (r.status === '移除') return;
+    (todayPlanByDate2_[r.date] = todayPlanByDate2_[r.date] || []).push(r);
+  });
 
   const allPharmacies = pharmaciesRes.pharmacies || [];
   const eligible = allPharmacies.filter(isEligibleForTiering_);
@@ -3248,11 +3432,15 @@ async function handleMonthOverview(request, env, ctx) {
     // 跟 A5 同一個門檻（SPEC 4.4 以外的另一組門檻，使用者原文就是「60%以上標紅」）。氣象署資料
     // 只涵蓋未來約7天，超出範圍 weatherByDate 查無資料，rainWarning 自然是 false，前端不顯示。
     const weather = (!isPast && !isToday) ? (weatherByDate[iso] || null) : null;
+    // 未來天的計畫家數：今日行程表那天的可見列數（已經排除「移除」）；過去/今天用 visitCount
+    // （實際拜訪紀錄）才對，今日行程是計畫不是事實，兩者故意不混用。
+    const plannedCount = (!isPast && !isToday) ? (todayPlanByDate2_[iso] || []).length : null;
     days.push({
       date: iso, inMonth: true, isToday, isPast, visitCount, loadTier,
       mailingBand: dayNum >= 1 && dayNum <= 5,   // 寄單期，跟 weekly.html 同一套規則（SPEC/CLAUDE.md）
       billingBand: dayNum >= 25 && dayNum <= 30, // 請款期，個別店家例外走「店家規則」，這裡不特殊處理
       region: null, // 只有未來天才補（見下面），過去/今天不需要
+      plannedCount,
       weather,
       rainWarning: !!(weather && weather.pop !== null && weather.pop >= 60),
     });

@@ -57,7 +57,10 @@
   .day-tag.holiday { background: var(--sr-danger-tint); color: var(--sr-danger); }
   .day-tag.weekend { background: var(--sr-bg-muted); color: var(--sr-ink-2); }
   .day-tag.makeup { background: var(--sr-billing-tint); color: #7A5A17; }
-  .day-tag.route { background: var(--sr-ink); color: var(--sr-on-dark); }
+  .day-tag.confirmed { background: var(--sr-ink); color: var(--sr-on-dark); }
+  .day-tag.draft { background: var(--sr-bg); color: var(--sr-ink-2); border: 1px solid var(--sr-line-dashed); }
+  .day-plan-list { font-size: var(--sr-text-2xs); color: var(--sr-ink-2); line-height: 1.5; margin-top: var(--sr-space-2); }
+  .day-plan-finish { font-weight: var(--sr-weight-bold); color: var(--sr-ink); }
 
   .day-weather { font-size: var(--sr-text-xs); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-sm); padding: var(--sr-space-2) var(--sr-space-3); }
   .day-weather.has-data { border-style: solid; border-color: var(--sr-line); color: var(--sr-ink-2); }
@@ -183,13 +186,26 @@ async function loadRegionOptions() {
   return regionOptions;
 }
 
-function dayTagsHtml(dateStr, weekday, holidayInfo, hasRoute) {
+// 2026-11-06 今日清單階段二：「已確定路線」這個 KV route 概念退休，改用「今日行程」表的
+// 已確定狀態——有清單才會標「已確定／草稿」，完全沒排的那天兩個標籤都不出現。
+function dayTagsHtml(dateStr, weekday, holidayInfo, todayPlan) {
   const tags = [];
   if (holidayInfo && holidayInfo.type === 'holiday') tags.push(`<span class="day-tag holiday">${escapeHtml(holidayInfo.name)}</span>`);
   else if (holidayInfo && holidayInfo.type === 'makeup_workday') tags.push(`<span class="day-tag makeup">補班</span>`);
   else if (weekday === 0 || weekday === 6) tags.push(`<span class="day-tag weekend">休息</span>`);
-  if (hasRoute) tags.push(`<span class="day-tag route">已確定路線</span>`);
+  if (todayPlan && todayPlan.rows && todayPlan.rows.length) {
+    tags.push(todayPlan.confirmed ? `<span class="day-tag confirmed">已確定</span>` : `<span class="day-tag draft">草稿</span>`);
+  }
   return tags.join('');
+}
+
+// 今日清單店名列表＋收工時間（近似值，見 worker.js approxFinishTimeFromRows_ 註解——不是精確
+// 到家時間，是最後一站預計到達＋它的停留分鐘）。沒有排任何店就不顯示這塊。
+function dayPlanListHtml(todayPlan) {
+  if (!todayPlan || !todayPlan.rows || !todayPlan.rows.length) return '';
+  const names = todayPlan.rows.map((r, i) => `${i + 1}. ${escapeHtml(r.name || r.storeId || '')}`).join(' → ');
+  const finishText = todayPlan.finishTime ? `收工 ${escapeHtml(todayPlan.finishTime)}` : '收工時間未定';
+  return `<div class="day-plan-list">${names}<br><span class="day-plan-finish">${finishText}</span></div>`;
 }
 
 function dayHintHtml(holidayInfo) {
@@ -237,10 +253,11 @@ function dayCellHtml(day, holidaysMap, followupsByDate, todayStr) {
       <span class="day-date">${d.getMonth() + 1}/${d.getDate()}</span>
       <span class="day-weekday">週${WEEKDAY_NAMES[weekday]}</span>
     </div>
-    <div class="day-tags">${dayTagsHtml(day.date, weekday, holidayInfo, day.hasRoute)}</div>
+    <div class="day-tags">${dayTagsHtml(day.date, weekday, holidayInfo, day.todayPlan)}</div>
     ${dayHintHtml(holidayInfo)}
     ${day.date < todayStr ? '' : weatherHtml(day.weather)}
     ${regionSelectHtml(day.date, day.region)}
+    ${dayPlanListHtml(day.todayPlan)}
     <div class="day-events">${events}${followupItems}</div>
     <button class="day-plan-link" data-date="${day.date}">規劃這天的店 →</button>
   </div>`;

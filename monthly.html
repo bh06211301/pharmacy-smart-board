@@ -185,10 +185,16 @@ function dayCellHtml(day, holidaysMap) {
   } else if (day.isPast || day.isToday) {
     bodyHtml = `<span class="day-cell-body">${day.visitCount} 家</span>`;
   } else {
+    // 2026-11-06 今日清單階段二：未來天的家數改從「今日行程」表算（day.plannedCount），
+    // 不是只顯示「預計區域」文字——比單純一個區名更直接看出這天排了幾家。
     const label = day.region ? regionLabelOf(day.region) : null;
-    bodyHtml = label
-      ? `<span class="day-cell-body">${escapeHtml(label)}</span>`
-      : `<span class="day-cell-body muted">未排</span>`;
+    if (day.plannedCount) {
+      bodyHtml = `<span class="day-cell-body">${day.plannedCount} 家${label ? '・' + escapeHtml(label) : ''}</span>`;
+    } else {
+      bodyHtml = label
+        ? `<span class="day-cell-body">${escapeHtml(label)}</span>`
+        : `<span class="day-cell-body muted">未排</span>`;
+    }
   }
   // 降雨提醒（SPEC 5.7，只有未來天會有 day.rainWarning，門檻 60%，CWA 資料超出範圍時 weather 是
   // null、rainWarning 固定 false，不特別顯示——跟寄單狀態一樣「缺資料優雅跳過」原則）
