@@ -20,12 +20,12 @@ const GEMINI_MODEL_PRO = 'gemini-3.5-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const GEMINI_URL_PRO = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_PRO}:generateContent`;
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxdCQvTWLTLtTLrpL5gpZZrvsEAujA0xnQ9gOiX0o23mR2y6ZTJHtSDqEmt_LmqZBFA/exec';
-const GAS_VISIT_URL = 'https://script.google.com/macros/s/AKfycbxBDS60OKaAhxeS53qrN7O1TbbN_wHSaJgwKJeFVjgr8ZuxpS-RV6aRu-uEwTJwKvzN9g/exec';
+// 2026-11-09 外勤模式規格安全整頓：這三支 GAS exec 網址原本直接寫死在這個檔案裡，而這個 repo
+// 是 public——等於任何人都看得到。改成 wrangler secret（env.GAS_URL／env.GAS_VISIT_URL／
+// env.SCREENING_API_URL），呼叫處對應改讀 env，不再用這三個模組常數。
 // 新開藥局篩選（new-pharmacy-screening）的 Web App，讀「藥局每日異動追蹤」篩選分頁。
 // 這份試算表沒有開「知道連結的人可檢視」（跟其他 SHEET_* 不同），gviz 直接讀會是登入頁，
 // 改用它自己的 doGet API（已經是 FIELD 對應好的 JSON，含 stage/stageDate），密碼走 wrangler secret：SCREENING_API_TOKEN
-const SCREENING_API_URL = 'https://script.google.com/macros/s/AKfycbyUJrKP1PsAOsQx8sVnJE5dwMhsn7LdEdZctsP_Y_T8em7AM5BtubDDpR1eL-1ZLxUNuQ/exec';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -76,13 +76,13 @@ const CORS_HEADERS = {
 //
 // 【/customer-status — 死客戶標記，2026-10-24 改為讀寫主表「停用」欄】
 //   GET  → { ok, statuses: { [Customer_ID]: {status:'dead', note} } }（讀 /pharmacies 的 deadReason，非空才列入）
-//   POST → body: { id, status:'dead'|'active', note }，寫入 GAS_VISIT_URL action:'updatePharmacyFlag' field:'dead'
+//   POST → body: { id, status:'dead'|'active', note }，寫入 env.GAS_VISIT_URL action:'updatePharmacyFlag' field:'dead'
 //          status='dead' 且 note 空白時預設寫入「死客戶」（欄位只要非空值就算死客戶，不能寫空字串）
 //
 // 【/dad-pharmacies — 爸爸客戶清單，2026-10-24 改為讀寫主表「負責人」欄】
 //   GET  → { ok, ids: ['C116',...] }（讀 /pharmacies 裡 owner === '老爸' 的 id）
 //   POST → body: { id, action: 'add'|'remove' }，回傳 { ok, ids }
-//          寫入 GAS_VISIT_URL action:'updatePharmacyFlag' field:'dad'，value 為 '老爸'（add）或 ''（remove，預設即我）
+//          寫入 env.GAS_VISIT_URL action:'updatePharmacyFlag' field:'dad'，value 為 '老爸'（add）或 ''（remove，預設即我）
 //
 // ============================================================
 
@@ -139,7 +139,7 @@ export default {
 
       // ★ 新增：業務待辦清單（舊版，保留相容）
       if (path === '/todos') {
-        return await handleTodos(request);
+        return await handleTodos(request, env);
       }
 
       // ★ 新版待辦清單（KV 持久化）
@@ -177,7 +177,7 @@ export default {
       }
 
       if (path === '/add-visit' && request.method === 'POST') {
-        return await handleAddVisit(request);
+        return await handleAddVisit(request, env);
       }
 
       // ★ 月曆計畫（KV 持久化）
@@ -962,7 +962,7 @@ async function handleCustomerStatus(request, env) {
     const { id, status, note } = body;
     if (!id) return json({ error: '缺少 id' }, 400);
     const value = status === 'dead' ? (note || '死客戶') : '';
-    const res = await fetch(GAS_VISIT_URL, {
+    const res = await fetch(env.GAS_VISIT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'updatePharmacyFlag', id, field: 'dead', value }),
@@ -978,16 +978,16 @@ async function handleCustomerStatus(request, env) {
 // ============================================================
 // 9. 業務待辦清單（代理到 Google Apps Script）
 // ============================================================
-async function handleTodos(request) {
+async function handleTodos(request, env) {
   if (request.method === 'GET') {
-    const res = await fetch(`${GAS_URL}?action=getTodos`, { redirect: 'follow' });
+    const res = await fetch(`${env.GAS_URL}?action=getTodos`, { redirect: 'follow' });
     const data = await res.json();
     return json(data);
   }
 
   if (request.method === 'POST') {
     const body = await request.json();
-    const res = await fetch(GAS_URL, {
+    const res = await fetch(env.GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1146,8 +1146,16 @@ async function handlePharmacyDetect(request) {
 // ============================================================
 // 13. 新增拜訪紀錄（代理到 GAS）
 // ============================================================
-async function handleAddVisit(request) {
+// 外勤模式規格階段1前置：field-v2 驗收要能指定寫 _TEST 分頁，這裡跟 GAS 端用同一組白名單
+// （VisitAppWebhook.js 的 VISIT_SHEET_WHITELIST）。不帶 sheetName 時完全不轉送這個欄位，
+// 等同現行行為（GAS 端收不到就預設寫「拜訪紀錄表」），不影響既有呼叫端。
+const ADD_VISIT_SHEET_WHITELIST = ['拜訪紀錄表', '拜訪紀錄_TEST'];
+
+async function handleAddVisit(request, env) {
   const body = await request.json();
+  if (body.sheetName && ADD_VISIT_SHEET_WHITELIST.indexOf(body.sheetName) < 0) {
+    return json({ success: false, error: '不允許的分頁名稱：' + body.sheetName }, 400);
+  }
   // 轉換欄位名稱以符合 VisitAppWebhook.js 格式
   const gasPayload = {
     action:      'addVisit',
@@ -1157,7 +1165,8 @@ async function handleAddVisit(request) {
     visitType:   body.purpose || body.visitType || '',
     note:        body.content  || body.note || '',
   };
-  const res = await fetch(GAS_VISIT_URL, {
+  if (body.sheetName) gasPayload.sheetName = body.sheetName;
+  const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(gasPayload),
@@ -1336,7 +1345,7 @@ async function handleDadPharmacies(request, env) {
     if (!id || !action) return json({ error: '缺少 id 或 action' }, 400);
     if (action !== 'add' && action !== 'remove') return json({ error: 'action 必須是 add 或 remove' }, 400);
     const value = action === 'add' ? '老爸' : '';
-    const writeRes = await fetch(GAS_VISIT_URL, {
+    const writeRes = await fetch(env.GAS_VISIT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'updatePharmacyFlag', id, field: 'dad', value }),
@@ -1646,7 +1655,7 @@ async function handleInventorySubmit(request, env) {
     })),
   };
 
-  const res = await fetch(GAS_VISIT_URL, {
+  const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(gasPayload),
@@ -2881,7 +2890,7 @@ async function handleSaveTodayPlan(request, env) {
   const { date, rows, clientUpdatedAt } = body;
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!Array.isArray(rows)) return json({ error: 'rows 必須是陣列' }, 400);
-  const res = await fetch(GAS_VISIT_URL, {
+  const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -3845,7 +3854,7 @@ async function handleListPlannerFollowups(env, ctx) {
 async function handlePlannerRules(request, env) {
   const body = await request.json();
   const action = body.delete ? 'deleteRule' : (body.ruleId ? 'updateRule' : 'addRule');
-  const res = await fetch(GAS_VISIT_URL, {
+  const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, action, token: env.PLANNER_API_TOKEN }),
@@ -3868,7 +3877,7 @@ async function handlePlannerFollowups(request, env, ctx) {
     : body.resolve ? 'resolveFollowup'
     : body.action === 'update' ? 'updateFollowup'
     : 'addFollowup';
-  const res = await fetch(GAS_VISIT_URL, {
+  const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, action, token: env.PLANNER_API_TOKEN }),
@@ -3901,7 +3910,7 @@ async function handlePlannerFollowups(request, env, ctx) {
 
     let updated = false;
     if (Object.keys(patch).length > 0) {
-      const updateRes = await fetch(GAS_VISIT_URL, {
+      const updateRes = await fetch(env.GAS_VISIT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'updateFollowup', followupId: data.followupId, patch, token: env.PLANNER_API_TOKEN }),
@@ -3977,7 +3986,7 @@ function convertedCustomerIdByStore_(stageHistoryRows) {
 // handleFunnelResult() 自己要核對「現在真正的階段」那兩處刻意不走這份快取（仍然直接 fetch），
 // 避免寫入流程根據過期資料做決定。
 async function fetchScreeningRowsRaw_(env) {
-  const data = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
+  const data = await fetch(`${env.SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
   return data.rows || [];
 }
 async function fetchScreeningRows_(env, ctx, cacheMeta) {
@@ -3993,7 +4002,7 @@ async function fetchScreeningRows_(env, ctx, cacheMeta) {
 async function callScreeningStageAction_(storeId, stageAction, dropReason, env) {
   if (!env.SCREENING_API_TOKEN) return { ok: false, error: '缺少 SCREENING_API_TOKEN（wrangler secret 未設定）' };
   try {
-    const res = await fetch(SCREENING_API_URL, {
+    const res = await fetch(env.SCREENING_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: env.SCREENING_API_TOKEN, id: storeId, patch: { stageAction, dropReason } }),
@@ -4020,7 +4029,7 @@ async function callScreeningStageAction_(storeId, stageAction, dropReason, env) 
 async function verifyScreeningStage_(storeId, env) {
   if (!env.SCREENING_API_TOKEN) return { verified: false };
   try {
-    const res = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`);
+    const res = await fetch(`${env.SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`);
     const data = await res.json();
     const row = (data.rows || []).find(r => r.id === storeId);
     if (!row) return { verified: false };
@@ -4035,7 +4044,7 @@ async function verifyScreeningStage_(storeId, env) {
 async function rollbackStageHistory_(eventId, env) {
   if (!eventId) return;
   try {
-    await fetch(GAS_VISIT_URL, {
+    await fetch(env.GAS_VISIT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'deleteStageHistory', eventId, token: env.PLANNER_API_TOKEN }),
@@ -4058,7 +4067,7 @@ async function handleFunnelResult(request, env, ctx) {
   }
   if (!env.SCREENING_API_TOKEN) return json({ error: '缺少 SCREENING_API_TOKEN（wrangler secret 未設定）' }, 500);
 
-  const screeningRes = await fetch(`${SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
+  const screeningRes = await fetch(`${env.SCREENING_API_URL}?token=${encodeURIComponent(env.SCREENING_API_TOKEN)}`).then(r => r.json());
   const row = (screeningRes.rows || []).find(r => r.id === storeId);
   if (!row) return json({ error: `篩選分頁找不到這家店：${storeId}` }, 404);
   const fromStage = row.stage;
@@ -4098,7 +4107,7 @@ async function handleFunnelResult(request, env, ctx) {
   }
 
   // 第一步：寫階段歷程。失敗就整個中止，不碰篩選分頁——這是最安全的失敗模式，使用者可以直接重按。
-  const historyRes = await fetch(GAS_VISIT_URL, {
+  const historyRes = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

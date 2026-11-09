@@ -11,8 +11,8 @@
 
 | # | 步驟 | 備註 |
 |---|---|---|
-| 0.1 | 記錄 gas-backend 的 `GAS_VISIT_URL` 部署前版本號 | 2026-11-02 查過：deployment id `AKfycbxBDS60OKaAhxeS53qrN7O1TbbN_wHSaJgwKJeFVjgr8ZuxpS-RV6aRu-uEwTJwKvzN9g` 對應 `@30`（標籤「scheduleAction改名+拜訪紀錄表寫入保護+token保護」）。部署前再查一次確認沒有變動 |
-| 0.2 | 記錄 new-pharmacy-screening 的 `SCREENING_API_URL` 部署前版本號 | 2026-11-02 查過：deployment id `AKfycbyUJrKP1PsAOsQx8sVnJE5dwMhsn7LdEdZctsP_Y_T8em7AM5BtubDDpR1eL-1ZLxUNuQ` 對應 `@2`（標籤「SmartRoute v2 第1階段：新店階段追蹤3欄」） |
+| 0.1 | 記錄 gas-backend 的 `GAS_VISIT_URL`（存於 Worker secret，見 CLAUDE.md）部署前版本號 | 2026-11-02 查過：對應 `@30`（標籤「scheduleAction改名+拜訪紀錄表寫入保護+token保護」）。部署前再查一次確認沒有變動 |
+| 0.2 | 記錄 new-pharmacy-screening 的 `SCREENING_API_URL`（存於 Worker secret，見 CLAUDE.md）部署前版本號 | 2026-11-02 查過：對應 `@2`（標籤「SmartRoute v2 第1階段：新店階段追蹤3欄」） |
 | 0.3 | 記錄 `still-meadow-0efd` 部署前的版本 id | 2026-11-02 查過：目前 100% 流量版本 `417746e8-86c8-4119-b3a1-17164d34b45b`（2026-11-01 建立），回退用 `npx wrangler rollback 417746e8-86c8-4119-b3a1-17164d34b45b` |
 
 ---

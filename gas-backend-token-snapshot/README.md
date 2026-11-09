@@ -12,7 +12,7 @@
    - GAS 指令碼屬性 `PLANNER_API_TOKEN`（AppSheet_AI_Backend 專案，專案設定→指令碼屬性）
    - `wrangler secret put PLANNER_API_TOKEN`（正式環境）
    - `pharmacy-smart-board/.dev.vars` 加一行 `PLANNER_API_TOKEN=同樣的值`（本機測試用）
-3. `cd gas-backend && npx @google/clasp push && npx @google/clasp deploy -i AKfycbxBDS60OKaAhxeS53qrN7O1TbbN_wHSaJgwKJeFVjgr8ZuxpS-RV6aRu-uEwTJwKvzN9g -d "說明"`
+3. `cd gas-backend && npx @google/clasp push && npx @google/clasp deploy -i <GAS_VISIT_URL的deploymentId，存於Worker secret，見CLAUDE.md> -d "說明"`
    （用 `-i` 更新既有部署，不要新增部署）
 4. 把這個分支的 `worker.js`（`handlePlannerRules`/`handlePlannerFollowups` 讀 `env.PLANNER_API_TOKEN`
    代填）合併或複製回主要工作分支，並用 `wrangler dev` 重新驗證一次新增/完成待追蹤。
