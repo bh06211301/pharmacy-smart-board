@@ -1690,14 +1690,15 @@ async function saveTodayPlanNow_(opts) {
   }
 }
 
-// 點導覽列連結／換日期前呼叫：有未存變更就先 flush，最多等 5 秒；逾時或失敗都照常導覽
-// （留 console.warn），不能讓使用者被卡在原地動彈不得。
+// 點導覽列連結／換日期前呼叫：有未存變更就先 flush，最多等 8 秒；逾時或失敗都照常導覽
+// （留 console.warn），不能讓使用者被卡在原地動彈不得。2026-11-09：原本5秒，實測GAS單次
+// 回應偶爾就要5秒左右（這張表剛啟用、流量還不穩），拉寬到8秒給緩衝空間。
 async function flushBeforeNavigate_() {
   if (!todayPlanDirty_ && !todaySavePromise_) return;
   try {
     await Promise.race([
       flushTodayPlanSave_(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('存檔逾時(5秒)')), 5000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('存檔逾時(8秒)')), 8000)),
     ]);
   } catch (e) {
     console.warn('切頁前存檔沒能在時限內完成，照常跳頁', e);
