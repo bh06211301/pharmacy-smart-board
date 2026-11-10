@@ -244,6 +244,11 @@ export default {
         return await handleSaveTodayPlan(request, env);
       }
 
+      // ★ field-v2 階段1：外勤模式單站狀態更新（只改一列，不是整天覆蓋）
+      if (path === '/api/today-plan/row' && request.method === 'POST') {
+        return await handleUpdateTodayPlanRow(request, env);
+      }
+
       // ★ 2026-10-27 新增：客戶叫貨健康度分級（只讀分析，跟 /api/plan 完全獨立、不影響 SmartRoute 評分）
       // 只在 wrangler dev 本機測，還沒決定要不要留、要不要 commit
       if (path === '/api/customer-tiers' && request.method === 'GET') {
@@ -2919,6 +2924,47 @@ function todayPlanObjFromGasRow_(o) {
     source: o['來源'] || '', confirmed: o['已確定'] === 'TRUE',
     status: o['狀態'] || '待去', note: o['備註'] || '', updatedAt: o['更新時間'] || '',
   };
+}
+
+// field-v2 階段1：外勤模式單站狀態更新（已到／完成／跳過＋備註），只改一列，不是整天覆蓋
+// ——外勤手機跟電腦 planner.html 可能同時在動同一天的今日行程，用 saveTodayPlan 整天覆蓋
+// 會有互相蓋掉對方改動的風險。body: { date, storeId?, address?, patch:{狀態?,備註?,預計到達?},
+// requestId? }，storeId 跟 address 至少要帶一個（店家代號優先，没代號的新店退回用地址定位，
+// 跟 todayPlanRowFromClient_／docs/今日清單_規格.md「同一家店不得重複」判斷同一套慣例）。
+// patch 白名單跟 GAS 端 handleUpdateTodayPlanRow_ 的 TODAY_PLAN_ROW_PATCHABLE_FIELDS_ 同步，
+// Worker 跟 GAS 兩邊都各自擋一次（defense-in-depth，跟 ADD_VISIT_SHEET_WHITELIST 同一個慣例）。
+// sheetName 可選帶「今日行程_TEST」，驗收時不用碰正式「今日行程」（跟 addVisit 的 sheetName
+// 白名單同一套做法）；不帶就預設正式分頁，等同現行行為，不影響既有呼叫端。
+const TODAY_PLAN_ROW_PATCHABLE_FIELDS = ['狀態', '備註', '預計到達'];
+const TODAY_PLAN_SHEET_WHITELIST = ['今日行程', '今日行程_TEST'];
+async function handleUpdateTodayPlanRow(request, env) {
+  const body = await request.json();
+  const { date, storeId, address, patch, requestId } = body;
+  const sheetName = body.sheetName || TODAY_PLAN_SHEET_NAME;
+  if (TODAY_PLAN_SHEET_WHITELIST.indexOf(sheetName) < 0) {
+    return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
+  }
+  if (!date) return json({ error: '缺少 date' }, 400);
+  if (!storeId && !address) return json({ error: '缺少 storeId 或 address，無法定位這一列' }, 400);
+  if (!patch || typeof patch !== 'object' || !Object.keys(patch).length) return json({ error: '缺少 patch' }, 400);
+  const badKeys = Object.keys(patch).filter(k => TODAY_PLAN_ROW_PATCHABLE_FIELDS.indexOf(k) < 0);
+  if (badKeys.length) {
+    return json({ error: 'patch 只能改 ' + TODAY_PLAN_ROW_PATCHABLE_FIELDS.join('/') + '，不認得：' + badKeys.join('、') }, 400);
+  }
+
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'updateTodayPlanRow', sheetName,
+      date, storeId, address, patch, requestId, token: env.PLANNER_API_TOKEN,
+    }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success && data.row) data.row = todayPlanObjFromGasRow_(data.row);
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  return json(data);
 }
 
 // ============================================================
