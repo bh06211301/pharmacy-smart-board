@@ -2910,21 +2910,29 @@ function todayPlanObjFromGasRow_(o) {
 // Worker 跟 GAS 兩邊都各自擋一次（defense-in-depth，跟 ADD_VISIT_SHEET_WHITELIST 同一個慣例）。
 // sheetName 可選帶「今日行程_TEST」，驗收時不用碰正式「今日行程」（跟 addVisit 的 sheetName
 // 白名單同一套做法）；不帶就預設正式分頁，等同現行行為，不影響既有呼叫端。
+// 2026-11-10 補 insertRow：找不到列時可以帶 insertRow 直接新增一列，給「臨時加一站／順路
+// 補一家」的「加入今日行程」按鈕用（同一支端點，不另開新端點，使用者明確指示）。insertRow
+// 沿用 todayPlanRowFromClient_ 同一套畫面狀態→欄位轉換，跟既有 saveTodayPlan 新增列時
+// 信任層級一致，不像 patch 那樣限制白名單（這是「新增一整列」，本來就要給齊欄位）。
 const TODAY_PLAN_ROW_PATCHABLE_FIELDS = ['狀態', '備註', '預計到達'];
 const TODAY_PLAN_SHEET_WHITELIST = ['今日行程', '今日行程_TEST'];
 async function handleUpdateTodayPlanRow(request, env) {
   const body = await request.json();
-  const { date, storeId, address, patch, requestId } = body;
+  const { date, storeId, address, patch, insertRow, requestId } = body;
   const sheetName = body.sheetName || TODAY_PLAN_SHEET_NAME;
   if (TODAY_PLAN_SHEET_WHITELIST.indexOf(sheetName) < 0) {
     return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
   }
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!storeId && !address) return json({ error: '缺少 storeId 或 address，無法定位這一列' }, 400);
-  if (!patch || typeof patch !== 'object' || !Object.keys(patch).length) return json({ error: '缺少 patch' }, 400);
-  const badKeys = Object.keys(patch).filter(k => TODAY_PLAN_ROW_PATCHABLE_FIELDS.indexOf(k) < 0);
-  if (badKeys.length) {
-    return json({ error: 'patch 只能改 ' + TODAY_PLAN_ROW_PATCHABLE_FIELDS.join('/') + '，不認得：' + badKeys.join('、') }, 400);
+  const hasPatch = patch && typeof patch === 'object' && Object.keys(patch).length > 0;
+  const hasInsert = insertRow && typeof insertRow === 'object';
+  if (!hasPatch && !hasInsert) return json({ error: '缺少 patch 或 insertRow' }, 400);
+  if (hasPatch) {
+    const badKeys = Object.keys(patch).filter(k => TODAY_PLAN_ROW_PATCHABLE_FIELDS.indexOf(k) < 0);
+    if (badKeys.length) {
+      return json({ error: 'patch 只能改 ' + TODAY_PLAN_ROW_PATCHABLE_FIELDS.join('/') + '，不認得：' + badKeys.join('、') }, 400);
+    }
   }
 
   const res = await fetch(env.GAS_VISIT_URL, {
@@ -2932,7 +2940,8 @@ async function handleUpdateTodayPlanRow(request, env) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'updateTodayPlanRow', sheetName,
-      date, storeId, address, patch, requestId, token: env.PLANNER_API_TOKEN,
+      date, storeId, address, patch, insertRow: hasInsert ? todayPlanRowFromClient_(insertRow) : undefined,
+      requestId, token: env.PLANNER_API_TOKEN,
     }),
     redirect: 'follow',
   });

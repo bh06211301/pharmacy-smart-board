@@ -145,49 +145,24 @@
   <!-- ============ 1. 今日行程（首頁） ============ -->
   <section class="screen" data-screen="1-home">
     <div class="topbar">
-      <div class="topbar-title">11 月 10 日（二）</div>
+      <div class="topbar-title" id="home-date">11 月 10 日（二）</div>
       <div class="topbar-sub">
-        <span class="pill synced">已同步 10:32</span>
+        <span class="pill" id="home-sync-pill">載入中…</span>
         <span class="progress-wrap" style="margin-top:6px">
-          <span class="progress-track"><span class="progress-fill" style="width:40%"></span></span>
-          <span style="font-size:var(--sr-text-xs);color:var(--sr-ink-2);white-space:nowrap">2 / 5 站完成</span>
+          <span class="progress-track"><span class="progress-fill" id="home-progress-fill" style="width:0%"></span></span>
+          <span id="home-progress-text" style="font-size:var(--sr-text-xs);color:var(--sr-ink-2);white-space:nowrap">— / — 站完成</span>
         </span>
       </div>
-      <div class="topbar-sub">預估收工 17:20</div>
+      <div class="topbar-sub" id="home-finish-estimate">預估收工 —</div>
     </div>
     <div class="body-scroll">
       <div class="section-label">下一站</div>
-      <div class="card card-hero">
-        <div class="store-meta">第 3 站 · 預計 14:10 到</div>
-        <div class="store-name">早安藥局</div>
-        <div class="store-meta">新北市板橋區文化路 120 號 · 車程 8 分</div>
-        <div class="tag-row">
-          <span class="tag tier-hot">大咖</span>
-          <span class="tag warn">該去了（倍數 1.4）</span>
-          <span class="tag">送貨</span>
-        </div>
-        <div class="store-meta" style="margin-top:var(--sr-space-3)">拜訪目的：送貨　備註：帶新品試用包</div>
-        <div class="btn-row" style="margin-top:var(--sr-space-5)">
-          <button class="btn" data-go="nav">開始導航</button>
-          <button class="btn primary" data-go="2-arrive">我到了</button>
-        </div>
+      <div id="home-nextstop" class="card card-hero">
+        <div class="center-note">讀取今日行程中…（真實資料，呼叫 GET /api/today-plan＋/api/plan）</div>
       </div>
 
       <div class="section-label">全部站點</div>
-      <div class="stop-list">
-        <div class="stop-row done"><div class="stop-dot">✓</div><div class="stop-main"><div class="stop-name">仁心藥局</div><div class="stop-sub">完成 · 巡視</div></div></div>
-        <div class="stop-row done"><div class="stop-dot">✓</div><div class="stop-main"><div class="stop-name">康美藥局</div><div class="stop-sub">完成 · 對帳請款</div></div></div>
-        <div class="stop-row current"><div class="stop-dot">3</div><div class="stop-main"><div class="stop-name">早安藥局</div><div class="stop-sub">目前站 · 送貨</div></div></div>
-        <div class="stop-row warn-conflict">
-          <div class="stop-dot">4</div>
-          <div class="stop-main">
-            <div class="stop-name">老友藥局</div>
-            <div class="stop-sub">預計 15:05 到 · 例行拜訪</div>
-            <div class="conflict-text">藥師 16:00 後才在，會早到 6 分</div>
-          </div>
-        </div>
-        <div class="stop-row skipped"><div class="stop-dot">✕</div><div class="stop-main"><div class="stop-name">新生藥局</div><div class="stop-sub">跳過：店休沒開</div></div></div>
-      </div>
+      <div id="home-stoplist" class="stop-list"></div>
 
       <button class="btn" data-go="1a-add-stop">＋ 臨時加一站</button>
     </div>
@@ -205,81 +180,34 @@
       <div class="topbar-title" style="margin-top:6px">臨時加一站</div>
     </div>
     <div class="body-scroll">
-      <input type="text" placeholder="搜尋店名（正式客戶＋開發中新店）" value="老">
-      <div class="stop-list">
-        <div class="stop-row" style="cursor:pointer">
-          <div class="stop-main">
-            <div class="stop-name">老友藥局</div>
-            <div class="stop-sub">板橋區 · 距目前站 1.2 公里 · 倍數 1.3</div>
-          </div>
-        </div>
-        <div class="stop-row" style="cursor:pointer">
-          <div class="stop-main">
-            <div class="stop-name">老地方藥局（新店 · 初訪後）</div>
-            <div class="stop-sub">板橋區 · 距目前站 2.0 公里</div>
-          </div>
-        </div>
+      <input type="text" id="add-stop-search" placeholder="搜尋店名（正式客戶＋開發中新店）">
+      <div id="add-stop-results" class="stop-list">
+        <div class="center-note">輸入店名開始搜尋</div>
       </div>
 
       <div class="section-label">去做什麼（可複選）</div>
-      <div class="chip-group">
-        <span class="chip selected">例行拜訪</span>
-        <span class="chip">新店開發</span>
-        <span class="chip">送貨</span>
-        <span class="chip">對帳請款</span>
-        <span class="chip">介紹新品</span>
-        <span class="chip">其他</span>
-      </div>
+      <div id="add-stop-purposes" class="chip-group"></div>
 
       <div class="section-label">插在哪裡</div>
-      <div class="choice-group">
-        <label class="choice selected"><input type="radio" name="insert" checked><div><div>最順路的位置</div><div class="stop-sub">收工時間不變：17:20</div></div></label>
-        <label class="choice"><input type="radio" name="insert"><div><div>馬上去（下一站）</div><div class="stop-sub">收工時間推後：17:35</div></div></label>
-        <label class="choice"><input type="radio" name="insert"><div><div>最後一站</div><div class="stop-sub">收工時間推後：17:48</div></div></label>
+      <div id="add-stop-insert-options" class="choice-group">
+        <div class="center-note">選一家店之後才能算插入位置</div>
       </div>
     </div>
-    <div class="bottombar"><button class="btn primary lg" data-go="1-home">加入今日行程</button></div>
+    <div class="bottombar"><button class="btn primary lg" id="add-stop-submit" disabled>加入今日行程</button></div>
   </section>
 
   <!-- ============ 2. 到店 ============ -->
   <section class="screen" data-screen="2-arrive">
     <div class="topbar">
-      <div class="topbar-title">第 3 站</div>
+      <div class="topbar-title" id="arrive-title">到店</div>
     </div>
-    <div class="body-scroll">
-      <div class="card">
-        <div class="store-name">早安藥局 <span style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">C042</span></div>
-        <div class="store-meta">板橋區 · 藥師：陳大同</div>
-        <div class="tag-row">
-          <span class="tag tier-hot">大咖</span>
-          <span class="tag warn">該去了</span>
-        </div>
-        <div class="store-meta" style="margin-top:var(--sr-space-3)">已 42 天未訪 · 倍數 1.4</div>
-        <button class="btn" style="margin-top:var(--sr-space-4)">📞 打電話</button>
-      </div>
-
-      <div class="card">
-        <div class="section-label">這站要做的事</div>
-        <div class="store-meta" style="margin-top:4px">拜訪目的：送貨　寄賣待整理：$3,200（月均 $2,100）</div>
-      </div>
-
-      <div class="card">
-        <div class="section-label">上次拜訪</div>
-        <div class="store-meta" style="margin-top:4px">10/20 · 送貨 · 補了止痛藥存貨</div>
-        <div class="store-meta">09/30 · 巡視 · 藥師反映某品項賣得不錯</div>
-      </div>
-
-      <div class="card">
-        <div class="section-label">待追蹤與規則</div>
-        <div class="store-meta" style="margin-top:4px">⚠ 待追蹤：下次經過確認退貨單</div>
-      </div>
-
-      <button class="btn">🤖 AI 拜訪前簡報</button>
+    <div class="body-scroll" id="arrive-body">
+      <div class="center-note">讀取店家資料中…（真實資料，呼叫 GET /api/store）</div>
     </div>
     <div class="bottombar">
       <div class="btn-row">
         <button class="btn danger-outline" data-go="4-skip">跳過</button>
-        <button class="btn primary" data-go="3-record-customer">完成並記錄</button>
+        <button class="btn primary" id="arrive-record-btn">完成並記錄</button>
       </div>
     </div>
   </section>
@@ -288,25 +216,25 @@
   <section class="screen" data-screen="3-record-customer">
     <div class="topbar">
       <button class="inline-link" data-go="2-arrive">← 返回</button>
-      <div class="topbar-title" style="margin-top:6px">記錄拜訪 · 早安藥局</div>
+      <div class="topbar-title" id="record-customer-title" style="margin-top:6px">記錄拜訪</div>
     </div>
     <div class="body-scroll">
       <div class="section-label">拜訪類型</div>
-      <div class="chip-group">
-        <span class="chip selected">送貨</span>
-        <span class="chip">巡視</span>
-        <span class="chip">收款</span>
-        <span class="chip">新案開發</span>
+      <div id="record-customer-type-chips" class="chip-group" data-single="true">
+        <span class="chip" data-value="送貨">送貨</span>
+        <span class="chip" data-value="巡視">巡視</span>
+        <span class="chip" data-value="收款">收款</span>
+        <span class="chip" data-value="新案開發">新案開發</span>
       </div>
 
       <div class="section-label">拜訪內容</div>
-      <textarea placeholder="說說今天拜訪的狀況…">藥師反映止痛藥存貨快不夠，已補一箱。</textarea>
+      <textarea id="record-customer-content" placeholder="說說今天拜訪的狀況…"></textarea>
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
       <div class="section-label">標籤（可複選）</div>
       <div class="chip-group">
         <span class="chip">競品</span>
-        <span class="chip selected">缺貨</span>
+        <span class="chip">缺貨</span>
         <span class="chip">客訴</span>
         <span class="chip">價格</span>
         <span class="chip">滿意</span>
@@ -314,55 +242,52 @@
       </div>
 
       <div class="section-label">緊急問題</div>
-      <input type="text" placeholder="有的話才填">
+      <input type="text" id="record-customer-urgent" placeholder="有的話才填">
 
       <div class="section-label">下次要記得</div>
-      <input type="text" placeholder="例如：帶新品試用包">
+      <input type="text" id="record-customer-nextaction" placeholder="例如：帶新品試用包">
+      <div class="stop-sub">文字會附在拜訪內容後面一起存檔；勾下面的選項才會另外建一筆待追蹤</div>
 
-      <label class="choice"><input type="checkbox" checked><div>同時建立待追蹤（下次經過）</div></label>
+      <label class="choice"><input type="checkbox" id="record-customer-followup-checkbox" checked><div>同時建立待追蹤（下次經過）</div></label>
 
-      <div class="dad-note">負責人是老爸的店：收工摘要會提醒「送貨：帳單要還給老爸」</div>
+      <div id="record-customer-dad-note" class="dad-note" hidden></div>
     </div>
-    <div class="bottombar"><button class="btn primary lg" data-go="1-home">儲存並回首頁</button></div>
+    <div class="bottombar"><button class="btn primary lg" id="record-customer-save">儲存並回首頁</button></div>
   </section>
 
   <!-- ============ 3b. 記錄拜訪（新店，B） ============ -->
   <section class="screen" data-screen="3b-record-newstore">
     <div class="topbar">
       <button class="inline-link" data-go="2-arrive">← 返回</button>
-      <div class="topbar-title" style="margin-top:6px">記錄拜訪 · 老地方藥局</div>
-      <div class="topbar-sub">目前階段：二訪後 · 第 16 天</div>
+      <div class="topbar-title" id="record-newstore-title" style="margin-top:6px">記錄拜訪</div>
+      <div class="topbar-sub" id="record-newstore-stage">目前階段：—</div>
     </div>
     <div class="body-scroll">
       <div class="section-label">這次結果</div>
-      <div class="choice-group">
-        <label class="choice" style="opacity:.5"><input type="radio" name="result" disabled><div><div>談過了，往下一步</div><div class="stop-sub">二訪後之後不提供這個選項</div></div></label>
-        <label class="choice selected"><input type="radio" name="result" checked><div>藥師不在，下次再來</div></label>
-        <label class="choice"><input type="radio" name="result"><div>成交，轉正式客戶</div></label>
-        <label class="choice"><input type="radio" name="result"><div>放棄這家</div></label>
-      </div>
+      <div id="record-newstore-result-choices" class="choice-group"></div>
 
       <div id="confirm-customer-search" style="display:none" class="card">
         <div class="section-label">正式代號</div>
-        <input type="text" placeholder="搜尋或輸入正式客戶代號，例如 C042">
-        <div class="stop-sub" style="margin-top:4px">轉正式必填代號，系統會核對新客戶資料表確實存在這個代號。</div>
+        <input type="text" id="confirm-customer-id-input" placeholder="搜尋或輸入正式客戶代號，例如 C042">
+        <div id="confirm-customer-matches" class="stop-sub" style="margin-top:4px"></div>
       </div>
 
       <div class="section-label">拜訪內容</div>
-      <textarea placeholder="說說這次談的狀況…">藥師說需要再想想，下週再來一次。</textarea>
+      <textarea id="record-newstore-content" placeholder="說說這次談的狀況…"></textarea>
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
       <div class="section-label">下次要記得</div>
-      <input type="text" placeholder="例如：帶報價單">
+      <input type="text" id="record-newstore-nextaction" placeholder="例如：帶報價單">
+      <div class="stop-sub">文字會附在拜訪內容後面一起存檔</div>
     </div>
-    <div class="bottombar"><button class="btn primary lg" data-go="1-home">儲存並回首頁</button></div>
+    <div class="bottombar"><button class="btn primary lg" id="record-newstore-save">儲存並回首頁</button></div>
   </section>
 
   <!-- ============ 4. 跳過這站 ============ -->
   <section class="screen" data-screen="4-skip">
     <div class="topbar">
       <button class="inline-link" data-go="2-arrive">← 返回</button>
-      <div class="topbar-title" style="margin-top:6px">跳過 · 早安藥局</div>
+      <div class="topbar-title" id="skip-title" style="margin-top:6px">跳過</div>
     </div>
     <div class="body-scroll">
       <div class="section-label">原因</div>
@@ -389,22 +314,9 @@
   <section class="screen" data-screen="4a-nearby">
     <div class="sheet-backdrop open" style="position:static;background:none;flex:1;display:flex;align-items:flex-end">
       <div class="sheet" style="width:100%;box-sizing:border-box">
-        <div class="topbar-title">多出 12 分鐘，順路補一家？</div>
-        <div class="stop-list">
-          <div class="stop-row">
-            <div class="stop-main">
-              <div class="stop-name">仁和藥局</div>
-              <div class="stop-sub">倍數 1.2 · 距離 0.8 公里 · 多花 5 分</div>
-            </div>
-            <button class="btn" style="width:auto;padding:0 var(--sr-space-5)">加入</button>
-          </div>
-          <div class="stop-row">
-            <div class="stop-main">
-              <div class="stop-name">大安藥局</div>
-              <div class="stop-sub">倍數 1.1 · 距離 1.1 公里 · 多花 8 分</div>
-            </div>
-            <button class="btn" style="width:auto;padding:0 var(--sr-space-5)">加入</button>
-          </div>
+        <div class="topbar-title" id="nearby-title">順路補一家？</div>
+        <div id="nearby-candidates" class="stop-list">
+          <div class="center-note">讀取附近店家中…（真實資料，haversine 篩2公里內＋Routes API 算多花幾分）</div>
         </div>
         <button class="btn" data-go="1-home">不用，直接去下一站</button>
       </div>
@@ -417,28 +329,21 @@
       <div class="topbar-title">今天收工</div>
     </div>
     <div class="body-scroll">
-      <div class="summary-grid">
-        <div class="summary-cell"><div class="summary-num">4</div><div class="summary-label">完成</div></div>
-        <div class="summary-cell"><div class="summary-num">1</div><div class="summary-label">跳過</div></div>
-        <div class="summary-cell"><div class="summary-num">對帳 2 家</div><div class="summary-label">寄賣對帳</div></div>
-        <div class="summary-cell"><div class="summary-num">1</div><div class="summary-label">新增待追蹤</div></div>
+      <div id="finish-summary" class="summary-grid">
+        <div class="center-note">統計中…</div>
       </div>
 
       <div class="card">
         <div class="section-label">已自動寫進系統</div>
-        <div class="store-meta" style="margin-top:4px">拜訪紀錄 4 筆 · 新增待追蹤 1 筆 · 新店推進 1 家</div>
+        <div id="finish-auto-written" class="store-meta" style="margin-top:4px">—</div>
       </div>
 
-      <div class="card">
+      <div class="card" id="finish-todo-card" hidden>
         <div class="section-label">還要處理</div>
-        <div class="store-meta" style="margin-top:4px">新生藥局（跳過，還沒選改期）</div>
-        <div class="btn-row" style="margin-top:var(--sr-space-4)">
-          <button class="btn">11/12（四）</button>
-          <button class="btn">選其他日期</button>
-        </div>
+        <div id="finish-todo-list" class="store-meta" style="margin-top:4px"></div>
       </div>
 
-      <div class="dad-note">老爸的事：早安藥局送貨帳單要還給老爸</div>
+      <div id="finish-dad-notes"></div>
     </div>
     <div class="bottombar"><button class="btn primary lg">確認收工</button></div>
   </section>
@@ -468,31 +373,532 @@ SCREENS.forEach(id => {
   switchBar.appendChild(btn);
 });
 
-document.querySelectorAll('[data-go]').forEach(el => {
-  el.addEventListener('click', () => showScreen(el.dataset.go));
+// [data-go] 用事件代理（而不是載入時 querySelectorAll），因為 render 函式之後會動態插入新的
+// [data-go] 元素（例如候選店家列表），委派在 document 上才能一直有效，不用每次 render 完再重綁。
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-go]');
+  if (el) showScreen(el.dataset.go);
 });
 
-// 3b「成交，轉正式客戶」選到時才顯示代號搜尋欄
-document.querySelectorAll('input[name="result"]').forEach(r => {
-  r.addEventListener('change', (e) => {
-    const label = e.target.closest('.choice').textContent.trim();
-    document.getElementById('confirm-customer-search').style.display = label.indexOf('轉正式') >= 0 ? 'block' : 'none';
-  });
-});
-
-// chip / choice 選取視覺（純畫面效果，不影響任何資料）
-document.querySelectorAll('.chip').forEach(c => {
-  c.addEventListener('click', () => c.classList.toggle('selected'));
-});
-document.querySelectorAll('.choice:not([style*="opacity"])').forEach(c => {
-  c.addEventListener('click', () => {
-    const name = c.querySelector('input')?.name;
+// chip / choice 選取視覺（純畫面效果，不影響任何資料；一樣用事件代理因為內容是動態產生的）
+// chip 預設多選（標籤、拜訪目的都是「可複選」）；外層容器有 data-single 的例外（目前只有
+// 「拜訪類型」是單選，見 #record-customer-type-chips 的 data-single="true"）才互斥切換。
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (chip) {
+    const group = chip.closest('[data-single]');
+    if (group) group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.toggle('selected', group ? true : !chip.classList.contains('selected'));
+    return;
+  }
+  const choice = e.target.closest('.choice');
+  if (choice && !choice.querySelector('input')?.disabled) {
+    const name = choice.querySelector('input')?.name;
     if (name) document.querySelectorAll(`.choice input[name="${name}"]`).forEach(i => i.closest('.choice').classList.remove('selected'));
-    c.classList.add('selected');
-  });
+    choice.classList.add('selected');
+    if (choice.querySelector('input[type=radio]')) choice.querySelector('input[type=radio]').checked = true;
+  }
 });
+
+// ============================================================
+// 以下開始是真實資料串接（field-v2 階段1剩餘步驟）。原則：
+// - 只送 GET／Google Routes API（瀏覽器端直連，不經過 Worker）。
+// - POST 到 /api/today-plan/row、/add-visit、/todos-v2、/api/followups 的函式都已經寫好，
+//   但今晚使用者明確要求「先不要送、等我在場」——這些函式目前只會被組出 payload，呼叫處
+//   保留但故意沒有在任何自動測試路徑裡被觸發（見 DEV_ALLOW_WRITE 這個旗標，目前鎖 false）。
+// - wrangler dev 本機測試用，之後部署時要把 WORKER 改成正式網址或做成可切換設定。
+// ============================================================
+const WORKER = 'http://127.0.0.1:8787';
+const DEV_ALLOW_WRITE = false; // 2026-11-10：寫入測試留到使用者在場時做，先鎖住，不能手滑按到就真的送出
+const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 planner.html／index.html 同一把前端 Maps key
+const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
+const DEST_ADDR = '台北市內湖區新民街422號';
+
+function todayStr_() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function genRequestId_() { return 'fv2-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8); }
+// haversine 直線距離（公里）——4a「順路補一家」的 2 公里篩選用這個先過濾候選，篩完才對少數
+//候選打 Routes API 算真正的車程分鐘數，避免每家店都打一次 API（使用者決定：附近補店純前端
+// haversine，不是每家都查路網距離）。
+function haversineKm_(lat1, lng1, lat2, lng2) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function minutesToHHMM_(totalMin) {
+  const h = Math.floor(totalMin / 60) % 24, m = Math.round(totalMin % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+const FV2 = {
+  date: null,
+  todayRows: [],      // GET /api/today-plan 的 rows
+  pharmacies: [],      // GET /pharmacies 的 pharmacies（含 lat/lng/owner/tier等）
+  planRecommended: [], // GET /api/plan 的 recommended（倍數/分級用）
+  dadIds: new Set(),   // GET /dad-pharmacies
+  dadTodos: [],        // GET /todos-v2 篩 quadrant==='dad'
+  currentStoreId: null, // 目前「到店／記錄拜訪」畫面指到的店
+  loaded: false,
+};
+
+function fv2StoreMeta_(storeId) {
+  const ph = FV2.pharmacies.find(p => p.id === storeId);
+  const rec = FV2.planRecommended.find(r => r.id === storeId);
+  return { ph, rec };
+}
+function fv2Tags_(storeId) {
+  const { ph, rec } = fv2StoreMeta_(storeId);
+  const tags = [];
+  if (rec && rec.tier) tags.push({ cls: rec.tier === '大咖' ? 'tier-hot' : '', text: rec.tier });
+  if (rec && rec.ratio !== null && rec.ratio !== undefined && rec.ratio >= 1) tags.push({ cls: 'warn', text: `該去了（倍數 ${rec.ratio}）` });
+  if (ph && ph.owner === '老爸') tags.push({ cls: '', text: '老爸的店' });
+  return tags;
+}
+
+// ---- 讀取真實資料（GET only） ----
+async function fv2LoadAll() {
+  FV2.date = todayStr_();
+  try {
+    const [todayRes, phRes, planRes, dadRes, todosRes] = await Promise.all([
+      fetch(`${WORKER}/api/today-plan?date=${FV2.date}`).then(r => r.json()),
+      fetch(`${WORKER}/pharmacies`).then(r => r.json()),
+      fetch(`${WORKER}/api/plan?date=${FV2.date}`).then(r => r.json()),
+      fetch(`${WORKER}/dad-pharmacies`).then(r => r.json()),
+      fetch(`${WORKER}/todos-v2`).then(r => r.json()),
+    ]);
+    FV2.todayRows = (todayRes.rows || []).filter(r => r.status !== '移除').sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
+    FV2.pharmacies = phRes.pharmacies || [];
+    FV2.planRecommended = planRes.recommended || [];
+    FV2.dadIds = new Set(dadRes.ids || []);
+    FV2.dadTodos = (todosRes.todos || []).filter(t => t.quadrant === 'dad');
+    FV2.loaded = true;
+    fv2RenderHome();
+  } catch (e) {
+    document.getElementById('home-nextstop').innerHTML =
+      `<div class="center-note">讀取失敗：${e.message}<br>（field-v2 還沒部署，這個骨架要搭配 wrangler dev 本機測試才讀得到真實資料）</div>`;
+    document.getElementById('home-stoplist').innerHTML = '';
+    document.getElementById('home-sync-pill').textContent = '讀取失敗';
+  }
+}
+
+// ---- 1. 首頁 ----
+function fv2RenderHome() {
+  const d = new Date();
+  document.getElementById('home-date').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日（${'日一二三四五六'[d.getDay()]}）`;
+  document.getElementById('home-sync-pill').textContent = '已同步 ' + d.toTimeString().slice(0, 5);
+  document.getElementById('home-sync-pill').className = 'pill synced';
+
+  const rows = FV2.todayRows;
+  const doneCount = rows.filter(r => r.status === '完成').length;
+  document.getElementById('home-progress-text').textContent = `${doneCount} / ${rows.length} 站完成`;
+  document.getElementById('home-progress-fill').style.width = rows.length ? `${Math.round(doneCount / rows.length * 100)}%` : '0%';
+
+  const finishRow = rows.length ? rows[rows.length - 1] : null;
+  const finishMin = finishRow && finishRow.arrival ? (() => {
+    const m = String(finishRow.arrival).match(/^(\d{1,2}):(\d{2})$/);
+    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) + (parseInt(finishRow.stayMin) || 0) : null;
+  })() : null;
+  document.getElementById('home-finish-estimate').textContent = finishMin !== null ? `預估收工 ${minutesToHHMM_(finishMin)}` : '預估收工 —（還沒算路線）';
+
+  // 下一站：第一個狀態是「待去」的列
+  const nextIdx = rows.findIndex(r => r.status === '待去');
+  const nextEl = document.getElementById('home-nextstop');
+  if (nextIdx < 0) {
+    nextEl.innerHTML = '<div class="center-note">今天的站都處理完了 🎉</div>';
+  } else {
+    const r = rows[nextIdx];
+    const tags = fv2Tags_(r.storeId).map(t => `<span class="tag ${t.cls}">${escapeHtml_(t.text)}</span>`).join('');
+    nextEl.innerHTML = `
+      <div class="store-meta">第 ${nextIdx + 1} 站${r.arrival ? ' · 預計 ' + escapeHtml_(r.arrival) + ' 到' : ''}</div>
+      <div class="store-name">${escapeHtml_(r.name)}</div>
+      <div class="store-meta">${escapeHtml_(r.address || '')}</div>
+      <div class="tag-row">${tags}</div>
+      <div class="store-meta" style="margin-top:var(--sr-space-3)">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
+      <div class="btn-row" style="margin-top:var(--sr-space-5)">
+        <button class="btn" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address || r.name)}','_blank')">開始導航</button>
+        <button class="btn primary" data-arrive-id="${escapeHtml_(r.storeId || r.address)}">我到了</button>
+      </div>`;
+  }
+
+  // 全部站點
+  const listEl = document.getElementById('home-stoplist');
+  listEl.innerHTML = rows.map((r, i) => {
+    let cls = '', dot = String(i + 1), sub = '';
+    if (r.status === '完成') { cls = 'done'; dot = '✓'; sub = `完成 · ${(r.purposes || []).join('、') || '—'}`; }
+    else if (r.status === '跳過') { cls = 'skipped'; dot = '✕'; sub = `跳過：${escapeHtml_(r.note || '')}`; }
+    else if (i === nextIdx) { cls = 'current'; sub = `目前站 · ${(r.purposes || []).join('、') || '—'}`; }
+    else { sub = `${r.arrival ? '預計 ' + r.arrival + ' 到 · ' : ''}${(r.purposes || []).join('、') || '—'}`; }
+    return `<div class="stop-row ${cls}"><div class="stop-dot">${dot}</div><div class="stop-main"><div class="stop-name">${escapeHtml_(r.name)}</div><div class="stop-sub">${sub}</div></div></div>`;
+  }).join('') || '<div class="center-note">今天還沒有排任何站點</div>';
+}
+
+function escapeHtml_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 「我到了」：記住 storeId，去抓真實的店家詳情
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-arrive-id]');
+  if (!btn) return;
+  FV2.currentStoreId = btn.dataset.arriveId;
+  showScreen('2-arrive');
+  fv2RenderArrive(FV2.currentStoreId);
+});
+
+// ---- 2. 到店 ----
+async function fv2RenderArrive(storeId) {
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  document.getElementById('arrive-title').textContent = row ? `到店 · ${row.name}` : '到店';
+  const body = document.getElementById('arrive-body');
+  body.innerHTML = '<div class="center-note">讀取中…</div>';
+  try {
+    const detail = await fetch(`${WORKER}/api/store?id=${encodeURIComponent(storeId)}`).then(r => r.json());
+    if (!detail.ok) { body.innerHTML = `<div class="center-note">讀取失敗：${escapeHtml_(detail.error || '未知錯誤')}</div>`; return; }
+    const t = detail.tiering;
+    const visitsData = await fetch(`${WORKER}/visits/${encodeURIComponent(storeId)}`).then(r => r.json()).catch(() => ({ visits: [] }));
+    const visits = (visitsData.visits || []).slice(0, 2);
+    const tagRow = fv2Tags_(storeId).map(x => `<span class="tag ${x.cls}">${escapeHtml_(x.text)}</span>`).join('');
+    body.innerHTML = `
+      <div class="card">
+        <div class="store-name">${escapeHtml_(detail.name)} <span style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">${escapeHtml_(detail.id)}</span></div>
+        <div class="store-meta">${escapeHtml_([detail.city, detail.district].filter(Boolean).join(''))}</div>
+        <div class="tag-row">${tagRow}</div>
+        <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? `已 ${t.daysSince ?? '—'} 天未訪 · 倍數 ${t.ratio ?? '—'}` : (detail.excludeReason || '不列入分級')}</div>
+        ${detail.phone ? `<button class="btn" style="margin-top:var(--sr-space-4)" onclick="location.href='tel:${escapeHtml_(detail.phone)}'">📞 打電話</button>` : ''}
+      </div>
+      ${row ? `<div class="card"><div class="section-label">這站要做的事</div><div class="store-meta" style="margin-top:4px">拜訪目的：${escapeHtml_((row.purposes || []).join('、') || '—')}${t && t.consignmentText ? '　' + escapeHtml_(t.consignmentText) : ''}</div></div>` : ''}
+      <div class="card">
+        <div class="section-label">上次拜訪</div>
+        ${visits.length ? visits.map(v => `<div class="store-meta">${escapeHtml_(v.date)} · ${escapeHtml_(v.purpose)} · ${escapeHtml_(v.content).slice(0, 40)}</div>`).join('') : '<div class="store-meta">還沒有拜訪紀錄</div>'}
+      </div>
+      <div class="card">
+        <div class="section-label">待追蹤與規則</div>
+        ${(detail.followups || []).length ? detail.followups.map(f => `<div class="store-meta">⚠ 待追蹤：${escapeHtml_(f.item)}</div>`).join('') : '<div class="store-meta">沒有未完成的待追蹤</div>'}
+      </div>
+      <button class="btn" id="arrive-ai-brief">🤖 AI 拜訪前簡報</button>`;
+  } catch (e) {
+    body.innerHTML = `<div class="center-note">讀取失敗：${escapeHtml_(e.message)}</div>`;
+  }
+}
+document.getElementById('arrive-record-btn').addEventListener('click', () => {
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
+  if (row && row.types && row.types.indexOf('新店') >= 0) {
+    fv2RenderRecordNewstore(FV2.currentStoreId);
+    showScreen('3b-record-newstore');
+  } else {
+    fv2RenderRecordCustomer(FV2.currentStoreId);
+    showScreen('3-record-customer');
+  }
+});
+
+// ---- 3. 記錄拜訪（正式客戶） ----
+function fv2RenderRecordCustomer(storeId) {
+  const { ph } = fv2StoreMeta_(storeId);
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  document.getElementById('record-customer-title').textContent = `記錄拜訪 · ${ph ? ph.name : (row ? row.name : storeId)}`;
+  // 拜訪目的→拜訪類型優先序（使用者核准）：新案開發 > 收款 > 送貨 > 巡視；可手動改（chip 可點擊切換）
+  const purposes = row ? (row.purposes || []) : [];
+  const priority = ['新案開發', '收款', '送貨', '巡視'];
+  const purposeToType = { '新店開發': '新案開發', '對帳請款': '收款', '送貨': '送貨', '例行拜訪': '巡視', '介紹新品': '巡視', '其他': '巡視' };
+  const mappedTypes = purposes.map(p => purposeToType[p]).filter(Boolean);
+  const preselect = priority.find(t => mappedTypes.indexOf(t) >= 0) || '巡視';
+  document.querySelectorAll('#record-customer-type-chips .chip').forEach(c => c.classList.toggle('selected', c.dataset.value === preselect));
+
+  const dadEl = document.getElementById('record-customer-dad-note');
+  if (ph && ph.owner === '老爸') {
+    dadEl.hidden = false;
+    dadEl.textContent = '負責人是老爸的店：存檔時會依內容關鍵字自動判斷要不要提醒「還帳單／交資料袋給老爸」（沿用 field.html 既有規則）';
+  } else {
+    dadEl.hidden = true;
+  }
+}
+// 下次要記得：文字附在拜訪內容後面一起存檔（使用者核准的規則）
+function fv2AppendNextAction_(content, nextAction) {
+  return nextAction ? `${content}${content ? '\n' : ''}下次要記得：${nextAction}` : content;
+}
+// 老爸提醒關鍵字判斷，照抄 field.html submitVisitRecord 既有邏輯（使用者核准：沿用，不改字眼）
+function fv2DadReminderTasks_(purpose, content, phId, phName, isDad, visitId, dateStr) {
+  const isDelivery = purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content);
+  const isPayment = purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content);
+  const isRedSlip = isDelivery || isPayment || /紅單|交貨/.test(content);
+  const tasks = [];
+  if (isDad && isDelivery) tasks.push({ task: `【${phName}】還帳單給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
+  if (isDad && isPayment) tasks.push({ task: `【${phName}】交資料袋給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
+  if (isRedSlip) tasks.push({ task: `【${phName}】把紅單放回抽屜（等整理日整理）`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
+  return tasks;
+}
+document.getElementById('record-customer-save').addEventListener('click', async () => {
+  const storeId = FV2.currentStoreId;
+  const { ph } = fv2StoreMeta_(storeId);
+  const visitType = document.querySelector('#record-customer-type-chips .chip.selected')?.dataset.value || '巡視';
+  const contentRaw = document.getElementById('record-customer-content').value.trim();
+  const nextAction = document.getElementById('record-customer-nextaction').value.trim();
+  const content = fv2AppendNextAction_(contentRaw, nextAction);
+  const wantFollowup = document.getElementById('record-customer-followup-checkbox').checked;
+  const visitId = genRequestId_();
+  const dateStr = todayStr_();
+
+  const visitPayload = {
+    visitId, pharmacyName: storeId, date: dateStr, purpose: visitType, content,
+    sheetName: '拜訪紀錄_TEST', // 階段1：寫入測試一律先指向測試分頁，正式環境等使用者核准才拿掉這行
+  };
+  const followupPayload = wantFollowup ? { action: 'addFollowup', storeId, item: nextAction || '拜訪後續', who: '我', deadlineType: '下次經過' } : null;
+  const dadTasks = ph ? fv2DadReminderTasks_(visitType, content, storeId, ph.name, ph.owner === '老爸', visitId, dateStr) : [];
+
+  console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload（DEV_ALLOW_WRITE=false，今晚不會真的送出）：', { visitPayload, followupPayload, dadTasks });
+  if (!DEV_ALLOW_WRITE) {
+    alert('今晚寫入測試先不送出（DEV_ALLOW_WRITE=false）。payload 已印在 console，使用者在場時再打開這個開關測試。');
+    return;
+  }
+  // 以下只有 DEV_ALLOW_WRITE=true 時才會執行到（今晚不會發生）
+  await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
+  if (followupPayload) await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
+  for (const t of dadTasks) await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
+  showScreen('1-home');
+});
+
+// ---- 3b. 記錄拜訪（新店） ----
+function fv2RenderRecordNewstore(storeId) {
+  const { rec } = fv2StoreMeta_(storeId);
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  document.getElementById('record-newstore-title').textContent = `記錄拜訪 · ${rec ? rec.name : (row ? row.name : storeId)}`;
+  const stage = rec ? rec.stage : '—';
+  document.getElementById('record-newstore-stage').textContent = `目前階段：${stage}${rec && rec.daysSince !== null ? ' · 第 ' + rec.daysSince + ' 天' : ''}`;
+
+  const canAdvance = ['發現', '初訪後'].indexOf(stage) >= 0; // 跟worker.js handleFunnelResult的idx<0||idx>1同一條邊界
+  const choices = [
+    { key: 'advance', label: '談過了，往下一步', disabled: !canAdvance, note: canAdvance ? '' : '二訪後之後不提供這個選項' },
+    { key: 'keep', label: '藥師不在，下次再來', disabled: false },
+    { key: 'confirmed', label: '成交，轉正式客戶', disabled: false },
+    { key: 'drop', label: '放棄這家', disabled: false },
+  ];
+  document.getElementById('record-newstore-result-choices').innerHTML = choices.map((c, i) => `
+    <label class="choice${c.disabled ? '' : (i === 1 ? ' selected' : '')}" ${c.disabled ? 'style="opacity:.5"' : ''}>
+      <input type="radio" name="result" value="${c.key}" ${c.disabled ? 'disabled' : ''} ${(!c.disabled && i === 1) ? 'checked' : ''}>
+      <div><div>${escapeHtml_(c.label)}</div>${c.note ? `<div class="stop-sub">${escapeHtml_(c.note)}</div>` : ''}</div>
+    </label>`).join('');
+  document.getElementById('confirm-customer-search').style.display = 'none';
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'result') {
+    document.getElementById('confirm-customer-search').style.display = e.target.value === 'confirmed' ? 'block' : 'none';
+  }
+});
+// confirmed 代號搜尋：純前端用已經抓到的 pharmacies 清單比對，不額外打 API
+document.getElementById('confirm-customer-id-input')?.addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  const el = document.getElementById('confirm-customer-matches');
+  if (!q) { el.textContent = ''; return; }
+  const hit = FV2.pharmacies.find(p => p.id === q);
+  el.textContent = hit ? `✓ 核對到：${hit.name}` : '找不到這個代號，請確認有沒有打錯字';
+  el.style.color = hit ? 'var(--sr-primary)' : 'var(--sr-danger)';
+});
+document.getElementById('record-newstore-save').addEventListener('click', () => {
+  const storeId = FV2.currentStoreId;
+  const action = document.querySelector('input[name="result"]:checked')?.value || 'keep';
+  const contentRaw = document.getElementById('record-newstore-content').value.trim();
+  const nextAction = document.getElementById('record-newstore-nextaction').value.trim();
+  const content = fv2AppendNextAction_(contentRaw, nextAction);
+  const customerId = document.getElementById('confirm-customer-id-input').value.trim();
+  if (action === 'confirmed' && !customerId) { alert('轉正式必填代號'); return; }
+
+  const visitId = genRequestId_();
+  const visitPayload = { visitId, pharmacyName: storeId, date: todayStr_(), purpose: '新案開發', content, sheetName: '拜訪紀錄_TEST' };
+  const funnelPayload = { storeId, action, customerId: action === 'confirmed' ? customerId : undefined, requestId: genRequestId_() };
+
+  console.log('[field-v2] 記錄拜訪（新店）準備送出的payload（DEV_ALLOW_WRITE=false，今晚不會真的送出）：', { visitPayload, funnelPayload });
+  if (!DEV_ALLOW_WRITE) {
+    alert('今晚寫入測試先不送出（DEV_ALLOW_WRITE=false）。payload 已印在 console。');
+    return;
+  }
+  (async () => {
+    await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
+    await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
+    showScreen('1-home');
+  })();
+});
+
+// ---- 4. 跳過這站 ----
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-go="4-skip"]')) {
+    const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
+    document.getElementById('skip-title').textContent = row ? `跳過 · ${row.name}` : '跳過';
+  }
+});
+
+// ---- 1a／4a：插入位置 Routes API 試算（瀏覽器端直連 Google，不經過 Worker）----
+// 用「今天還沒處理的站」當固定順序的中繼點，固定用 ORIGIN_ADDR/DEST_ADDR 當頭尾（跟
+// planner.html computeRoutes 同一組常數），因為骨架沒有真實GPS，用這個當階段1的近似值。
+function fv2RemainingIntermediates_() {
+  return FV2.todayRows
+    .filter(r => r.status === '待去' || r.status === '已到')
+    .map(r => {
+      const ph = FV2.pharmacies.find(p => p.id === r.storeId);
+      const rec = FV2.planRecommended.find(x => x.id === r.storeId);
+      const lat = ph?.lat ?? rec?.lat, lng = ph?.lng ?? rec?.lng;
+      return lat && lng ? { location: { latLng: { latitude: lat, longitude: lng } } } : null;
+    })
+    .filter(Boolean);
+}
+async function fv2ComputeRouteMinutes_(intermediates, optimize) {
+  const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', 'X-Goog-Api-Key': GMAPS_KEY,
+      // optimizeWaypointOrder:true 時 Google 要求 FieldMask 一定要帶 optimized_intermediate_waypoint_index，
+      // 否則回 400（實測發現，不是文件上第一眼就看得出來的限制）。
+      'X-Goog-FieldMask': optimize ? 'routes.legs.duration,routes.optimized_intermediate_waypoint_index' : 'routes.legs.duration',
+    },
+    body: JSON.stringify({ origin: { address: ORIGIN_ADDR }, destination: { address: DEST_ADDR }, intermediates, travelMode: 'DRIVE', optimizeWaypointOrder: !!optimize }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(`Routes API HTTP ${res.status}：${errBody.error?.message || '未知錯誤'}`);
+  }
+  const data = await res.json();
+  if (!data.routes?.length) throw new Error('找不到路線');
+  return data.routes[0].legs.reduce((sum, leg) => sum + parseInt(leg.duration) / 60, 0);
+}
+async function fv2CalcInsertOptions_(candidateLatLng) {
+  const remaining = fv2RemainingIntermediates_();
+  const candidate = { location: { latLng: candidateLatLng } };
+  const baseMin = remaining.length ? await fv2ComputeRouteMinutes_(remaining, false) : await fv2ComputeRouteMinutes_([], false);
+  const [smartMin, nextMin, lastMin] = await Promise.all([
+    fv2ComputeRouteMinutes_([...remaining, candidate], true),
+    fv2ComputeRouteMinutes_([candidate, ...remaining], false),
+    fv2ComputeRouteMinutes_([...remaining, candidate], false),
+  ]);
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return [
+    { key: 'smart', label: '最順路的位置', deltaMin: Math.round(smartMin - baseMin), finishMin: nowMin + smartMin },
+    { key: 'next', label: '馬上去（下一站）', deltaMin: Math.round(nextMin - baseMin), finishMin: nowMin + nextMin },
+    { key: 'last', label: '最後一站', deltaMin: Math.round(lastMin - baseMin), finishMin: nowMin + lastMin },
+  ];
+}
+
+// 1a 搜尋（正式客戶＋開發中新店，用店名 includes 比對，純前端）
+let fv2SelectedCandidate = null;
+document.getElementById('add-stop-search')?.addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  const resultsEl = document.getElementById('add-stop-results');
+  if (!q) { resultsEl.innerHTML = '<div class="center-note">輸入店名開始搜尋</div>'; return; }
+  const customers = FV2.pharmacies.filter(p => p.name.includes(q)).map(p => ({ id: p.id, name: p.name, type: 'customer', lat: p.lat, lng: p.lng, district: p.district }));
+  const newStores = FV2.planRecommended.filter(r => r.type === 'new-store' && r.name.includes(q)).map(r => ({ id: r.id, name: `${r.name}（新店 · ${r.stage}）`, type: 'new-store', lat: r.lat, lng: r.lng, district: r.district }));
+  const matches = [...customers, ...newStores].slice(0, 10);
+  resultsEl.innerHTML = matches.length
+    ? matches.map(m => `<div class="stop-row" style="cursor:pointer" data-candidate="${escapeHtml_(m.id)}"><div class="stop-main"><div class="stop-name">${escapeHtml_(m.name)}</div><div class="stop-sub">${escapeHtml_(m.district || '')}${m.lat ? '' : '　⚠ 沒有座標，無法試算路線'}</div></div></div>`).join('')
+    : '<div class="center-note">沒有符合的店家</div>';
+  resultsEl.dataset.pool = JSON.stringify(matches);
+});
+document.addEventListener('click', async (e) => {
+  const row = e.target.closest('[data-candidate]');
+  if (!row || !row.closest('#add-stop-results')) return;
+  const pool = JSON.parse(document.getElementById('add-stop-results').dataset.pool || '[]');
+  const m = pool.find(x => x.id === row.dataset.candidate);
+  if (!m) return;
+  fv2SelectedCandidate = m;
+  const optsEl = document.getElementById('add-stop-insert-options');
+  if (!m.lat || !m.lng) {
+    optsEl.innerHTML = '<div class="center-note">這家店沒有座標快取，階段1骨架不處理即時地理編碼，無法試算插入位置</div>';
+    document.getElementById('add-stop-submit').disabled = true;
+    return;
+  }
+  optsEl.innerHTML = '<div class="center-note">呼叫 Routes API 試算中…</div>';
+  try {
+    const options = await fv2CalcInsertOptions_({ latitude: m.lat, longitude: m.lng });
+    optsEl.innerHTML = options.map((o, i) => `
+      <label class="choice${i === 0 ? ' selected' : ''}">
+        <input type="radio" name="insert" value="${o.key}" ${i === 0 ? 'checked' : ''}>
+        <div><div>${escapeHtml_(o.label)}</div><div class="stop-sub">收工時間${o.deltaMin <= 0 ? '不變' : '推後 ' + o.deltaMin + ' 分'}：約 ${minutesToHHMM_(o.finishMin)}</div></div>
+      </label>`).join('');
+    document.getElementById('add-stop-submit').disabled = false;
+  } catch (err) {
+    optsEl.innerHTML = `<div class="center-note">Routes API 試算失敗：${escapeHtml_(err.message)}</div>`;
+  }
+});
+document.getElementById('add-stop-submit')?.addEventListener('click', () => {
+  if (!fv2SelectedCandidate) return;
+  const purposes = Array.from(document.querySelectorAll('#add-stop-purposes .chip.selected')).map(c => c.dataset.value);
+  const insertRow = {
+    storeId: fv2SelectedCandidate.type === 'customer' ? fv2SelectedCandidate.id : '',
+    name: fv2SelectedCandidate.name, address: '', purposes, source: '錨點', status: '待去',
+  };
+  const body = { date: FV2.date, storeId: insertRow.storeId || undefined, address: insertRow.storeId ? undefined : fv2SelectedCandidate.name, insertRow, requestId: genRequestId_() };
+  console.log('[field-v2] 加入今日行程準備送出的payload（DEV_ALLOW_WRITE=false，今晚不會真的送出）：', body);
+  if (!DEV_ALLOW_WRITE) { alert('今晚寫入測試先不送出（DEV_ALLOW_WRITE=false）。payload 已印在 console。'); return; }
+  fetch(`${WORKER}/api/today-plan/row`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, sheetName: '今日行程_TEST' }) })
+    .then(() => showScreen('1-home'));
+});
+
+// 4a 順路補一家：haversine 篩 2 公里內，倍數>=1，今天還不在清單裡，最多3家，個別用 Routes API 算多花幾分
+async function fv2RenderNearby_() {
+  const el = document.getElementById('nearby-candidates');
+  const anchor = fv2RemainingIntermediates_()[0];
+  if (!anchor) { el.innerHTML = '<div class="center-note">今天已經沒有站點可以當基準點</div>'; return; }
+  const anchorLat = anchor.location.latLng.latitude, anchorLng = anchor.location.latLng.longitude;
+  const onRouteIds = new Set(FV2.todayRows.map(r => r.storeId).filter(Boolean));
+  const within2km = FV2.pharmacies
+    .filter(p => p.lat && p.lng && !onRouteIds.has(p.id))
+    .map(p => ({ ...p, distKm: haversineKm_(anchorLat, anchorLng, p.lat, p.lng) }))
+    .filter(p => p.distKm <= 2)
+    .sort((a, b) => a.distKm - b.distKm)
+    .slice(0, 3);
+  if (!within2km.length) { el.innerHTML = '<div class="center-note">附近2公里內沒有符合的店</div>'; return; }
+  el.innerHTML = within2km.map(p => `<div class="stop-row"><div class="stop-main"><div class="stop-name">${escapeHtml_(p.name)}</div><div class="stop-sub">距離 ${p.distKm.toFixed(1)} 公里 · 試算中…</div></div></div>`).join('');
+  const rows = el.querySelectorAll('.stop-row');
+  const baseMin = await fv2ComputeRouteMinutes_(fv2RemainingIntermediates_(), false).catch(() => null);
+  for (let i = 0; i < within2km.length; i++) {
+    const p = within2km[i];
+    try {
+      const withCandidate = await fv2ComputeRouteMinutes_([...fv2RemainingIntermediates_(), { location: { latLng: { latitude: p.lat, longitude: p.lng } } }], false);
+      const extra = baseMin !== null ? Math.max(0, Math.round(withCandidate - baseMin)) : null;
+      rows[i].querySelector('.stop-sub').textContent = `距離 ${p.distKm.toFixed(1)} 公里${extra !== null ? ' · 多花 ' + extra + ' 分' : ''}`;
+    } catch { rows[i].querySelector('.stop-sub').textContent = `距離 ${p.distKm.toFixed(1)} 公里 · 車程試算失敗`; }
+  }
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-go="4a-nearby"]')) fv2RenderNearby_(); });
+
+// ---- 5. 收工 ----
+function fv2RenderFinish() {
+  const rows = FV2.todayRows;
+  const done = rows.filter(r => r.status === '完成').length;
+  const skipped = rows.filter(r => r.status === '跳過').length;
+  document.getElementById('finish-summary').innerHTML = `
+    <div class="summary-cell"><div class="summary-num">${done}</div><div class="summary-label">完成</div></div>
+    <div class="summary-cell"><div class="summary-num">${skipped}</div><div class="summary-label">跳過</div></div>
+    <div class="summary-cell"><div class="summary-num">對帳 ${rows.filter(r => (r.types || []).indexOf('寄賣對帳') >= 0).length} 家</div><div class="summary-label">寄賣對帳</div></div>
+    <div class="summary-cell"><div class="summary-num">${FV2.dadTodos.length}</div><div class="summary-label">老爸的事</div></div>`;
+  document.getElementById('finish-auto-written').textContent = `拜訪紀錄 ${done} 筆（實際筆數要以拜訪紀錄表為準，這裡只是今日行程完成數的近似值）`;
+
+  const needReschedule = rows.filter(r => r.status === '跳過' && !r.note);
+  const todoCard = document.getElementById('finish-todo-card');
+  if (needReschedule.length) {
+    todoCard.hidden = false;
+    document.getElementById('finish-todo-list').innerHTML = needReschedule.map(r => `<div>${escapeHtml_(r.name)}（跳過，還沒選改期）</div>`).join('');
+  } else {
+    todoCard.hidden = true;
+  }
+
+  // 老爸的事：來自 KV todos-v2（quadrant==='dad'），不是用 owner 欄位判斷（使用者修正）
+  const dadEl = document.getElementById('finish-dad-notes');
+  dadEl.innerHTML = FV2.dadTodos.length
+    ? `<div class="dad-note">老爸的事：${FV2.dadTodos.map(t => escapeHtml_(t.task)).join('、')}</div>`
+    : '';
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-go="5-finish"]')) fv2RenderFinish(); });
+
+// 拜訪目的選項（跟 docs/今日清單_規格.md VISIT_PURPOSES 同一組值，之後要集中到 planner-config.js
+// 時這裡要一起改，暫時先照抄一份，跟 planner.html 既有「不共用、各自複製」的慣例一致）
+const FV2_VISIT_PURPOSES = ['例行拜訪', '新店開發', '送貨', '對帳請款', '介紹新品', '其他'];
+document.getElementById('add-stop-purposes').innerHTML = FV2_VISIT_PURPOSES
+  .map((p, i) => `<span class="chip${i === 0 ? ' selected' : ''}" data-value="${escapeHtml_(p)}">${escapeHtml_(p)}</span>`).join('');
 
 showScreen('1-home');
+fv2LoadAll();
 </script>
 </body>
 </html>
