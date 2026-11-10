@@ -3284,7 +3284,7 @@ async function handleOverview(env, ctx) {
   // 攤平成跟正式客戶同一種格子資料，給區域分組用。
   const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
-  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const devStages = ['發現', '初訪後', '二訪後'];
   const developing = screeningRows
     .filter(r => r.decision === '要去' && devStages.indexOf(r.stage) >= 0 && !possiblyConvertedIds.has(r.id))
     .map(r => {
@@ -4078,18 +4078,21 @@ async function handleFunnelResult(request, env, ctx) {
   if (action === 'keep') {
     toStage = fromStage;
   } else if (action === 'advance') {
-    if (idx < 0 || idx > 2) {
-      return json({ error: idx === 3 ? '試賣中之後請用「確認已建檔」，不能用一般推進' : '目前階段不允許推進' }, 400);
+    // 2026-11-10 field-v2 階段1：拿掉「試賣中」階段，初訪後（idx===1）是現在最後一個能 advance 的
+    // 階段，二訪後（idx===2）之後不再能用一般推進，只能 confirmed 或 drop（邊界跟 Code.gs 的
+    // computeNextStage_ 同步）
+    if (idx < 0 || idx > 1) {
+      return json({ error: idx === 2 ? '二訪後之後請用「確認已建檔」或「放棄」，不能用一般推進' : '目前階段不允許推進' }, 400);
     }
     toStage = stages[idx + 1];
     stageAction = 'advance';
   } else if (action === 'drop') {
-    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許放棄（必須是發現～試賣中之一）' }, 400);
+    if (idx < 0 || idx > 2) return json({ error: '目前階段不允許放棄（必須是發現～二訪後之一）' }, 400);
     if (!dropReason) return json({ error: '放棄必須填原因' }, 400);
     toStage = '放棄';
     stageAction = 'drop';
   } else { // confirmed
-    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許確認已建檔（必須是發現～試賣中之一）' }, 400);
+    if (idx < 0 || idx > 2) return json({ error: '目前階段不允許確認已建檔（必須是發現～二訪後之一）' }, 400);
     if (!customerId) return json({ error: '缺少 customerId' }, 400);
     const pharmaciesRes = await handleGetPharmacies(null, env, ctx).then(r => r.json());
     const exists = (pharmaciesRes.pharmacies || []).some(p => p.id === customerId);
@@ -4181,7 +4184,7 @@ async function handleFunnelOverview(request, env, ctx) {
   const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
   const convertedCustomerId = convertedCustomerIdByStore_(stageHistoryRows);
-  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const devStages = ['發現', '初訪後', '二訪後'];
   const stages = PLANNER_CONFIG.newStoreStages;
 
   const cards = screeningRows
@@ -4232,7 +4235,7 @@ async function handleFunnelOverview(request, env, ctx) {
     return { rate: Math.round((advancedCount / enteredIds.size) * 1000) / 10, samples: enteredIds.size };
   }
 
-  const columns = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'].map(stage => ({
+  const columns = ['發現', '初訪後', '二訪後', '轉正式', '放棄'].map(stage => ({
     stage,
     intervalDays: PLANNER_CONFIG.stageIntervalDays[stage] || null,
     cards: cards.filter(c => c.stage === stage),
