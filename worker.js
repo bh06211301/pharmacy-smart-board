@@ -137,11 +137,6 @@ export default {
         return await handleCustomerStatus(request, env);
       }
 
-      // ★ 新增：業務待辦清單（舊版，保留相容）
-      if (path === '/todos') {
-        return await handleTodos(request, env);
-      }
-
       // ★ 新版待辦清單（KV 持久化）
       if (path === '/todos-v2') {
         return await handleTodosV2(request, env);
@@ -980,30 +975,10 @@ async function handleCustomerStatus(request, env) {
   return json({ error: '不支援此 method' }, 405);
 }
 
-// ============================================================
-// 9. 業務待辦清單（代理到 Google Apps Script）
-// ============================================================
-async function handleTodos(request, env) {
-  if (request.method === 'GET') {
-    const res = await fetch(`${env.GAS_URL}?action=getTodos`, { redirect: 'follow' });
-    const data = await res.json();
-    return json(data);
-  }
-
-  if (request.method === 'POST') {
-    const body = await request.json();
-    const res = await fetch(env.GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      redirect: 'follow',
-    });
-    const data = await res.json();
-    return json(data);
-  }
-
-  return json({ error: '不支援此 method' }, 405);
-}
+// 2026-11-10 field-v2 階段1：移除「9. 業務待辦清單」整組（/todos 路由、handleTodos、
+// env.GAS_URL）——全專案找不到任何前端呼叫，轉送到的 GAS（customer-status-gas）doGet
+// 本來就沒實作 getTodos，一直回「未知 action」，見 docs/SPEC.md 第11節。部署時記得連
+// GAS_URL 的 wrangler secret 一併刪除（見部署步驟）。
 
 // ============================================================
 // 10. 新版待辦清單（Cloudflare KV 持久化）
