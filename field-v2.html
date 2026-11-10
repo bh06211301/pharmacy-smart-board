@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>field-v2 骨架（假資料，不呼叫任何 API）</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* ============ 開發用骨架切換列（不是正式設計的一部分，截圖時可以忽略這條） ============ */
+  #dev-switch {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; flex-wrap: wrap; gap: 4px;
+    background: #222; padding: 8px; font-size: 11px;
+  }
+  #dev-switch button {
+    font-size: 11px; padding: 4px 8px; border-radius: var(--sr-radius-sm);
+    border: 1px solid #555; background: #333; color: #ddd; cursor: pointer;
+  }
+  #dev-switch button.active { background: var(--sr-primary); color: #fff; border-color: var(--sr-primary); }
+
+  body { background: var(--sr-bg-subtle); }
+  .phone {
+    max-width: 390px; margin: 0 auto; background: var(--sr-bg); min-height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  .screen { display: none; flex-direction: column; flex: 1; }
+  .screen.active { display: flex; }
+
+  /* ---------- 共用 ---------- */
+  .topbar {
+    padding: var(--sr-space-6) var(--sr-space-6) var(--sr-space-4);
+    border-bottom: 1px solid var(--sr-line-soft);
+  }
+  .topbar-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
+  .topbar-sub { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: var(--sr-space-1); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--sr-text-xs); padding: 2px 10px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-bg-subtle); color: var(--sr-ink-2);
+  }
+  .pill.synced { background: var(--sr-primary-tint); color: var(--sr-primary-hover); }
+  .pill.offline { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .body-scroll { flex: 1; overflow-y: auto; padding: var(--sr-space-6); display: flex; flex-direction: column; gap: var(--sr-space-6); }
+  .card {
+    border: 1px solid var(--sr-line-soft); border-radius: var(--sr-radius-lg);
+    padding: var(--sr-space-6); background: var(--sr-bg);
+  }
+  .card-hero { border-color: var(--sr-primary); box-shadow: 0 0 0 1px var(--sr-primary) inset; }
+  .store-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); }
+  .store-meta { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: 2px; }
+  .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--sr-space-3); }
+  .tag {
+    font-size: var(--sr-text-2xs); padding: 2px 8px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-bg-subtle); color: var(--sr-ink-2);
+  }
+  .tag.tier-hot { background: var(--sr-danger-soft); color: var(--sr-ink); }
+  .tag.warn { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .btn {
+    height: var(--sr-btn-h); border-radius: var(--sr-radius-md); border: 1px solid var(--sr-line);
+    background: var(--sr-bg); color: var(--sr-ink); font-size: var(--sr-text-md);
+    display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  }
+  .btn.primary { background: var(--sr-primary); color: var(--sr-on-dark); border-color: var(--sr-primary); }
+  .btn.lg { height: var(--sr-btn-h-lg); font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
+  .btn.danger-outline { border-color: var(--sr-danger); color: var(--sr-danger); }
+  .btn-row { display: flex; gap: var(--sr-space-4); }
+  .btn-row > .btn { flex: 1; }
+  .bottombar { padding: var(--sr-space-6); border-top: 1px solid var(--sr-line-soft); display: flex; flex-direction: column; gap: var(--sr-space-4); }
+
+  .stop-list { display: flex; flex-direction: column; gap: var(--sr-space-3); }
+  .stop-row {
+    display: flex; align-items: center; gap: var(--sr-space-4);
+    padding: var(--sr-space-4) var(--sr-space-5); border-radius: var(--sr-radius-md);
+    border: 1px solid var(--sr-line-soft);
+  }
+  .stop-row.current { background: var(--sr-primary-tint); border-color: var(--sr-primary); }
+  .stop-row.done { color: var(--sr-ink-3); }
+  .stop-row.done .stop-name { text-decoration: line-through; }
+  .stop-row.skipped { background: var(--sr-bg-subtle); color: var(--sr-ink-3); }
+  .stop-dot {
+    width: var(--sr-step-size); height: var(--sr-step-size); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    font-size: var(--sr-text-sm); border: 1.5px solid var(--sr-line);
+  }
+  .stop-row.current .stop-dot { background: var(--sr-primary); border-color: var(--sr-primary); color: #fff; }
+  .stop-row.done .stop-dot { background: var(--sr-ink-3); border-color: var(--sr-ink-3); color: #fff; }
+  .stop-row.skipped .stop-dot { border-style: dashed; }
+  .stop-main { flex: 1; min-width: 0; }
+  .stop-name { font-size: var(--sr-text-base); font-weight: var(--sr-weight-medium); }
+  .stop-sub { font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .stop-row.warn-conflict { outline: 1.5px solid var(--sr-danger); background: var(--sr-danger-tint); }
+  .conflict-text { color: var(--sr-danger); font-size: var(--sr-text-xs); margin-top: 2px; }
+
+  .section-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
+  textarea, input[type=text] {
+    width: 100%; box-sizing: border-box; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-4); font-size: var(--sr-text-base); font-family: var(--sr-font);
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .choice-group { display: flex; flex-direction: column; gap: var(--sr-space-3); }
+  .choice {
+    display: flex; align-items: center; gap: var(--sr-space-4);
+    padding: var(--sr-space-5); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    cursor: pointer;
+  }
+  .choice.selected { border-color: var(--sr-primary); background: var(--sr-primary-tint); }
+  .choice input { accent-color: var(--sr-primary); }
+  .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-size: var(--sr-text-xs); padding: 4px 12px; border-radius: var(--sr-radius-pill);
+    border: 1px solid var(--sr-line); cursor: pointer; background: var(--sr-bg);
+  }
+  .chip.selected { background: var(--sr-primary); color: #fff; border-color: var(--sr-primary); }
+  .mic-row { display: flex; gap: var(--sr-space-3); align-items: center; margin-top: var(--sr-space-2); }
+  .mic-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--sr-line);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; background: var(--sr-bg);
+  }
+  .progress-wrap { display: flex; align-items: center; gap: var(--sr-space-4); }
+  .progress-track { flex: 1; height: 6px; border-radius: var(--sr-radius-pill); background: var(--sr-bg-track); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--sr-primary); }
+  .center-note { text-align: center; color: var(--sr-ink-2); font-size: var(--sr-text-sm); padding: var(--sr-space-6); }
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sr-space-4); }
+  .summary-cell { border: 1px solid var(--sr-line-soft); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); text-align: center; }
+  .summary-num { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .summary-label { font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .dad-note { background: var(--sr-billing-tint); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); font-size: var(--sr-text-sm); }
+  .sheet-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; align-items: flex-end; justify-content: center;
+  }
+  .sheet-backdrop.open { display: flex; }
+  .sheet {
+    width: 100%; max-width: 390px; background: var(--sr-bg); border-radius: var(--sr-radius-xl) var(--sr-radius-xl) 0 0;
+    padding: var(--sr-space-7); display: flex; flex-direction: column; gap: var(--sr-space-5);
+  }
+  .inline-link { color: var(--sr-primary); font-size: var(--sr-text-sm); background: none; border: none; cursor: pointer; padding: 0; }
+</style>
+</head>
+<body>
+
+<div id="dev-switch"></div>
+
+<div class="phone">
+
+  <!-- ============ 1. 今日行程（首頁） ============ -->
+  <section class="screen" data-screen="1-home">
+    <div class="topbar">
+      <div class="topbar-title">11 月 10 日（二）</div>
+      <div class="topbar-sub">
+        <span class="pill synced">已同步 10:32</span>
+        <span class="progress-wrap" style="margin-top:6px">
+          <span class="progress-track"><span class="progress-fill" style="width:40%"></span></span>
+          <span style="font-size:var(--sr-text-xs);color:var(--sr-ink-2);white-space:nowrap">2 / 5 站完成</span>
+        </span>
+      </div>
+      <div class="topbar-sub">預估收工 17:20</div>
+    </div>
+    <div class="body-scroll">
+      <div class="section-label">下一站</div>
+      <div class="card card-hero">
+        <div class="store-meta">第 3 站 · 預計 14:10 到</div>
+        <div class="store-name">早安藥局</div>
+        <div class="store-meta">新北市板橋區文化路 120 號 · 車程 8 分</div>
+        <div class="tag-row">
+          <span class="tag tier-hot">大咖</span>
+          <span class="tag warn">該去了（倍數 1.4）</span>
+          <span class="tag">送貨</span>
+        </div>
+        <div class="store-meta" style="margin-top:var(--sr-space-3)">拜訪目的：送貨　備註：帶新品試用包</div>
+        <div class="btn-row" style="margin-top:var(--sr-space-5)">
+          <button class="btn" data-go="nav">開始導航</button>
+          <button class="btn primary" data-go="2-arrive">我到了</button>
+        </div>
+      </div>
+
+      <div class="section-label">全部站點</div>
+      <div class="stop-list">
+        <div class="stop-row done"><div class="stop-dot">✓</div><div class="stop-main"><div class="stop-name">仁心藥局</div><div class="stop-sub">完成 · 巡視</div></div></div>
+        <div class="stop-row done"><div class="stop-dot">✓</div><div class="stop-main"><div class="stop-name">康美藥局</div><div class="stop-sub">完成 · 對帳請款</div></div></div>
+        <div class="stop-row current"><div class="stop-dot">3</div><div class="stop-main"><div class="stop-name">早安藥局</div><div class="stop-sub">目前站 · 送貨</div></div></div>
+        <div class="stop-row warn-conflict">
+          <div class="stop-dot">4</div>
+          <div class="stop-main">
+            <div class="stop-name">老友藥局</div>
+            <div class="stop-sub">預計 15:05 到 · 例行拜訪</div>
+            <div class="conflict-text">藥師 16:00 後才在，會早到 6 分</div>
+          </div>
+        </div>
+        <div class="stop-row skipped"><div class="stop-dot">✕</div><div class="stop-main"><div class="stop-name">新生藥局</div><div class="stop-sub">跳過：店休沒開</div></div></div>
+      </div>
+
+      <button class="btn" data-go="1a-add-stop">＋ 臨時加一站</button>
+    </div>
+    <div class="bottombar" style="flex-direction:row;justify-content:space-around">
+      <span class="inline-link" style="color:var(--sr-primary);font-weight:700">今日</span>
+      <span class="inline-link">地圖</span>
+      <span class="inline-link" data-go="5-finish">收工</span>
+    </div>
+  </section>
+
+  <!-- ============ 1a. 臨時加一站（A） ============ -->
+  <section class="screen" data-screen="1a-add-stop">
+    <div class="topbar">
+      <button class="inline-link" data-go="1-home">← 返回</button>
+      <div class="topbar-title" style="margin-top:6px">臨時加一站</div>
+    </div>
+    <div class="body-scroll">
+      <input type="text" placeholder="搜尋店名（正式客戶＋開發中新店）" value="老">
+      <div class="stop-list">
+        <div class="stop-row" style="cursor:pointer">
+          <div class="stop-main">
+            <div class="stop-name">老友藥局</div>
+            <div class="stop-sub">板橋區 · 距目前站 1.2 公里 · 倍數 1.3</div>
+          </div>
+        </div>
+        <div class="stop-row" style="cursor:pointer">
+          <div class="stop-main">
+            <div class="stop-name">老地方藥局（新店 · 初訪後）</div>
+            <div class="stop-sub">板橋區 · 距目前站 2.0 公里</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">去做什麼（可複選）</div>
+      <div class="chip-group">
+        <span class="chip selected">例行拜訪</span>
+        <span class="chip">新店開發</span>
+        <span class="chip">送貨</span>
+        <span class="chip">對帳請款</span>
+        <span class="chip">介紹新品</span>
+        <span class="chip">其他</span>
+      </div>
+
+      <div class="section-label">插在哪裡</div>
+      <div class="choice-group">
+        <label class="choice selected"><input type="radio" name="insert" checked><div><div>最順路的位置</div><div class="stop-sub">收工時間不變：17:20</div></div></label>
+        <label class="choice"><input type="radio" name="insert"><div><div>馬上去（下一站）</div><div class="stop-sub">收工時間推後：17:35</div></div></label>
+        <label class="choice"><input type="radio" name="insert"><div><div>最後一站</div><div class="stop-sub">收工時間推後：17:48</div></div></label>
+      </div>
+    </div>
+    <div class="bottombar"><button class="btn primary lg" data-go="1-home">加入今日行程</button></div>
+  </section>
+
+  <!-- ============ 2. 到店 ============ -->
+  <section class="screen" data-screen="2-arrive">
+    <div class="topbar">
+      <div class="topbar-title">第 3 站</div>
+    </div>
+    <div class="body-scroll">
+      <div class="card">
+        <div class="store-name">早安藥局 <span style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">C042</span></div>
+        <div class="store-meta">板橋區 · 藥師：陳大同</div>
+        <div class="tag-row">
+          <span class="tag tier-hot">大咖</span>
+          <span class="tag warn">該去了</span>
+        </div>
+        <div class="store-meta" style="margin-top:var(--sr-space-3)">已 42 天未訪 · 倍數 1.4</div>
+        <button class="btn" style="margin-top:var(--sr-space-4)">📞 打電話</button>
+      </div>
+
+      <div class="card">
+        <div class="section-label">這站要做的事</div>
+        <div class="store-meta" style="margin-top:4px">拜訪目的：送貨　寄賣待整理：$3,200（月均 $2,100）</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">上次拜訪</div>
+        <div class="store-meta" style="margin-top:4px">10/20 · 送貨 · 補了止痛藥存貨</div>
+        <div class="store-meta">09/30 · 巡視 · 藥師反映某品項賣得不錯</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">待追蹤與規則</div>
+        <div class="store-meta" style="margin-top:4px">⚠ 待追蹤：下次經過確認退貨單</div>
+      </div>
+
+      <button class="btn">🤖 AI 拜訪前簡報</button>
+    </div>
+    <div class="bottombar">
+      <div class="btn-row">
+        <button class="btn danger-outline" data-go="4-skip">跳過</button>
+        <button class="btn primary" data-go="3-record-customer">完成並記錄</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. 記錄拜訪（正式客戶） ============ -->
+  <section class="screen" data-screen="3-record-customer">
+    <div class="topbar">
+      <button class="inline-link" data-go="2-arrive">← 返回</button>
+      <div class="topbar-title" style="margin-top:6px">記錄拜訪 · 早安藥局</div>
+    </div>
+    <div class="body-scroll">
+      <div class="section-label">拜訪類型</div>
+      <div class="chip-group">
+        <span class="chip selected">送貨</span>
+        <span class="chip">巡視</span>
+        <span class="chip">收款</span>
+        <span class="chip">新案開發</span>
+      </div>
+
+      <div class="section-label">拜訪內容</div>
+      <textarea placeholder="說說今天拜訪的狀況…">藥師反映止痛藥存貨快不夠，已補一箱。</textarea>
+      <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
+
+      <div class="section-label">標籤（可複選）</div>
+      <div class="chip-group">
+        <span class="chip">競品</span>
+        <span class="chip selected">缺貨</span>
+        <span class="chip">客訴</span>
+        <span class="chip">價格</span>
+        <span class="chip">滿意</span>
+        <span class="chip">其他</span>
+      </div>
+
+      <div class="section-label">緊急問題</div>
+      <input type="text" placeholder="有的話才填">
+
+      <div class="section-label">下次要記得</div>
+      <input type="text" placeholder="例如：帶新品試用包">
+
+      <label class="choice"><input type="checkbox" checked><div>同時建立待追蹤（下次經過）</div></label>
+
+      <div class="dad-note">負責人是老爸的店：收工摘要會提醒「送貨：帳單要還給老爸」</div>
+    </div>
+    <div class="bottombar"><button class="btn primary lg" data-go="1-home">儲存並回首頁</button></div>
+  </section>
+
+  <!-- ============ 3b. 記錄拜訪（新店，B） ============ -->
+  <section class="screen" data-screen="3b-record-newstore">
+    <div class="topbar">
+      <button class="inline-link" data-go="2-arrive">← 返回</button>
+      <div class="topbar-title" style="margin-top:6px">記錄拜訪 · 老地方藥局</div>
+      <div class="topbar-sub">目前階段：二訪後 · 第 16 天</div>
+    </div>
+    <div class="body-scroll">
+      <div class="section-label">這次結果</div>
+      <div class="choice-group">
+        <label class="choice" style="opacity:.5"><input type="radio" name="result" disabled><div><div>談過了，往下一步</div><div class="stop-sub">二訪後之後不提供這個選項</div></div></label>
+        <label class="choice selected"><input type="radio" name="result" checked><div>藥師不在，下次再來</div></label>
+        <label class="choice"><input type="radio" name="result"><div>成交，轉正式客戶</div></label>
+        <label class="choice"><input type="radio" name="result"><div>放棄這家</div></label>
+      </div>
+
+      <div id="confirm-customer-search" style="display:none" class="card">
+        <div class="section-label">正式代號</div>
+        <input type="text" placeholder="搜尋或輸入正式客戶代號，例如 C042">
+        <div class="stop-sub" style="margin-top:4px">轉正式必填代號，系統會核對新客戶資料表確實存在這個代號。</div>
+      </div>
+
+      <div class="section-label">拜訪內容</div>
+      <textarea placeholder="說說這次談的狀況…">藥師說需要再想想，下週再來一次。</textarea>
+      <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
+
+      <div class="section-label">下次要記得</div>
+      <input type="text" placeholder="例如：帶報價單">
+    </div>
+    <div class="bottombar"><button class="btn primary lg" data-go="1-home">儲存並回首頁</button></div>
+  </section>
+
+  <!-- ============ 4. 跳過這站 ============ -->
+  <section class="screen" data-screen="4-skip">
+    <div class="topbar">
+      <button class="inline-link" data-go="2-arrive">← 返回</button>
+      <div class="topbar-title" style="margin-top:6px">跳過 · 早安藥局</div>
+    </div>
+    <div class="body-scroll">
+      <div class="section-label">原因</div>
+      <div class="choice-group">
+        <label class="choice selected"><input type="radio" name="skip" checked><div>藥師不在</div></label>
+        <label class="choice"><input type="radio" name="skip"><div>店休沒開</div></label>
+        <label class="choice"><input type="radio" name="skip"><div>時間不夠</div></label>
+        <label class="choice"><input type="radio" name="skip"><div>老爸臨時要我送貨</div></label>
+        <label class="choice"><input type="radio" name="skip"><div>其他</div></label>
+      </div>
+
+      <div class="section-label">改哪天</div>
+      <div class="choice-group">
+        <label class="choice"><input type="radio" name="reschedule"><div><div>11/12（四）</div><div class="stop-sub">同區，當天已排 3 家</div></div></label>
+        <label class="choice"><input type="radio" name="reschedule"><div><div>11/14（六）</div><div class="stop-sub">這區最近還沒排的平日</div></div></label>
+        <label class="choice"><input type="radio" name="reschedule"><div>選其他日期</div></label>
+        <label class="choice"><input type="radio" name="reschedule"><div>先不排</div></label>
+      </div>
+    </div>
+    <div class="bottombar"><button class="btn primary lg" data-go="4a-nearby">確定</button></div>
+  </section>
+
+  <!-- ============ 4a. 順路補一家（C） ============ -->
+  <section class="screen" data-screen="4a-nearby">
+    <div class="sheet-backdrop open" style="position:static;background:none;flex:1;display:flex;align-items:flex-end">
+      <div class="sheet" style="width:100%;box-sizing:border-box">
+        <div class="topbar-title">多出 12 分鐘，順路補一家？</div>
+        <div class="stop-list">
+          <div class="stop-row">
+            <div class="stop-main">
+              <div class="stop-name">仁和藥局</div>
+              <div class="stop-sub">倍數 1.2 · 距離 0.8 公里 · 多花 5 分</div>
+            </div>
+            <button class="btn" style="width:auto;padding:0 var(--sr-space-5)">加入</button>
+          </div>
+          <div class="stop-row">
+            <div class="stop-main">
+              <div class="stop-name">大安藥局</div>
+              <div class="stop-sub">倍數 1.1 · 距離 1.1 公里 · 多花 8 分</div>
+            </div>
+            <button class="btn" style="width:auto;padding:0 var(--sr-space-5)">加入</button>
+          </div>
+        </div>
+        <button class="btn" data-go="1-home">不用，直接去下一站</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. 今天收工 ============ -->
+  <section class="screen" data-screen="5-finish">
+    <div class="topbar">
+      <div class="topbar-title">今天收工</div>
+    </div>
+    <div class="body-scroll">
+      <div class="summary-grid">
+        <div class="summary-cell"><div class="summary-num">4</div><div class="summary-label">完成</div></div>
+        <div class="summary-cell"><div class="summary-num">1</div><div class="summary-label">跳過</div></div>
+        <div class="summary-cell"><div class="summary-num">對帳 2 家</div><div class="summary-label">寄賣對帳</div></div>
+        <div class="summary-cell"><div class="summary-num">1</div><div class="summary-label">新增待追蹤</div></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">已自動寫進系統</div>
+        <div class="store-meta" style="margin-top:4px">拜訪紀錄 4 筆 · 新增待追蹤 1 筆 · 新店推進 1 家</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">還要處理</div>
+        <div class="store-meta" style="margin-top:4px">新生藥局（跳過，還沒選改期）</div>
+        <div class="btn-row" style="margin-top:var(--sr-space-4)">
+          <button class="btn">11/12（四）</button>
+          <button class="btn">選其他日期</button>
+        </div>
+      </div>
+
+      <div class="dad-note">老爸的事：早安藥局送貨帳單要還給老爸</div>
+    </div>
+    <div class="bottombar"><button class="btn primary lg">確認收工</button></div>
+  </section>
+
+</div>
+
+<script>
+// ============ 純前端畫面切換，不呼叫任何 API、不讀寫任何試算表/GAS/Worker ============
+const SCREENS = ['1-home', '1a-add-stop', '2-arrive', '3-record-customer', '3b-record-newstore', '4-skip', '4a-nearby', '5-finish'];
+const SCREEN_LABELS = {
+  '1-home': '1 首頁', '1a-add-stop': '1a 加一站', '2-arrive': '2 到店',
+  '3-record-customer': '3 記錄-客戶', '3b-record-newstore': '3b 記錄-新店',
+  '4-skip': '4 跳過', '4a-nearby': '4a 補一家', '5-finish': '5 收工',
+};
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === id));
+  document.querySelectorAll('#dev-switch button').forEach(b => b.classList.toggle('active', b.dataset.target === id));
+}
+
+const switchBar = document.getElementById('dev-switch');
+SCREENS.forEach(id => {
+  const btn = document.createElement('button');
+  btn.textContent = SCREEN_LABELS[id];
+  btn.dataset.target = id;
+  btn.addEventListener('click', () => showScreen(id));
+  switchBar.appendChild(btn);
+});
+
+document.querySelectorAll('[data-go]').forEach(el => {
+  el.addEventListener('click', () => showScreen(el.dataset.go));
+});
+
+// 3b「成交，轉正式客戶」選到時才顯示代號搜尋欄
+document.querySelectorAll('input[name="result"]').forEach(r => {
+  r.addEventListener('change', (e) => {
+    const label = e.target.closest('.choice').textContent.trim();
+    document.getElementById('confirm-customer-search').style.display = label.indexOf('轉正式') >= 0 ? 'block' : 'none';
+  });
+});
+
+// chip / choice 選取視覺（純畫面效果，不影響任何資料）
+document.querySelectorAll('.chip').forEach(c => {
+  c.addEventListener('click', () => c.classList.toggle('selected'));
+});
+document.querySelectorAll('.choice:not([style*="opacity"])').forEach(c => {
+  c.addEventListener('click', () => {
+    const name = c.querySelector('input')?.name;
+    if (name) document.querySelectorAll(`.choice input[name="${name}"]`).forEach(i => i.closest('.choice').classList.remove('selected'));
+    c.classList.add('selected');
+  });
+});
+
+showScreen('1-home');
+</script>
+</body>
+</html>
