@@ -275,7 +275,8 @@
 
       <div id="confirm-customer-search" style="display:none" class="card">
         <div class="section-label">正式代號</div>
-        <input type="text" id="confirm-customer-id-input" placeholder="搜尋或輸入正式客戶代號，例如 C042">
+        <div id="confirm-customer-candidates"></div>
+        <input type="text" id="confirm-customer-id-input" placeholder="都不符合時可手動輸入代號，例如 C042" style="margin-top:8px">
         <div id="confirm-customer-matches" class="stop-sub" style="margin-top:4px"></div>
       </div>
 
@@ -700,6 +701,73 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   showScreen('1-home');
 });
 
+// 正式代號自動建議（2026-11-11 新需求）：用新店店名/地址去配客戶清單，列出最可能的候選
+// （最多3個），使用者點選才自動填入，避免手動輸入打錯代號。地址完全相同優先權最高，其次是
+// 店名完全相同，再其次是店名/地址互相包含——跟 funnel.html 共用同一套比對邏輯（兩份檔案各自
+// 內嵌一份，這個專案目前沒有共用 JS 模組機制，跟其他重複邏輯一樣的慣例）。
+function suggestCustomerMatches_(storeName, storeAddress, pharmacies) {
+  const normName = (s) => String(s || '').trim();
+  const normAddr = (s) => String(s || '').replace(/\s+/g, '');
+  const nameQ = normName(storeName);
+  const addrQ = normAddr(storeAddress);
+  const scored = (pharmacies || []).map(p => {
+    const pName = normName(p.name);
+    const pAddr = normAddr(p.address);
+    let score = 0;
+    if (addrQ && pAddr) {
+      if (addrQ === pAddr) score += 100;
+      else if (pAddr.indexOf(addrQ) >= 0 || addrQ.indexOf(pAddr) >= 0) score += 40;
+    }
+    if (nameQ && pName) {
+      if (nameQ === pName) score += 60;
+      else if (pName.indexOf(nameQ) >= 0 || nameQ.indexOf(pName) >= 0) score += 25;
+    }
+    return { p, score };
+  }).filter(x => x.score > 0);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map(x => x.p);
+}
+
+function fv2RenderConfirmCandidates_(storeName, storeAddress) {
+  const el = document.getElementById('confirm-customer-candidates');
+  if (!el) return;
+  const candidates = suggestCustomerMatches_(storeName, storeAddress, FV2.pharmacies);
+  const refreshBtnHtml = `<button type="button" class="inline-link" id="confirm-candidates-refresh">重新整理清單</button>`;
+  if (!candidates.length) {
+    el.innerHTML = `<div class="stop-sub">沒有找到可能的候選。剛建立的客戶可能還沒同步，可按重新整理清單。${refreshBtnHtml}</div>`;
+  } else {
+    el.innerHTML = candidates.map(p => `
+      <div class="choice" data-candidate-id="${escapeHtml_(p.id)}">
+        <div><div>${escapeHtml_(p.id)}　${escapeHtml_(p.name)}</div><div class="stop-sub">${escapeHtml_(p.address || '—')}</div></div>
+      </div>`).join('') +
+      `<div class="stop-sub" style="margin-top:4px">都不對時可以直接在下面手動輸入代號。${refreshBtnHtml}</div>`;
+  }
+  el.querySelectorAll('[data-candidate-id]').forEach(elm => {
+    elm.addEventListener('click', () => {
+      const idInput = document.getElementById('confirm-customer-id-input');
+      idInput.value = elm.dataset.candidateId;
+      idInput.dispatchEvent(new Event('input'));
+      el.querySelectorAll('[data-candidate-id]').forEach(x => x.classList.toggle('selected', x === elm));
+    });
+  });
+  document.getElementById('confirm-candidates-refresh')?.addEventListener('click', async (e) => {
+    e.target.textContent = '重新整理中…'; e.target.disabled = true;
+    await fv2RefetchPharmacies_();
+    fv2RenderConfirmCandidates_(storeName, storeAddress);
+  });
+}
+
+// 重新抓 /pharmacies，不經過任何本機快取——目前還是會打到 Worker 既有的 SWR 快取（4分鐘內
+// 可能還是拿到同一份舊資料），真正略過 Worker 端快取需要 Worker 加參數，這次先不做（見回報）。
+async function fv2RefetchPharmacies_() {
+  try {
+    const data = await fetch(`${WORKER}/pharmacies`).then(r => r.json());
+    FV2.pharmacies = data.pharmacies || [];
+  } catch (e) {
+    fv2Toast_('重新整理清單失敗：' + e.message, true);
+  }
+}
+
 // ---- 3b. 記錄拜訪（新店） ----
 function fv2RenderRecordNewstore(storeId) {
   const { rec } = fv2StoreMeta_(storeId);
@@ -724,7 +792,16 @@ function fv2RenderRecordNewstore(storeId) {
 }
 document.addEventListener('change', (e) => {
   if (e.target.name === 'result') {
-    document.getElementById('confirm-customer-search').style.display = e.target.value === 'confirmed' ? 'block' : 'none';
+    const isConfirmed = e.target.value === 'confirmed';
+    document.getElementById('confirm-customer-search').style.display = isConfirmed ? 'block' : 'none';
+    if (isConfirmed) {
+      const storeId = FV2.currentStoreId;
+      const { rec } = fv2StoreMeta_(storeId);
+      const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+      const storeName = rec?.name || row?.name || storeId;
+      const storeAddress = rec?.address || row?.address || '';
+      fv2RenderConfirmCandidates_(storeName, storeAddress);
+    }
   }
 });
 // confirmed 代號搜尋：純前端用已經抓到的 pharmacies 清單比對，不額外打 API

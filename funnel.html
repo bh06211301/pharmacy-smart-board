@@ -227,11 +227,17 @@ function renderBoard() {
     btn.addEventListener('click', () => openScheduleModal(btn.dataset.id, btn.dataset.name));
   });
   root.querySelectorAll('[data-action="result"]').forEach(btn => {
-    btn.addEventListener('click', () => openResultModal({
-      id: btn.dataset.id, name: btn.dataset.name, stage: btn.dataset.stage,
-      canAdvance: btn.dataset.canAdvance === 'true', canDrop: btn.dataset.canDrop === 'true',
-      canConfirm: btn.dataset.canConfirm === 'true',
-    }));
+    btn.addEventListener('click', () => {
+      // 正式代號候選比對需要地址，但 dataset 只帶了 id/name/stage——從 overviewData 找回完整
+      // 的卡片資料（跟 cardHtml() 的 regionText 同一套 fallback：address 沒有就用 city+district）。
+      const full = (overviewData.columns || []).flatMap(col => col.cards).find(x => x.id === btn.dataset.id) || {};
+      openResultModal({
+        id: btn.dataset.id, name: btn.dataset.name, stage: btn.dataset.stage,
+        address: full.address || [full.city, full.district].filter(Boolean).join(' '),
+        canAdvance: btn.dataset.canAdvance === 'true', canDrop: btn.dataset.canDrop === 'true',
+        canConfirm: btn.dataset.canConfirm === 'true',
+      });
+    });
   });
 }
 
@@ -297,6 +303,33 @@ function openScheduleModal(storeId, storeName) {
   });
 }
 
+// 正式代號自動建議（2026-11-11 新需求）：用新店店名/地址去配客戶清單，列出最可能的候選
+// （最多3個），使用者點選才自動填入，避免手動輸入打錯代號。地址完全相同優先權最高，其次是
+// 店名完全相同，再其次是店名/地址互相包含——跟 field-v2.html 共用同一套比對邏輯（兩份檔案各自
+// 內嵌一份，這個專案目前沒有共用 JS 模組機制，跟其他重複邏輯一樣的慣例）。
+function suggestCustomerMatches_(storeName, storeAddress, pharmacies) {
+  const normName = (s) => String(s || '').trim();
+  const normAddr = (s) => String(s || '').replace(/\s+/g, '');
+  const nameQ = normName(storeName);
+  const addrQ = normAddr(storeAddress);
+  const scored = (pharmacies || []).map(p => {
+    const pName = normName(p.name);
+    const pAddr = normAddr(p.address);
+    let score = 0;
+    if (addrQ && pAddr) {
+      if (addrQ === pAddr) score += 100;
+      else if (pAddr.indexOf(addrQ) >= 0 || addrQ.indexOf(pAddr) >= 0) score += 40;
+    }
+    if (nameQ && pName) {
+      if (nameQ === pName) score += 60;
+      else if (pName.indexOf(nameQ) >= 0 || nameQ.indexOf(pName) >= 0) score += 25;
+    }
+    return { p, score };
+  }).filter(x => x.score > 0);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map(x => x.p);
+}
+
 // ---------- 記結果：兩段式（選動作 → 確認送出），比照 pharmacy-visit-app 的送出前確認步驟 ----------
 function openResultModal(card) {
   const root = document.getElementById('modal-root');
@@ -306,13 +339,49 @@ function openResultModal(card) {
   // 裡（render() 每次都會整個重畫 innerHTML，textarea/input 不帶 value 就會變空白）。
   let dropReasonValue = '';
   let customerIdValue = '';
+  // 正式代號候選（2026-11-11）：candidatesState 控制畫面文字，candidates 是比對結果，
+  // 每次打開「確認已建檔」才抓一次 /pharmacies（不跨 modal 開關快取），避免拿到舊資料。
+  let candidates = [];
+  let candidatesState = 'idle'; // idle | loading | loaded | error
+  let candidatesError = '';
+
+  async function loadCandidates_() {
+    candidatesState = 'loading'; render();
+    try {
+      const resp = await window.PlannerAPI.get('/pharmacies');
+      candidates = suggestCustomerMatches_(card.name, card.address, resp.pharmacies || []);
+      candidatesState = 'loaded';
+    } catch (e) {
+      candidatesError = e.message || String(e);
+      candidatesState = 'error';
+    }
+    render();
+  }
+
+  function candidatesHtml() {
+    const refreshBtn = `<button type="button" class="card-name" style="text-decoration:underline;font-size:var(--sr-text-xs)" id="result-candidates-refresh">重新整理清單</button>`;
+    if (candidatesState === 'loading') return `<div class="card-meta">比對中…</div>`;
+    if (candidatesState === 'error') return `<div class="card-meta">比對失敗：${escapeHtml(candidatesError)}　${refreshBtn}</div>`;
+    if (!candidates.length) {
+      return `<div class="card-meta">沒有找到可能的候選。剛建立的客戶可能還沒同步，可按重新整理清單。${refreshBtn}</div>`;
+    }
+    return `<div class="action-choices" style="flex-direction:column">${candidates.map(p => `
+      <button type="button" class="action-choice${customerIdValue === p.id ? ' selected' : ''}" data-candidate-id="${escapeHtml(p.id)}" style="text-align:left">
+        ${escapeHtml(p.id)}　${escapeHtml(p.name)}<div class="card-meta">${escapeHtml(p.address || '—')}</div>
+      </button>`).join('')}</div>
+      <div class="card-meta" style="margin-top:var(--sr-space-2)">都不對時可以直接在下面手動輸入代號。${refreshBtn}</div>`;
+  }
 
   function fieldHtml() {
     if (selectedAction === 'drop') {
       return `<div class="sr-modal-field"><label>放棄原因（必填）</label><textarea id="result-drop-reason">${escapeHtml(dropReasonValue)}</textarea></div>`;
     }
     if (selectedAction === 'confirmed') {
-      return `<div class="sr-modal-field"><label>正式代號（必填，AppSheet 建好客戶後填入，例如 C137）</label><input type="text" id="result-customer-id" value="${escapeHtml(customerIdValue)}"></div>`;
+      return `<div class="sr-modal-field">
+        <label>正式代號（必填）</label>
+        ${candidatesHtml()}
+        <input type="text" id="result-customer-id" value="${escapeHtml(customerIdValue)}" placeholder="都不符合時可手動輸入代號，例如 C137" style="margin-top:var(--sr-space-3)">
+      </div>`;
     }
     return '';
   }
@@ -336,12 +405,22 @@ function openResultModal(card) {
       </div>
     </div>`;
     root.querySelectorAll('[data-choice]').forEach(btn => {
-      btn.addEventListener('click', () => { selectedAction = btn.dataset.choice; render(); });
+      btn.addEventListener('click', () => {
+        selectedAction = btn.dataset.choice;
+        if (selectedAction === 'confirmed' && candidatesState === 'idle') { loadCandidates_(); return; } // loadCandidates_ 自己會 render()
+        render();
+      });
     });
     document.getElementById('result-cancel').addEventListener('click', closeModal);
     document.getElementById('result-overlay').addEventListener('click', (e) => { if (e.target.id === 'result-overlay') closeModal(); });
     const nextBtn = document.getElementById('result-next');
     if (nextBtn) nextBtn.addEventListener('click', () => onNext());
+    if (selectedAction === 'confirmed') {
+      root.querySelectorAll('[data-candidate-id]').forEach(btn => {
+        btn.addEventListener('click', () => { customerIdValue = btn.dataset.candidateId; render(); });
+      });
+      document.getElementById('result-candidates-refresh')?.addEventListener('click', () => { candidatesState = 'idle'; loadCandidates_(); });
+    }
   }
 
   function onNext() {
