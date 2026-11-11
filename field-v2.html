@@ -419,6 +419,12 @@ const DEST_ADDR = '台北市內湖區新民街422號';
 // 寫測試分頁——上線前要改成預設 false，只用 ?test=1 明確才切測試分頁。
 const IS_TEST_MODE = new URLSearchParams(location.search).get('test') !== '0';
 function fv2SheetNameFor_(prodName, testName) { return IS_TEST_MODE ? testName : prodName; }
+// funnel/result（含confirmed）、addFollowup、todos-v2 老爸提醒這三種沒有 _TEST 姊妹分頁可用，
+// 測試模式下不能像拜訪紀錄/今日行程那樣換 sheetName 避開正式資料——改成測試模式一律不送出，
+// 只印 console + toast 提示，payload 仍可在 console 檢查正不正確。
+function fv2TestBlockedLog_(label, payload) {
+  console.log(`[field-v2] 測試模式：未送出 ${label}（沒有_TEST分頁可用）：`, payload);
+}
 if (IS_TEST_MODE) {
   const banner = document.getElementById('fv2-test-banner');
   if (banner) banner.style.display = 'block';
@@ -680,10 +686,17 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const dadTasks = ph ? fv2DadReminderTasks_(visitType, content, storeId, ph.name, ph.owner === '老爸', visitId, dateStr) : [];
 
   console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks });
+  const skipped = [];
   await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
-  if (followupPayload) await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
-  for (const t of dadTasks) await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
-  fv2Toast_('已儲存');
+  if (followupPayload) {
+    if (IS_TEST_MODE) { fv2TestBlockedLog_('待追蹤', followupPayload); skipped.push('待追蹤'); }
+    else await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
+  }
+  for (const t of dadTasks) {
+    if (IS_TEST_MODE) { fv2TestBlockedLog_('老爸提醒', t); if (skipped.indexOf('老爸提醒') < 0) skipped.push('老爸提醒'); }
+    else await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
+  }
+  fv2Toast_(skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存');
   showScreen('1-home');
 });
 
@@ -742,8 +755,10 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
   console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload });
   (async () => {
     await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
-    await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
-    fv2Toast_('已儲存');
+    let skippedFunnel = false;
+    if (IS_TEST_MODE) { fv2TestBlockedLog_('階段推進', funnelPayload); skippedFunnel = true; }
+    else await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
+    fv2Toast_(skippedFunnel ? '已儲存；測試模式：未送出（階段推進）' : '已儲存');
     showScreen('1-home');
   })();
 });
