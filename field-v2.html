@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>field-v2 骨架（假資料，不呼叫任何 API）</title>
+<title>field-v2 外勤模式（測試中）</title>
 <link rel="stylesheet" href="design-tokens.css">
 <style>
   /* ============ 開發用骨架切換列（不是正式設計的一部分，截圖時可以忽略這條） ============ */
@@ -17,6 +17,12 @@
     border: 1px solid #555; background: #333; color: #ddd; cursor: pointer;
   }
   #dev-switch button.active { background: var(--sr-primary); color: #fff; border-color: var(--sr-primary); }
+
+  #fv2-test-banner {
+    display: none;
+    text-align: center; font-size: 12px; font-weight: 700;
+    padding: 6px 10px; background: #ffb400; color: #1a1a1a;
+  }
 
   body { background: var(--sr-bg-subtle); }
   .phone {
@@ -138,6 +144,7 @@
 </head>
 <body>
 
+<div id="fv2-test-banner">⚠️ 測試模式：寫入會寫到 _TEST 分頁，不是正式資料</div>
 <div id="dev-switch"></div>
 
 <div class="phone">
@@ -401,17 +408,10 @@ document.addEventListener('click', (e) => {
 });
 
 // ============================================================
-// 以下開始是真實資料串接（field-v2 階段1剩餘步驟）。原則：
-// - 只送 GET／Google Routes API（瀏覽器端直連，不經過 Worker）。
-// - POST 到 /api/today-plan/row、/add-visit、/todos-v2、/api/followups 的函式都已經寫好，
-//   但今晚使用者明確要求「先不要送、等我在場」——這些函式目前只會被組出 payload，呼叫處
-//   保留但故意沒有在任何自動測試路徑裡被觸發（見 DEV_ALLOW_WRITE 這個旗標，目前鎖 false）。
-// - wrangler dev 本機測試用，之後部署時要把 WORKER 改成正式網址或做成可切換設定。
+// 真實資料串接（field-v2 階段1）。寫入會不會動到正式資料，完全由 IS_TEST_MODE 決定
+// （預設 true，sheetName 一律帶 _TEST；上線前要把預設改成 false，或帶 ?test=0 明確指定正式分頁）。
 // ============================================================
-const WORKER = 'http://127.0.0.1:8787';
-// 2026-11-10：改成 let，讓測試腳本可以在 runtime 用 page.evaluate 開關，不用改這個檔案本身——
-// commit 進 git 的預設值永遠是 false，不會有人忘記關掉就直接部署出去。
-let DEV_ALLOW_WRITE = false;
+const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
 const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 planner.html／index.html 同一把前端 Maps key
 const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
 const DEST_ADDR = '台北市內湖區新民街422號';
@@ -419,6 +419,10 @@ const DEST_ADDR = '台北市內湖區新民街422號';
 // 寫測試分頁——上線前要改成預設 false，只用 ?test=1 明確才切測試分頁。
 const IS_TEST_MODE = new URLSearchParams(location.search).get('test') !== '0';
 function fv2SheetNameFor_(prodName, testName) { return IS_TEST_MODE ? testName : prodName; }
+if (IS_TEST_MODE) {
+  const banner = document.getElementById('fv2-test-banner');
+  if (banner) banner.style.display = 'block';
+}
 
 // ---- 頁面內 toast（取代 alert()，不會中斷操作、不用使用者按確定）----
 function fv2Toast_(msg, isError) {
@@ -675,11 +679,7 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const followupPayload = wantFollowup ? { action: 'addFollowup', storeId, item: nextAction || '拜訪後續', who: '我', deadlineType: '下次經過' } : null;
   const dadTasks = ph ? fv2DadReminderTasks_(visitType, content, storeId, ph.name, ph.owner === '老爸', visitId, dateStr) : [];
 
-  console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks, DEV_ALLOW_WRITE });
-  if (!DEV_ALLOW_WRITE) {
-    fv2Toast_('測試模式：payload 已印在 console，沒有真的送出');
-    return;
-  }
+  console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks });
   await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
   if (followupPayload) await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
   for (const t of dadTasks) await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
@@ -739,11 +739,7 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
   const visitPayload = { visitId, pharmacyName: storeName, date: todayStr_(), purpose: '新案開發', content, sheetName: fv2SheetNameFor_(undefined, '拜訪紀錄_TEST') };
   const funnelPayload = { storeId, action, customerId: action === 'confirmed' ? customerId : undefined, requestId: genRequestId_() };
 
-  console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload, DEV_ALLOW_WRITE });
-  if (!DEV_ALLOW_WRITE) {
-    fv2Toast_('測試模式：payload 已印在 console，沒有真的送出');
-    return;
-  }
+  console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload });
   (async () => {
     await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
     await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
@@ -862,8 +858,7 @@ document.getElementById('add-stop-submit')?.addEventListener('click', () => {
     date: FV2.date, storeId: insertRow.storeId || undefined, address: insertRow.storeId ? undefined : fv2SelectedCandidate.name,
     insertRow, requestId: genRequestId_(), sheetName: fv2SheetNameFor_(undefined, '今日行程_TEST'),
   };
-  console.log('[field-v2] 加入今日行程準備送出的payload：', body, { DEV_ALLOW_WRITE });
-  if (!DEV_ALLOW_WRITE) { fv2Toast_('測試模式：payload 已印在 console，沒有真的送出'); return; }
+  console.log('[field-v2] 加入今日行程準備送出的payload：', body);
   fetch(`${WORKER}/api/today-plan/row`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(() => { fv2Toast_('已加入今日行程'); showScreen('1-home'); });
 });
