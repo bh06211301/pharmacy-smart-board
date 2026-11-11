@@ -705,14 +705,29 @@ document.getElementById('record-customer-save').addEventListener('click', async 
 // （最多3個），使用者點選才自動填入，避免手動輸入打錯代號。地址完全相同優先權最高，其次是
 // 店名完全相同，再其次是店名/地址互相包含——跟 funnel.html 共用同一套比對邏輯（兩份檔案各自
 // 內嵌一份，這個專案目前沒有共用 JS 模組機制，跟其他重複邏輯一樣的慣例）。
+// 正規化只用在比對，候選清單畫面顯示的還是原文（2026-11-11 使用者要求補強）：
+// 臺→台、全形轉半形、拿掉括號（裡面文字留著繼續比對）、拿掉樓層描述（1樓/1F這類）、拿掉
+// 所有空白、拿掉開頭的縣市名（地址常常同一家店有人填「台北市」有人沒填，縣市不算比對重點）。
+const CITY_PREFIXES_ = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市', '基隆市', '新竹市',
+  '新竹縣', '苗栗縣', '彰化縣', '南投縣', '雲林縣', '嘉義市', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣',
+  '台東縣', '澎湖縣', '金門縣', '連江縣'];
+function normalizeForMatch_(s) {
+  let t = String(s || '').replace(/臺/g, '台');
+  t = t.replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)); // 全形轉半形
+  t = t.replace(/[()（）]/g, ''); // 括號本身拿掉，裡面文字留著繼續比對
+  t = t.replace(/\d+樓|\d+F/gi, ''); // 樓層描述（括號已經拿掉，不用再分有沒有被包住）
+  t = t.replace(/\s|　/g, ''); // 一般空白＋全形空白
+  for (const city of CITY_PREFIXES_) {
+    if (t.indexOf(city) === 0) { t = t.slice(city.length); break; }
+  }
+  return t;
+}
 function suggestCustomerMatches_(storeName, storeAddress, pharmacies) {
-  const normName = (s) => String(s || '').trim();
-  const normAddr = (s) => String(s || '').replace(/\s+/g, '');
-  const nameQ = normName(storeName);
-  const addrQ = normAddr(storeAddress);
+  const nameQ = normalizeForMatch_(storeName);
+  const addrQ = normalizeForMatch_(storeAddress);
   const scored = (pharmacies || []).map(p => {
-    const pName = normName(p.name);
-    const pAddr = normAddr(p.address);
+    const pName = normalizeForMatch_(p.name);
+    const pAddr = normalizeForMatch_(p.address);
     let score = 0;
     if (addrQ && pAddr) {
       if (addrQ === pAddr) score += 100;
@@ -757,11 +772,11 @@ function fv2RenderConfirmCandidates_(storeName, storeAddress) {
   });
 }
 
-// 重新抓 /pharmacies，不經過任何本機快取——目前還是會打到 Worker 既有的 SWR 快取（4分鐘內
-// 可能還是拿到同一份舊資料），真正略過 Worker 端快取需要 Worker 加參數，這次先不做（見回報）。
+// 重新抓 /pharmacies，帶 ?fresh=1 跳過 Worker 端 SWR 快取（2026-11-11 使用者同意後補的
+// Worker 參數），直接拿到剛在 AppSheet 建好的最新客戶清單，不用等 4 分鐘快取窗口過期。
 async function fv2RefetchPharmacies_() {
   try {
-    const data = await fetch(`${WORKER}/pharmacies`).then(r => r.json());
+    const data = await fetch(`${WORKER}/pharmacies?fresh=1`).then(r => r.json());
     FV2.pharmacies = data.pharmacies || [];
   } catch (e) {
     fv2Toast_('重新整理清單失敗：' + e.message, true);
