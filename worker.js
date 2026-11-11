@@ -514,7 +514,27 @@ async function handleOptimizeRoute(request, env) {
 // 自己不會觸發背景更新），handlePlannerPlan 等 3 個目標端點會傳兩者進來。
 async function handleGetPharmacies(request, env, ctx, cacheMeta) {
   const sheetName = '新客戶資料表_AppSheet';
-  const { rows, colMap } = await fetchGvizSheet(env.SHEET_PHARMACY, sheetName, env, ctx, cacheMeta);
+  // 2026-11-11：field-v2/funnel 的正式代號候選比對需要抓到剛在 AppSheet 建好、還落在 SWR
+  // 4分鐘快取窗口內的新客戶——帶 ?fresh=1 跳過 fetchGvizSheet() 的快取，直接即時抓一次，
+  // 順便把 KV 快取也更新成這份新資料（cache key 跟 fetchGvizSheet() 用同一套格式，接下來
+  // 的一般請求不用等 4 分鐘窗口過期就能吃到新資料）。不帶這個參數時完全照舊。
+  const fresh = request && new URL(request.url).searchParams.get('fresh') === '1';
+  let rows, colMap;
+  if (fresh) {
+    const raw = await fetchGvizSheetRaw_(env.SHEET_PHARMACY, sheetName);
+    rows = raw.rows; colMap = raw.colMap;
+    if (env.TODOS_KV) {
+      const cacheKey = `gviz:${env.SHEET_PHARMACY}:${sheetName}`;
+      try {
+        await env.TODOS_KV.put(cacheKey, JSON.stringify({ data: { rows, colMap }, cachedAt: Date.now() }));
+      } catch (e) {
+        console.warn('fresh=1 更新快取失敗（不影響這次回應，已經拿到新資料了）', e && e.message || e);
+      }
+    }
+  } else {
+    const entry = await fetchGvizSheet(env.SHEET_PHARMACY, sheetName, env, ctx, cacheMeta);
+    rows = entry.rows; colMap = entry.colMap;
+  }
 
   const pharmacies = rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';

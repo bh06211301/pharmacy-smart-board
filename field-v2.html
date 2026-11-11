@@ -275,7 +275,8 @@
 
       <div id="confirm-customer-search" style="display:none" class="card">
         <div class="section-label">正式代號</div>
-        <input type="text" id="confirm-customer-id-input" placeholder="搜尋或輸入正式客戶代號，例如 C042">
+        <div id="confirm-customer-candidates"></div>
+        <input type="text" id="confirm-customer-id-input" placeholder="都不符合時可手動輸入代號，例如 C042" style="margin-top:8px">
         <div id="confirm-customer-matches" class="stop-sub" style="margin-top:4px"></div>
       </div>
 
@@ -700,6 +701,88 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   showScreen('1-home');
 });
 
+// 正式代號自動建議（2026-11-11 新需求）：用新店店名/地址去配客戶清單，列出最可能的候選
+// （最多3個），使用者點選才自動填入，避免手動輸入打錯代號。地址完全相同優先權最高，其次是
+// 店名完全相同，再其次是店名/地址互相包含——跟 funnel.html 共用同一套比對邏輯（兩份檔案各自
+// 內嵌一份，這個專案目前沒有共用 JS 模組機制，跟其他重複邏輯一樣的慣例）。
+// 正規化只用在比對，候選清單畫面顯示的還是原文（2026-11-11 使用者要求補強）：
+// 臺→台、全形轉半形、拿掉括號（裡面文字留著繼續比對）、拿掉樓層描述（1樓/1F這類）、拿掉
+// 所有空白、拿掉開頭的縣市名（地址常常同一家店有人填「台北市」有人沒填，縣市不算比對重點）。
+const CITY_PREFIXES_ = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市', '基隆市', '新竹市',
+  '新竹縣', '苗栗縣', '彰化縣', '南投縣', '雲林縣', '嘉義市', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣',
+  '台東縣', '澎湖縣', '金門縣', '連江縣'];
+function normalizeForMatch_(s) {
+  let t = String(s || '').replace(/臺/g, '台');
+  t = t.replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)); // 全形轉半形
+  t = t.replace(/[()（）]/g, ''); // 括號本身拿掉，裡面文字留著繼續比對
+  t = t.replace(/\d+樓|\d+F/gi, ''); // 樓層描述（括號已經拿掉，不用再分有沒有被包住）
+  t = t.replace(/\s|　/g, ''); // 一般空白＋全形空白
+  for (const city of CITY_PREFIXES_) {
+    if (t.indexOf(city) === 0) { t = t.slice(city.length); break; }
+  }
+  return t;
+}
+function suggestCustomerMatches_(storeName, storeAddress, pharmacies) {
+  const nameQ = normalizeForMatch_(storeName);
+  const addrQ = normalizeForMatch_(storeAddress);
+  const scored = (pharmacies || []).map(p => {
+    const pName = normalizeForMatch_(p.name);
+    const pAddr = normalizeForMatch_(p.address);
+    let score = 0;
+    if (addrQ && pAddr) {
+      if (addrQ === pAddr) score += 100;
+      else if (pAddr.indexOf(addrQ) >= 0 || addrQ.indexOf(pAddr) >= 0) score += 40;
+    }
+    if (nameQ && pName) {
+      if (nameQ === pName) score += 60;
+      else if (pName.indexOf(nameQ) >= 0 || nameQ.indexOf(pName) >= 0) score += 25;
+    }
+    return { p, score };
+  }).filter(x => x.score > 0);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map(x => x.p);
+}
+
+function fv2RenderConfirmCandidates_(storeName, storeAddress) {
+  const el = document.getElementById('confirm-customer-candidates');
+  if (!el) return;
+  const candidates = suggestCustomerMatches_(storeName, storeAddress, FV2.pharmacies);
+  const refreshBtnHtml = `<button type="button" class="inline-link" id="confirm-candidates-refresh">重新整理清單</button>`;
+  if (!candidates.length) {
+    el.innerHTML = `<div class="stop-sub">沒有找到可能的候選。剛建立的客戶可能還沒同步，可按重新整理清單。${refreshBtnHtml}</div>`;
+  } else {
+    el.innerHTML = candidates.map(p => `
+      <div class="choice" data-candidate-id="${escapeHtml_(p.id)}">
+        <div><div>${escapeHtml_(p.id)}　${escapeHtml_(p.name)}</div><div class="stop-sub">${escapeHtml_(p.address || '—')}</div></div>
+      </div>`).join('') +
+      `<div class="stop-sub" style="margin-top:4px">都不對時可以直接在下面手動輸入代號。${refreshBtnHtml}</div>`;
+  }
+  el.querySelectorAll('[data-candidate-id]').forEach(elm => {
+    elm.addEventListener('click', () => {
+      const idInput = document.getElementById('confirm-customer-id-input');
+      idInput.value = elm.dataset.candidateId;
+      idInput.dispatchEvent(new Event('input'));
+      el.querySelectorAll('[data-candidate-id]').forEach(x => x.classList.toggle('selected', x === elm));
+    });
+  });
+  document.getElementById('confirm-candidates-refresh')?.addEventListener('click', async (e) => {
+    e.target.textContent = '重新整理中…'; e.target.disabled = true;
+    await fv2RefetchPharmacies_();
+    fv2RenderConfirmCandidates_(storeName, storeAddress);
+  });
+}
+
+// 重新抓 /pharmacies，帶 ?fresh=1 跳過 Worker 端 SWR 快取（2026-11-11 使用者同意後補的
+// Worker 參數），直接拿到剛在 AppSheet 建好的最新客戶清單，不用等 4 分鐘快取窗口過期。
+async function fv2RefetchPharmacies_() {
+  try {
+    const data = await fetch(`${WORKER}/pharmacies?fresh=1`).then(r => r.json());
+    FV2.pharmacies = data.pharmacies || [];
+  } catch (e) {
+    fv2Toast_('重新整理清單失敗：' + e.message, true);
+  }
+}
+
 // ---- 3b. 記錄拜訪（新店） ----
 function fv2RenderRecordNewstore(storeId) {
   const { rec } = fv2StoreMeta_(storeId);
@@ -724,7 +807,16 @@ function fv2RenderRecordNewstore(storeId) {
 }
 document.addEventListener('change', (e) => {
   if (e.target.name === 'result') {
-    document.getElementById('confirm-customer-search').style.display = e.target.value === 'confirmed' ? 'block' : 'none';
+    const isConfirmed = e.target.value === 'confirmed';
+    document.getElementById('confirm-customer-search').style.display = isConfirmed ? 'block' : 'none';
+    if (isConfirmed) {
+      const storeId = FV2.currentStoreId;
+      const { rec } = fv2StoreMeta_(storeId);
+      const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+      const storeName = rec?.name || row?.name || storeId;
+      const storeAddress = rec?.address || row?.address || '';
+      fv2RenderConfirmCandidates_(storeName, storeAddress);
+    }
   }
 });
 // confirmed 代號搜尋：純前端用已經抓到的 pharmacies 清單比對，不額外打 API
