@@ -122,8 +122,8 @@
 const { get, post, withBusy, toast, escapeHtml, genRequestId, gvizDateToIso } = window.PlannerAPI;
 window.SRNav.render({ active: 'new-store' });
 
-const STAGES_ORDER = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'];
-const DEV_STAGES = ['發現', '初訪後', '二訪後', '試賣中'];
+const STAGES_ORDER = ['發現', '初訪後', '二訪後', '轉正式', '放棄'];
+const DEV_STAGES = ['發現', '初訪後', '二訪後'];
 
 let overviewData = null;
 let period = '30';
@@ -189,7 +189,8 @@ function cardHtml(c, stage) {
   const isHigh = c.ratio !== null && c.ratio >= 1;
   const nextIdx = STAGES_ORDER.indexOf(stage) + 1;
   const nextStage = nextIdx < STAGES_ORDER.length ? STAGES_ORDER[nextIdx] : null;
-  const canAdvance = DEV_STAGES.indexOf(stage) >= 0 && stage !== '試賣中';
+  // 2026-11-10 field-v2 階段1：拿掉「試賣中」階段後，二訪後變成新的邊界——只能confirmed或drop，不能再advance
+  const canAdvance = DEV_STAGES.indexOf(stage) >= 0 && stage !== '二訪後';
   const canDrop = DEV_STAGES.indexOf(stage) >= 0;
   const canConfirm = DEV_STAGES.indexOf(stage) >= 0;
   return `<div class="card ${isHigh ? 'ratio-high' : ''}" data-id="${escapeHtml(c.id)}">

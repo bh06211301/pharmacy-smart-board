@@ -87,7 +87,7 @@ function ratioClassOf(tier) {
   return tier === 'very-late' ? 'ratio-very-late' : tier === 'late' ? 'ratio-late' : tier === 'soon' ? 'ratio-soon' : 'ratio-early';
 }
 // 開發階段左上角小標（SPEC 5.8「開發中的店左上角標『發／初／二／試』」）
-const DEV_STAGE_BADGE = { '發現': '發', '初訪後': '初', '二訪後': '二', '試賣中': '試' };
+const DEV_STAGE_BADGE = { '發現': '發', '初訪後': '初', '二訪後': '二' };
 
 function tierCardHtml(t) {
   const overText = `${t.overCount} 家該去了`;

@@ -95,7 +95,7 @@
 
 | 新增欄位 | 型別 | 範例 | 說明 |
 |---|---|---|---|
-| 目前階段 | Enum | 初訪後 | 發現／初訪後／二訪後／試賣中／轉正式／放棄 |
+| 目前階段 | Enum | 初訪後 | 發現／初訪後／二訪後／轉正式／放棄（2026-11-10 field-v2 階段1拿掉「試賣中」） |
 | 進入階段日期 | Date | 2026/10/11 | 每次階段改變就更新，用來算倍數 |
 | 放棄原因 | Text | 已有固定廠商 | 只有放棄時才填 |
 
@@ -220,8 +220,7 @@ Worker 可以直接用現成的 `fetchGvizRows()` 讀，不用再繞一次比較
 |---|---|---|
 | 發現 | 7 天內初訪 | 進入階段日期 |
 | 初訪後 | 10 天內二訪 | 進入階段日期 |
-| 二訪後 | 14 天內談試賣 | 進入階段日期 |
-| 試賣中 | 14 天回訪看銷況 | 進入階段日期 |
+| 二訪後 | 14 天內確認已建檔或放棄（2026-11-10 field-v2 階段1拿掉「試賣中」，二訪後之後只能 confirmed／drop） | 進入階段日期 |
 
 正式客戶的建議間隔改由分級決定，見 4.5——不再是固定 21 天。
 
@@ -406,19 +405,20 @@ A1 的另一種檢視，A1 頁首有「清單／地圖」切換。兩者共用�
 
 - 頂部：開發中家數、卡住家數、近 90 天轉正式家數、發現到第一張正式單的平均天數（資料不足時顯示
   「資料累積中」，見 3.7）；期間切換 30 天／90 天／今年。
-- 欄位：發現、初訪後、二訪後、試賣中、轉正式、放棄。每欄顯示建議間隔與轉換率（資料不足時顯示
+- 欄位：發現、初訪後、二訪後、轉正式、放棄（2026-11-10 field-v2 階段1拿掉「試賣中」）。每欄顯示建議間隔與轉換率（資料不足時顯示
   「資料累積中」）。
 - 卡片：店名、區域、已幾天、倍數（超過 1.0 紅框）、下一步；按鈕「排進某天」「記結果」。篩選分頁這
   一列的店名如果跟某個正式客戶完全相同（當場建檔漏標的情況，見 3.6 的「暫存店家已轉正對照」跟
   `worker.js` 原有的店名比對邏輯），卡片標「可能已轉正，請確認」，可直接走「確認已建檔」補正式代號。
 - 「記結果」：推進／維持／放棄／確認已建檔，四種動作送出前都要跳確認對話框（「店名：A 階段 → B 階段，
   確定？」，維持時 A＝B），失敗時保留表單內容不清空（放棄原因不用重打）。**不寫拜訪紀錄**（見 3.6）。
-  - 推進：只能從發現／初訪後／二訪後往下一階段推，試賣中之後不能用「推進」（要用「確認已建檔」）。
+  - 推進：只能從發現／初訪後往下一階段推（2026-11-10 field-v2 階段1拿掉「試賣中」，二訪後之後不能
+    再用「推進」，要用「確認已建檔」或「放棄」）。
   - 維持：階段文字不變，只寫一筆階段歷程（從＝到＝目前階段）——拜訪過但還沒推進階段，也要讓倍數
     起算日重新計算（見 3.7），不能讓系統誤判成卡住。
-  - 放棄：發現～試賣中任一階段都能放棄，需要填原因。**目前沒有「恢復」路徑**，放棄後想救回來要
+  - 放棄：發現～二訪後任一階段都能放棄，需要填原因。**目前沒有「恢復」路徑**，放棄後想救回來要
     怎麼處理，之後再評估（見第 11 節待辦）。
-  - 確認已建檔：可以從發現～試賣中任一開發中階段直接觸發，不限試賣中才能轉正式（木木好藥局就是
+  - 確認已建檔：可以從發現～二訪後任一開發中階段直接觸發，不限最後階段才能轉正式（木木好藥局就是
     從「初訪後」直接轉正式的真實案例，見第 11 節待辦）。**第一版不自動建客戶**：系統只整理好要填
     進新客戶資料表的內容給我看，我在 AppSheet 手動建好、拿到正式代號後，回到 A10 填入代號，系統先
     驗證代號真的存在於新客戶資料表、且沒有被另一家開發中的店用在轉正式紀錄裡，才把篩選分頁標「轉
@@ -564,8 +564,11 @@ SmartRoute ｜ 今天・本週・本月・客戶[46]・新店開發[5] ｜ 管�
 - [x] **A5/A6 天氣（2026-11-03 已設定並接上）**：`CWA_API_KEY` 已設定，呼叫 `F-D0047-071`（新北市，取汐止區代表點）＋`TODOS_KV` 快取3小時，A5、A6 都已接上（60%以上降雨機率標紅/標圖示）。實作細節見 `CLAUDE.md`「A5/A6 天氣與日曆串接」一節。
 - [ ] **拜訪紀錄表目前公開可讀（2026-11-09 外勤模式規格階段0盤點發現）**：`SHEET_VISIT` 這份試算表設成「知道連結的人可檢視」，任何人拿到連結就能用 gviz 直接讀出全部拜訪紀錄（含店名、拜訪內容、Pain Points 等業務內容），不需要經過 Worker。之後要改成只有 Worker 自己用服務帳戶讀取，分頁的「知道連結的人可檢視」權限收回——這次外勤模式開發不處理，先記錄待辦。
 - [ ] **拜訪紀錄表既有壞資料待清理（2026-11-09 外勤模式規格階段0盤點發現，實查 202 列）**：店名欄位整個被寫成文字「找不到代號」8 筆（列 13/14/15/18/19/21/57/96，都是拜訪目的＝新案開發，疑似 pharmacy-visit-app 新店代號解析失敗時的既有 bug）；Action Items 欄位內容是字面文字 `[Ljava.lang.Object;@...`（Apps Script 陣列誤寫入儲存格的痕跡）共 36 筆（列 109~159 附近）；測試留下的亂碼列（Visit ID＝`TEST_001`，第 139 列）；整列幾乎全空、只有 AI Status=Success 的空白測試列（第 190 列，跟 `VisitAppWebhook.js` 既有的 `cleanupDeployTestVisits_()` 認的樣式一樣，但這筆沒被清到）。這次不動，先記錄待辦。
-- [ ] **拜訪紀錄表有一支來源不明的 AI 自動化流程（2026-11-09 外勤模式規格階段0盤點發現，11-10 排除 gas-backend 與 customer-status-gas 這兩個專案）**：202 列資料裡觀察到 AI Status 會被寫成 `Success`／`Error: 欄位空白：沒有文字內容，也沒有錄音檔`／其他 Gemini API 錯誤訊息，但全專案找不到對應的原始碼能解釋這個行為（`gas-backend/程式碼.js` 是本機僅存的相近版本，裡面的錯誤訊息、模型名稱`gemini-1.5-flash`都跟正式環境實際看到的`gemini-flash-latest`／錯誤文字不一致）。**已實查排除是 `gas-backend`（AppSheet_AI_Backend）造成**：`clasp pull` 比對線上與本機完全一致（0差異）；`listAllProjectTriggers_Diagnostic()` 列出這個專案目前只有 1 個觸發器（CLOCK，`runTempPharmacyNameMatch`，每日店名比對用，呼叫鏈只碰新客戶資料表，完全不碰拜訪紀錄表），沒有任何 onEdit/onChange/表單觸發。**也排除是 `customer-status-gas` 造成**：全專案 grep `gemini`／`欄位空白`／`AI Status`／`拜訪紀錄` 0 筆命中，這個專案的兩個觸發器（`handleEditTrigger`/`dailyFillBlanks`，見 CLAUDE.md「客戶狀態代理」一節）都只操作「新客戶資料表_AppSheet」，完全不碰拜訪紀錄表。真正寫 AI Status 的流程不在這兩個專案裡，疑似是完全獨立的另一個 Apps Script 專案，或 AppSheet Bot 的 Automation 設定（那種設定存在 AppSheet 那邊，不會出現在任何 `.gs` 檔案裡）。使用者要自己去 AppSheet Automation／Apps Script 編輯器（查其他專案）確認實際觸發條件與目前程式碼，這次不處理。
+- [x] **拜訪紀錄表寫 AI Status／Summary 的來源謎底已解開（2026-11-09 發現，2026-11-10 查明）**：202 列資料裡觀察到 AI Status 會被寫成 `Success`／`Error: 欄位空白：沒有文字內容，也沒有錄音檔`／其他 Gemini API 錯誤訊息，原本全專案找不到對應原始碼。已先排除 `gas-backend`（`clasp pull` 比對線上本機 0 差異，唯一觸發器 `runTempPharmacyNameMatch` 完全不碰拜訪紀錄表）跟 `customer-status-gas`（grep `gemini`/`AI Status`/`拜訪紀錄` 0 筆命中，兩個觸發器都只碰新客戶資料表）。**查到的真正來源：AppSheet Automation 的 Bot「AI 語音分析機器人」**——事件「新錄音上傳」（拜訪紀錄表）→ Call a script → Apps Script 專案 `CRM_AI_System` 的 `processVisitAudio(visitId, audioFileName)`，以 `bh06211302@gmail.com` 執行。**不經過任何 exec URL**，跟這次安全整頓封存的 3 支網址（gas-backend @33、customer-status-gas @1/@2）完全無關，封存不影響它。
+- [ ] **CRM_AI_System 專案尚未備份（2026-11-10 發現，待使用者提供 script ID）**：寫 AI Status 的 `processVisitAudio` 所在專案，目前完全沒有本機/git 備份，跟當時發現 `gas-backend`/`new-pharmacy-screening` 沒有遠端備份是同一類風險（見上面「兩個 git repo 都沒有遠端備份」待辦）。使用者會提供 script ID，之後要 `clasp clone` 下來並建私有 repo 備份。
+- [ ] **確認「新錄音上傳」事件的觸發條件是否會處理 field-v2 寫入的紀錄（2026-11-10 發現）**：field-v2 階段1的拜訪紀錄寫入（`sheetName` 白名單＋Visit ID 查重，見下面「外勤模式規格階段1」相關待辦）如果符合「新錄音上傳」這個 AppSheet 事件的觸發條件，可能會被「AI 語音分析機器人」接著處理，進而再動到 I 欄 AI Status／J 欄 Summary——要先確認這個事件具體怎麼判定「有新錄音上傳」（是看 H 欄 Audio File 從空變有值，還是看整列新增），才能知道 field-v2 寫入的紀錄會不會被這個 Bot 處理到，這會影響 field-v2 要不要自己先把 AI Status 欄填好或留空。
+- [x] **「New Bot 2」確認是內部動作，跟拜訪紀錄表無關（2026-11-10 查明）**：收款後自動累計（新客戶資料表_AppSheet）→ 更新客戶實收總額，純 AppSheet 內部動作，不碰拜訪紀錄表，跟 AI Status 謎題無關，只是順便查到記錄一下。
 - [ ] **customer-status-gas 的 setStatus 沒有 token 驗證（2026-11-10 發現）**：`CustomerStatus.js` 的 `doPost`/`doGet` 處理 `setStatus`/`getStatuses`，知道網址就能改任何客戶的狀態文字，沒有任何驗證。這次把 `GAS_URL` 從硬寫在公開 repo 移到 Worker secret 之後，知道網址的人少很多，風險降低，但沒有根本解決——之後要補 token 驗證（照 `PLANNER_API_TOKEN` 同一套模式），這次不處理。
 - [ ] **customer-status-gas 的 PLACES_API_KEY 待確認額度與計費範圍（2026-11-10 發現）**：`程式碼.js` 的 `dailyFillBlanks`（CLOCK，每日06:00）跟 `handleEditTrigger`（編輯店名/地址時）都會呼叫 Google Places API（`PLACES_API_KEY`，存在指令碼屬性），每日定時執行＋編輯觸發都會計費。要確認：(1) 這把金鑰在 GCP Console 有沒有限制 API 範圍（只允許 Places API，不要變成萬能金鑰）；(2) 每日呼叫量級與對應費用是否在預期內。這次不處理，先記錄待辦。
-- [ ] **`/todos` 端點評估移除（2026-11-10 外勤模式規格安全整頓時發現）**：全專案（.html/.js，排除過期備份資料夾）grep 不到任何前端呼叫 `/todos` 或 `getTodos`——`field.html`/`planner.html`/`index.html` 都沒有，只有 `worker.js` 自己的路由跟轉送邏輯提到它。而且它轉送到的 GAS（`env.GAS_URL`→`customer-status-gas/CustomerStatus.js` 的 `doGet`）本來就沒實作 `getTodos`，一直回 `{"error":"未知 action"}`（已用正式環境跟 `wrangler dev` 比對，兩邊逐字一致，不是這次改壞的既有問題）。這個端點看起來已經沒人在用、而且本來就是壞的，之後評估直接移除（連同 `worker.js` 的 `handleTodos`／`/todos` 路由），這次不處理。
+- [ ] **階段1待辦：移除 `/todos` 入口整組（2026-11-10 外勤模式規格安全整頓時發現並定案）**：全專案（.html/.js，排除過期備份資料夾）grep 不到任何前端呼叫 `/todos` 或 `getTodos`——`field.html`/`planner.html`/`index.html` 都沒有，只有 `worker.js` 自己的路由跟轉送邏輯提到它。而且它轉送到的 GAS（`env.GAS_URL`→`customer-status-gas/CustomerStatus.js` 的 `doGet`）本來就沒實作 `getTodos`，一直回 `{"error":"未知 action"}`（已用正式環境跟 `wrangler dev` 比對，兩邊逐字一致，不是這次改壞的既有問題）。另外確認過「死客戶」狀態（`/api/plan`、`/customer-status` GET 等會用到的）2026-10-24 已改成直接讀寫主表「停用」欄，跟 `GAS_URL`／customer-status-gas 完全脫鉤；`/customer-status` POST 打的是 `GAS_VISIT_URL`（gas-backend），也不是 `GAS_URL`。也確認過 `/todos-v2`（`handleTodosV2`，走 `TODOS_KV`）跟「老爸提醒」（`planner.html` 的 `dadReminderHtml()`，純前端顯示，不呼叫任何API）都是完全獨立的路徑/handler，不會被這個移除動作影響。**結論：`env.GAS_URL` 在 still-meadow 已經沒有任何真正在用的消費端，這次先不動（維持現狀，不輪替也不移除），下一次改動時一次處理**：移除 `worker.js` 的 `/todos` 路由、`handleTodos`、`env.GAS_URL` 讀取，以及對應的 `GAS_URL` wrangler secret。
 - [ ] **`new-customer-gps-tool/apps-script/` 跟 `customer-status-gas/` 內容重複（2026-11-10 發現）**：兩個本機資料夾都放著同一個 GAS 專案（`customer-status-gas` 的 script ID）的原始碼副本，diff 0 行完全一致。`new-customer-gps-tool/` 這份不是 git repo，`customer-status-gas/` 這份已經建私有 repo 備份並追蹤歷史。之後應該只留 `customer-status-gas/` 這份當唯一來源，`new-customer-gps-tool/apps-script/` 那份整個資料夾可以刪掉或改成指向備註，避免兩份各自被改到、兜不起來。這次不處理，先記錄待辦。

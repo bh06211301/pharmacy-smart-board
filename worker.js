@@ -137,11 +137,6 @@ export default {
         return await handleCustomerStatus(request, env);
       }
 
-      // ★ 新增：業務待辦清單（舊版，保留相容）
-      if (path === '/todos') {
-        return await handleTodos(request, env);
-      }
-
       // ★ 新版待辦清單（KV 持久化）
       if (path === '/todos-v2') {
         return await handleTodosV2(request, env);
@@ -242,6 +237,11 @@ export default {
       }
       if (path === '/api/today-plan' && request.method === 'POST') {
         return await handleSaveTodayPlan(request, env);
+      }
+
+      // ★ field-v2 階段1：外勤模式單站狀態更新（只改一列，不是整天覆蓋）
+      if (path === '/api/today-plan/row' && request.method === 'POST') {
+        return await handleUpdateTodayPlanRow(request, env);
       }
 
       // ★ 2026-10-27 新增：客戶叫貨健康度分級（只讀分析，跟 /api/plan 完全獨立、不影響 SmartRoute 評分）
@@ -975,30 +975,10 @@ async function handleCustomerStatus(request, env) {
   return json({ error: '不支援此 method' }, 405);
 }
 
-// ============================================================
-// 9. 業務待辦清單（代理到 Google Apps Script）
-// ============================================================
-async function handleTodos(request, env) {
-  if (request.method === 'GET') {
-    const res = await fetch(`${env.GAS_URL}?action=getTodos`, { redirect: 'follow' });
-    const data = await res.json();
-    return json(data);
-  }
-
-  if (request.method === 'POST') {
-    const body = await request.json();
-    const res = await fetch(env.GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      redirect: 'follow',
-    });
-    const data = await res.json();
-    return json(data);
-  }
-
-  return json({ error: '不支援此 method' }, 405);
-}
+// 2026-11-10 field-v2 階段1：移除「9. 業務待辦清單」整組（/todos 路由、handleTodos、
+// env.GAS_URL）——全專案找不到任何前端呼叫，轉送到的 GAS（customer-status-gas）doGet
+// 本來就沒實作 getTodos，一直回「未知 action」，見 docs/SPEC.md 第11節。部署時記得連
+// GAS_URL 的 wrangler secret 一併刪除（見部署步驟）。
 
 // ============================================================
 // 10. 新版待辦清單（Cloudflare KV 持久化）
@@ -2921,6 +2901,56 @@ function todayPlanObjFromGasRow_(o) {
   };
 }
 
+// field-v2 階段1：外勤模式單站狀態更新（已到／完成／跳過＋備註），只改一列，不是整天覆蓋
+// ——外勤手機跟電腦 planner.html 可能同時在動同一天的今日行程，用 saveTodayPlan 整天覆蓋
+// 會有互相蓋掉對方改動的風險。body: { date, storeId?, address?, patch:{狀態?,備註?,預計到達?},
+// requestId? }，storeId 跟 address 至少要帶一個（店家代號優先，没代號的新店退回用地址定位，
+// 跟 todayPlanRowFromClient_／docs/今日清單_規格.md「同一家店不得重複」判斷同一套慣例）。
+// patch 白名單跟 GAS 端 handleUpdateTodayPlanRow_ 的 TODAY_PLAN_ROW_PATCHABLE_FIELDS_ 同步，
+// Worker 跟 GAS 兩邊都各自擋一次（defense-in-depth，跟 ADD_VISIT_SHEET_WHITELIST 同一個慣例）。
+// sheetName 可選帶「今日行程_TEST」，驗收時不用碰正式「今日行程」（跟 addVisit 的 sheetName
+// 白名單同一套做法）；不帶就預設正式分頁，等同現行行為，不影響既有呼叫端。
+// 2026-11-10 補 insertRow：找不到列時可以帶 insertRow 直接新增一列，給「臨時加一站／順路
+// 補一家」的「加入今日行程」按鈕用（同一支端點，不另開新端點，使用者明確指示）。insertRow
+// 沿用 todayPlanRowFromClient_ 同一套畫面狀態→欄位轉換，跟既有 saveTodayPlan 新增列時
+// 信任層級一致，不像 patch 那樣限制白名單（這是「新增一整列」，本來就要給齊欄位）。
+const TODAY_PLAN_ROW_PATCHABLE_FIELDS = ['狀態', '備註', '預計到達'];
+const TODAY_PLAN_SHEET_WHITELIST = ['今日行程', '今日行程_TEST'];
+async function handleUpdateTodayPlanRow(request, env) {
+  const body = await request.json();
+  const { date, storeId, address, patch, insertRow, requestId } = body;
+  const sheetName = body.sheetName || TODAY_PLAN_SHEET_NAME;
+  if (TODAY_PLAN_SHEET_WHITELIST.indexOf(sheetName) < 0) {
+    return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
+  }
+  if (!date) return json({ error: '缺少 date' }, 400);
+  if (!storeId && !address) return json({ error: '缺少 storeId 或 address，無法定位這一列' }, 400);
+  const hasPatch = patch && typeof patch === 'object' && Object.keys(patch).length > 0;
+  const hasInsert = insertRow && typeof insertRow === 'object';
+  if (!hasPatch && !hasInsert) return json({ error: '缺少 patch 或 insertRow' }, 400);
+  if (hasPatch) {
+    const badKeys = Object.keys(patch).filter(k => TODAY_PLAN_ROW_PATCHABLE_FIELDS.indexOf(k) < 0);
+    if (badKeys.length) {
+      return json({ error: 'patch 只能改 ' + TODAY_PLAN_ROW_PATCHABLE_FIELDS.join('/') + '，不認得：' + badKeys.join('、') }, 400);
+    }
+  }
+
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'updateTodayPlanRow', sheetName,
+      date, storeId, address, patch, insertRow: hasInsert ? todayPlanRowFromClient_(insertRow) : undefined,
+      requestId, token: env.PLANNER_API_TOKEN,
+    }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success && data.row) data.row = todayPlanObjFromGasRow_(data.row);
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  return json(data);
+}
+
 // ============================================================
 // 新店定位永久快取（2026-11-04）：地圖模式每次重新整理都會對沒有 lat/lng 的新店打一次 Places API
 // (New)，這把 key 每日上限 300 次，很快會打爆。前端 resolveStoreLocation_() 查到座標之後呼叫這支
@@ -3284,7 +3314,7 @@ async function handleOverview(env, ctx) {
   // 攤平成跟正式客戶同一種格子資料，給區域分組用。
   const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
-  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const devStages = ['發現', '初訪後', '二訪後'];
   const developing = screeningRows
     .filter(r => r.decision === '要去' && devStages.indexOf(r.stage) >= 0 && !possiblyConvertedIds.has(r.id))
     .map(r => {
@@ -4078,18 +4108,21 @@ async function handleFunnelResult(request, env, ctx) {
   if (action === 'keep') {
     toStage = fromStage;
   } else if (action === 'advance') {
-    if (idx < 0 || idx > 2) {
-      return json({ error: idx === 3 ? '試賣中之後請用「確認已建檔」，不能用一般推進' : '目前階段不允許推進' }, 400);
+    // 2026-11-10 field-v2 階段1：拿掉「試賣中」階段，初訪後（idx===1）是現在最後一個能 advance 的
+    // 階段，二訪後（idx===2）之後不再能用一般推進，只能 confirmed 或 drop（邊界跟 Code.gs 的
+    // computeNextStage_ 同步）
+    if (idx < 0 || idx > 1) {
+      return json({ error: idx === 2 ? '二訪後之後請用「確認已建檔」或「放棄」，不能用一般推進' : '目前階段不允許推進' }, 400);
     }
     toStage = stages[idx + 1];
     stageAction = 'advance';
   } else if (action === 'drop') {
-    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許放棄（必須是發現～試賣中之一）' }, 400);
+    if (idx < 0 || idx > 2) return json({ error: '目前階段不允許放棄（必須是發現～二訪後之一）' }, 400);
     if (!dropReason) return json({ error: '放棄必須填原因' }, 400);
     toStage = '放棄';
     stageAction = 'drop';
   } else { // confirmed
-    if (idx < 0 || idx > 3) return json({ error: '目前階段不允許確認已建檔（必須是發現～試賣中之一）' }, 400);
+    if (idx < 0 || idx > 2) return json({ error: '目前階段不允許確認已建檔（必須是發現～二訪後之一）' }, 400);
     if (!customerId) return json({ error: '缺少 customerId' }, 400);
     const pharmaciesRes = await handleGetPharmacies(null, env, ctx).then(r => r.json());
     const exists = (pharmaciesRes.pharmacies || []).some(p => p.id === customerId);
@@ -4181,7 +4214,7 @@ async function handleFunnelOverview(request, env, ctx) {
   const possiblyConvertedIds = possiblyConvertedScreeningIds_(screeningRows, allPharmacies);
   const latestHistoryDate = latestStageHistoryDateByStore_(stageHistoryRows);
   const convertedCustomerId = convertedCustomerIdByStore_(stageHistoryRows);
-  const devStages = ['發現', '初訪後', '二訪後', '試賣中'];
+  const devStages = ['發現', '初訪後', '二訪後'];
   const stages = PLANNER_CONFIG.newStoreStages;
 
   const cards = screeningRows
@@ -4232,7 +4265,7 @@ async function handleFunnelOverview(request, env, ctx) {
     return { rate: Math.round((advancedCount / enteredIds.size) * 1000) / 10, samples: enteredIds.size };
   }
 
-  const columns = ['發現', '初訪後', '二訪後', '試賣中', '轉正式', '放棄'].map(stage => ({
+  const columns = ['發現', '初訪後', '二訪後', '轉正式', '放棄'].map(stage => ({
     stage,
     intervalDays: PLANNER_CONFIG.stageIntervalDays[stage] || null,
     cards: cards.filter(c => c.stage === stage),
