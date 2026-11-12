@@ -815,11 +815,17 @@ async function fetchVisitsSummaryRaw_(env) {
     if (conversionMap[id]) id = conversionMap[id]; // 暫存代號已轉正：合併進正式 Customer_ID
 
     if (!summary[id]) {
-      summary[id] = { lastDate: '', visitCount: 0, hasPending: false };
+      summary[id] = { lastDate: '', lastDateMs: -Infinity, visitCount: 0, hasPending: false };
     }
     summary[id].visitCount++;
-    if (!summary[id].lastDate || date > summary[id].lastDate) {
-      summary[id].lastDate = date;
+    // bug（2026-11-12 修正）：date 是 parseGvizDate() 吐出的未補零字串（如 "2026/9/18"），
+    // 直接用字串比大小會把 "9/18" 誤判成比 "11/11" 新（'9' > '1'）。改成轉成真正的時間戳比較。
+    if (date) {
+      const ms = new Date(date.replace(/\//g, '-')).getTime();
+      if (!isNaN(ms) && ms > summary[id].lastDateMs) {
+        summary[id].lastDateMs = ms;
+        summary[id].lastDate = date;
+      }
     }
     if (tags.includes('#待') || tags.includes('#追蹤') || actionItems) {
       summary[id].hasPending = true;
@@ -1378,6 +1384,15 @@ function parseGvizDate(v) {
   return s;
 }
 
+// parseGvizDate() 吐出的「Y/M/D」是未補零字串，不能直接字串比大小排序（"9/18" 會被誤判
+// 比 "11/11" 新）。排序要用這個轉成時間戳再比；空字串/解析失敗回 0（排到最舊，不影響其他
+// 有效日期的相對順序）。
+function dateSortKey_(dateStr) {
+  if (!dateStr) return 0;
+  const ms = new Date(String(dateStr).replace(/\//g, '-')).getTime();
+  return isNaN(ms) ? 0 : ms;
+}
+
 // 判斷是否已到寄單時機：今月 >= 訂單月+7
 function needsInvoicing(orderDateStr, now) {
   const parts = orderDateStr.split('/');
@@ -1765,7 +1780,7 @@ async function handlePharmacyProfile(request, env) {
       note:        String(gvizGet(row, returnDetailData.colMap, '退貨備註') || ''),
     });
   });
-  const returns = Object.values(myReturnOrders).sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
+  const returns = Object.values(myReturnOrders).sort((a, b) => dateSortKey_(b.date) - dateSortKey_(a.date));
 
   // ── 盤點歷史（盤點主檔=場次，盤點明細=品項，透過盤點編號 join，只取這家店的） ──
   const mySessions = {};
@@ -1792,7 +1807,7 @@ async function handlePharmacyProfile(request, env) {
       expiry:      String(gvizGet(row, invDetailData.colMap, '產品效期') || ''),
     });
   });
-  const inventory = Object.values(mySessions).sort((a, b) => (b.date > a.date ? 1 : (b.date < a.date ? -1 : 0)));
+  const inventory = Object.values(mySessions).sort((a, b) => dateSortKey_(b.date) - dateSortKey_(a.date));
 
   return json({ ok: true, pharmacy, orders, returns, inventory });
 }
