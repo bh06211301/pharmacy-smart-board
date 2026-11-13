@@ -19,8 +19,10 @@
     { id: 'customers', label: '客戶', href: 'customers.html', badge: 'badge-customers' },
     { id: 'new-store', label: '新店開發', href: 'funnel.html', badge: 'badge-new-store' },
   ];
+  // 階段2：「店家規則」拿掉主選單入口，改成只能從 A8 藥局檔案抽屜的「店家規則」區塊點進去
+  // （store-drawer.js 的「管理規則」連結，帶 ?store= 直接預選那家店）。store-rules.html 頁面
+  // 本身沒拿掉，只是不再排進主選單。
   const MANAGE_TABS = [
-    { id: 'rules', label: '店家規則', href: 'store-rules.html' },
     { id: 'followups', label: '待追蹤', href: 'followups.html', badge: 'badge-followups' },
   ];
 

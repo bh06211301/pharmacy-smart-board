@@ -158,6 +158,8 @@
       }
       .sr-dad-reminder div + div { margin-top: var(--sr-space-2); }
       .sr-section { padding: var(--sr-space-7) var(--sr-space-8); border-bottom: 1px solid var(--sr-line-soft); }
+      .sr-drawer-manage-rules-link { display: inline-block; margin-top: var(--sr-space-4); font-size: var(--sr-text-sm); color: var(--sr-primary); text-decoration: none; }
+      .sr-drawer-manage-rules-link:hover { text-decoration: underline; }
       .sr-section-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); display: flex; align-items: center; justify-content: space-between; }
       .sr-empty { font-size: var(--sr-text-sm); color: var(--sr-ink-3); border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md); padding: var(--sr-space-5); text-align: center; }
       .sr-tiering-badges { display: flex; gap: var(--sr-space-2); flex-wrap: wrap; margin-bottom: var(--sr-space-4); }
@@ -371,6 +373,7 @@
         : '<div class="sr-empty">目前沒有店家規則</div>'}
       </div>
       <div id="sr-rule-form-root"></div>
+      <a class="sr-drawer-manage-rules-link" href="store-rules.html?store=${encodeURIComponent(data.id)}">管理規則 →</a>
     </div>`;
   }
   function toggleRuleForm() {

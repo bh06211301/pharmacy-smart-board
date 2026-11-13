@@ -93,6 +93,11 @@
   .stop-row.skipped .stop-dot { border-style: dashed; }
   .stop-main { flex: 1; min-width: 0; }
   .stop-name { font-size: var(--sr-text-base); font-weight: var(--sr-weight-medium); }
+  .stop-detail {
+    margin-top: calc(var(--sr-space-3) * -1); padding: var(--sr-space-4) var(--sr-space-5);
+    border: 1px solid var(--sr-line-soft); border-top: none; border-radius: 0 0 var(--sr-radius-md) var(--sr-radius-md);
+    background: var(--sr-bg-subtle);
+  }
   .stop-sub { font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
   .stop-row.warn-conflict { outline: 1.5px solid var(--sr-danger); background: var(--sr-danger-tint); }
   .conflict-text { color: var(--sr-danger); font-size: var(--sr-text-xs); margin-top: 2px; }
@@ -234,6 +239,11 @@
         <span class="chip" data-value="新案開發">新案開發</span>
       </div>
 
+      <div id="record-customer-followups-wrap" hidden>
+        <div class="section-label">這家店的待追蹤</div>
+        <div id="record-customer-followups" style="display:flex;flex-direction:column;gap:var(--sr-space-4)"></div>
+      </div>
+
       <div class="section-label">拜訪內容</div>
       <textarea id="record-customer-content" placeholder="說說今天拜訪的狀況…"></textarea>
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
@@ -372,14 +382,18 @@ function showScreen(id) {
   document.querySelectorAll('#dev-switch button').forEach(b => b.classList.toggle('active', b.dataset.target === id));
 }
 
+// 階段2 項目6：開發用切換列只在網址帶 ?dev=1 時顯示，正常使用（手機上線）不會看到這排按鈕。
 const switchBar = document.getElementById('dev-switch');
-SCREENS.forEach(id => {
-  const btn = document.createElement('button');
-  btn.textContent = SCREEN_LABELS[id];
-  btn.dataset.target = id;
-  btn.addEventListener('click', () => showScreen(id));
-  switchBar.appendChild(btn);
-});
+if (new URLSearchParams(location.search).get('dev') === '1') {
+  switchBar.style.display = 'flex';
+  SCREENS.forEach(id => {
+    const btn = document.createElement('button');
+    btn.textContent = SCREEN_LABELS[id];
+    btn.dataset.target = id;
+    btn.addEventListener('click', () => showScreen(id));
+    switchBar.appendChild(btn);
+  });
+}
 
 // [data-go] 用事件代理（而不是載入時 querySelectorAll），因為 render 函式之後會動態插入新的
 // [data-go] 元素（例如候選店家列表），委派在 document 上才能一直有效，不用每次 render 完再重綁。
@@ -476,7 +490,9 @@ const FV2 = {
   planRecommended: [], // GET /api/plan 的 recommended（倍數/分級用）
   dadIds: new Set(),   // GET /dad-pharmacies
   dadTodos: [],        // GET /todos-v2 篩 quadrant==='dad'
+  allFollowups: [],    // GET /api/followups 全量（首頁展開站點用，依 storeId 篩）
   currentStoreId: null, // 目前「到店／記錄拜訪」畫面指到的店
+  currentFollowups: [], // 目前這家店未結案待追蹤（從 /api/store 的 detail.followups 存一份，記錄畫面要用）
   loaded: false,
 };
 
@@ -498,18 +514,21 @@ function fv2Tags_(storeId) {
 async function fv2LoadAll() {
   FV2.date = todayStr_();
   try {
-    const [todayRes, phRes, planRes, dadRes, todosRes] = await Promise.all([
+    const [todayRes, phRes, planRes, dadRes, todosRes, followupsRes] = await Promise.all([
       fetch(`${WORKER}/api/today-plan?date=${FV2.date}`).then(r => r.json()),
       fetch(`${WORKER}/pharmacies`).then(r => r.json()),
       fetch(`${WORKER}/api/plan?date=${FV2.date}`).then(r => r.json()),
       fetch(`${WORKER}/dad-pharmacies`).then(r => r.json()),
       fetch(`${WORKER}/todos-v2`).then(r => r.json()),
+      fetch(`${WORKER}/api/followups`).then(r => r.json()),
     ]);
     FV2.todayRows = (todayRes.rows || []).filter(r => r.status !== '移除').sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
     FV2.pharmacies = phRes.pharmacies || [];
     FV2.planRecommended = planRes.recommended || [];
     FV2.dadIds = new Set(dadRes.ids || []);
     FV2.dadTodos = (todosRes.todos || []).filter(t => t.quadrant === 'dad');
+    // 全量待追蹤（階段2 項目5：首頁展開站點用），只留未完成的，依 storeId 篩
+    FV2.allFollowups = (followupsRes.followups || []).filter(f => f.status === '未完成');
     FV2.loaded = true;
     fv2RenderHome();
   } catch (e) {
@@ -559,7 +578,7 @@ function fv2RenderHome() {
       </div>`;
   }
 
-  // 全部站點
+  // 全部站點（階段2 項目5：點一下展開拜訪目的/目的備註/地址/導航/未結案待追蹤，只顯示不能動）
   const listEl = document.getElementById('home-stoplist');
   listEl.innerHTML = rows.map((r, i) => {
     let cls = '', dot = String(i + 1), sub = '';
@@ -567,9 +586,38 @@ function fv2RenderHome() {
     else if (r.status === '跳過') { cls = 'skipped'; dot = '✕'; sub = `跳過：${escapeHtml_(r.note || '')}`; }
     else if (i === nextIdx) { cls = 'current'; sub = `目前站 · ${(r.purposes || []).join('、') || '—'}`; }
     else { sub = `${r.arrival ? '預計 ' + r.arrival + ' 到 · ' : ''}${(r.purposes || []).join('、') || '—'}`; }
-    return `<div class="stop-row ${cls}"><div class="stop-dot">${dot}</div><div class="stop-main"><div class="stop-name">${escapeHtml_(r.name)}</div><div class="stop-sub">${sub}</div></div></div>`;
+    const stopKey = r.storeId || r.address || String(i);
+    return `<div class="stop-row ${cls}" data-stop-toggle="${escapeHtml_(stopKey)}" style="cursor:pointer">
+        <div class="stop-dot">${dot}</div><div class="stop-main"><div class="stop-name">${escapeHtml_(r.name)}</div><div class="stop-sub">${sub}</div></div>
+      </div>
+      <div class="stop-detail" data-stop-detail="${escapeHtml_(stopKey)}" hidden></div>`;
   }).join('') || '<div class="center-note">今天還沒有排任何站點</div>';
 }
+// 展開單一站點明細（點第一次才算，之後只是切換顯示/隱藏，不用重複算）
+function fv2StopDetailHtml_(r) {
+  const followups = FV2.allFollowups.filter(f => f.storeId === r.storeId);
+  return `
+    <div class="store-meta">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
+    <div class="store-meta" style="margin-top:4px">${escapeHtml_(r.address || '沒有地址')}</div>
+    ${followups.length
+      ? followups.map(f => `<div class="store-meta" style="margin-top:4px">⚠ 待追蹤：${escapeHtml_(f.item)}</div>`).join('')
+      : '<div class="store-meta" style="margin-top:4px">沒有未結案的待追蹤</div>'}
+    <button class="btn" style="margin-top:var(--sr-space-4);width:100%" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address || r.name)}','_blank');event.stopPropagation()">開始導航</button>`;
+}
+document.addEventListener('click', (e) => {
+  const row = e.target.closest('[data-stop-toggle]');
+  if (!row) return;
+  const key = row.dataset.stopToggle;
+  const detail = document.querySelector(`[data-stop-detail="${CSS.escape(key)}"]`);
+  if (!detail) return;
+  const opening = detail.hidden;
+  detail.hidden = !opening;
+  if (opening && !detail.dataset.rendered) {
+    const r = FV2.todayRows.find(x => (x.storeId || x.address) === key);
+    if (r) detail.innerHTML = fv2StopDetailHtml_(r);
+    detail.dataset.rendered = '1';
+  }
+});
 
 function escapeHtml_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -593,6 +641,7 @@ async function fv2RenderArrive(storeId) {
   try {
     const detail = await fetch(`${WORKER}/api/store?id=${encodeURIComponent(storeId)}`).then(r => r.json());
     if (!detail.ok) { body.innerHTML = `<div class="center-note">讀取失敗：${escapeHtml_(detail.error || '未知錯誤')}</div>`; return; }
+    FV2.currentFollowups = detail.followups || []; // 記錄拜訪畫面要用（階段2 項目2：逐筆待追蹤結果）
     const t = detail.tiering;
     const visitsData = await fetch(`${WORKER}/visits/${encodeURIComponent(storeId)}`).then(r => r.json()).catch(() => ({ visits: [] }));
     const visits = (visitsData.visits || []).slice(0, 2);
@@ -605,14 +654,18 @@ async function fv2RenderArrive(storeId) {
         <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? `已 ${t.daysSince ?? '—'} 天未訪 · 倍數 ${t.ratio ?? '—'}` : (detail.excludeReason || '不列入分級')}</div>
         ${detail.phone ? `<button class="btn" style="margin-top:var(--sr-space-4)" onclick="location.href='tel:${escapeHtml_(detail.phone)}'">📞 打電話</button>` : ''}
       </div>
-      ${row ? `<div class="card"><div class="section-label">這站要做的事</div><div class="store-meta" style="margin-top:4px">拜訪目的：${escapeHtml_((row.purposes || []).join('、') || '—')}${t && t.consignmentText ? '　' + escapeHtml_(t.consignmentText) : ''}</div></div>` : ''}
+      <div class="card">
+        <div class="section-label">這次要處理的事</div>
+        <div class="store-meta" style="margin-top:4px">拜訪目的：${row ? escapeHtml_((row.purposes || []).join('、') || '—') : '—'}${row && row.purposeNote ? '　備註：' + escapeHtml_(row.purposeNote) : ''}${t && t.consignmentText ? '　' + escapeHtml_(t.consignmentText) : ''}</div>
+        ${(detail.followups || []).length
+          ? `<div class="store-meta" style="margin-top:6px">未結案待追蹤：</div>` +
+            detail.followups.map(f => `<div class="store-meta">⚠ ${escapeHtml_(f.item)}${f.deadline ? '（' + escapeHtml_(f.deadlineType || '') + (f.deadlineType === '指定日期前' ? ' ' + escapeHtml_(f.deadline) : '') + '）' : ''}</div>`).join('')
+          : '<div class="store-meta" style="margin-top:6px">沒有未結案的待追蹤</div>'}
+      </div>
+      ${(detail.rules || []).length ? `<div class="card"><div class="section-label">店家規則</div>${detail.rules.map(r => `<div class="store-meta">${escapeHtml_(r.ruleType || '')}：${escapeHtml_(r.note || '')}</div>`).join('')}</div>` : ''}
       <div class="card">
         <div class="section-label">上次拜訪</div>
         ${visits.length ? visits.map(v => `<div class="store-meta">${escapeHtml_(v.date)} · ${escapeHtml_(v.purpose)} · ${escapeHtml_(v.content).slice(0, 40)}</div>`).join('') : '<div class="store-meta">還沒有拜訪紀錄</div>'}
-      </div>
-      <div class="card">
-        <div class="section-label">待追蹤與規則</div>
-        ${(detail.followups || []).length ? detail.followups.map(f => `<div class="store-meta">⚠ 待追蹤：${escapeHtml_(f.item)}</div>`).join('') : '<div class="store-meta">沒有未完成的待追蹤</div>'}
       </div>
       <button class="btn" id="arrive-ai-brief">🤖 AI 拜訪前簡報</button>`;
   } catch (e) {
@@ -650,10 +703,99 @@ function fv2RenderRecordCustomer(storeId) {
   } else {
     dadEl.hidden = true;
   }
+
+  fv2RenderFollowupActions_(FV2.currentFollowups);
 }
 // 下次要記得：文字附在拜訪內容後面一起存檔（使用者核准的規則）
 function fv2AppendNextAction_(content, nextAction) {
   return nextAction ? `${content}${content ? '\n' : ''}下次要記得：${nextAction}` : content;
+}
+
+// ---- 階段2 項目2：記錄拜訪時逐筆處理這家店的未結案待追蹤 ----
+// 「下週同一天」固定算今天+7天（不是期限原本的日期+7天——使用者原文「下次經過」「下週同一天」
+// 都是相對「今天」這次拜訪的快捷，不是相對舊期限）。
+function fv2PlusDaysIso_(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function fv2NextWeekLabel_() {
+  const iso = fv2PlusDaysIso_(7);
+  const d = new Date(iso + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+function fv2FollowupActionCardHtml_(f) {
+  const fid = escapeHtml_(f.followupId);
+  return `
+    <div class="card" data-followup-card="${fid}">
+      <div class="store-meta"><b>待追蹤：</b>${escapeHtml_(f.item)}</div>
+      <div class="chip-group" data-single="true" data-followup-result style="margin-top:var(--sr-space-3)">
+        <span class="chip selected" data-value="none">沒處理到</span>
+        <span class="chip" data-value="done">完成</span>
+        <span class="chip" data-value="partial">部分完成</span>
+        <span class="chip" data-value="reschedule">改期</span>
+        <span class="chip" data-value="cancel">取消</span>
+      </div>
+      <input type="text" class="followup-partial-input" placeholder="剩下的部分…" hidden style="margin-top:var(--sr-space-3)">
+      <div class="choice-group followup-reschedule-group" hidden style="margin-top:var(--sr-space-3)">
+        <label class="choice selected"><input type="radio" name="resched-${fid}" value="next-pass" checked><div>下次經過</div></label>
+        <label class="choice"><input type="radio" name="resched-${fid}" value="next-week"><div>下週同一天（${fv2NextWeekLabel_()}）</div></label>
+        <label class="choice"><input type="radio" name="resched-${fid}" value="custom"><div>指定日期　<input type="date" class="followup-resched-date" onclick="event.stopPropagation()"></div></label>
+      </div>
+    </div>`;
+}
+function fv2RenderFollowupActions_(followups) {
+  const wrap = document.getElementById('record-customer-followups-wrap');
+  const listEl = document.getElementById('record-customer-followups');
+  if (!followups || !followups.length) { wrap.hidden = true; listEl.innerHTML = ''; return; }
+  wrap.hidden = false;
+  listEl.innerHTML = followups.map(fv2FollowupActionCardHtml_).join('');
+}
+// chip 選取後（沒處理到/完成/部分完成/改期/取消）同步顯示/隱藏這張卡的「部分完成輸入框」「改期選項」
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip[data-value]');
+  if (!chip || !chip.closest('[data-followup-result]')) return;
+  const card = chip.closest('[data-followup-card]');
+  if (!card) return;
+  const value = chip.dataset.value;
+  card.querySelector('.followup-partial-input').hidden = value !== 'partial';
+  card.querySelector('.followup-reschedule-group').hidden = value !== 'reschedule';
+});
+// 依每張待追蹤卡選的結果，組出要送出的 API 呼叫（null = 不送出，「沒處理到」預設）
+function fv2FollowupActionPayload_(card, visitId) {
+  const result = card.querySelector('.chip[data-followup-result].selected')?.dataset.value
+    || card.querySelector('.chip.selected')?.dataset.value || 'none';
+  const followupId = card.dataset.followupCard;
+  if (result === 'done') return { resolve: true, followupId, resolvedFrom: visitId };
+  if (result === 'cancel') return { resolve: true, followupId, resolvedFrom: '取消' };
+  if (result === 'partial') {
+    const text = card.querySelector('.followup-partial-input').value.trim();
+    if (!text) return { warn: '部分完成沒有填寫剩下的部分，這筆待追蹤先不動' };
+    return { action: 'update', followupId, patch: { item: text } };
+  }
+  if (result === 'reschedule') {
+    const choice = card.querySelector('input[name^="resched-"]:checked')?.value || 'next-pass';
+    if (choice === 'next-pass') return { action: 'update', followupId, patch: { deadlineType: '下次經過', deadline: '' } };
+    if (choice === 'next-week') return { action: 'update', followupId, patch: { deadlineType: '指定日期前', deadline: fv2PlusDaysIso_(7) } };
+    const dateVal = card.querySelector('.followup-resched-date').value;
+    if (!dateVal) return { warn: '改期沒有選日期，這筆待追蹤先不動' };
+    return { action: 'update', followupId, patch: { deadlineType: '指定日期前', deadline: dateVal } };
+  }
+  return null; // 沒處理到：不送出
+}
+// 記錄拜訪存檔時統一呼叫：回傳 { sentCount, skippedForTest }
+async function fv2SubmitFollowupActions_(visitId) {
+  const cards = document.querySelectorAll('#record-customer-followups [data-followup-card]');
+  let sentCount = 0, skippedForTest = false;
+  for (const card of cards) {
+    const payload = fv2FollowupActionPayload_(card, visitId);
+    if (!payload) continue;
+    if (payload.warn) { fv2Toast_(payload.warn, true); continue; }
+    if (IS_TEST_MODE) { fv2TestBlockedLog_('待追蹤異動', payload); skippedForTest = true; continue; }
+    await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    sentCount++;
+  }
+  return { sentCount, skippedForTest };
 }
 // 老爸提醒關鍵字判斷，照抄 field.html submitVisitRecord 既有邏輯（使用者核准：沿用，不改字眼）
 function fv2DadReminderTasks_(purpose, content, phId, phName, isDad, visitId, dateStr) {
@@ -697,6 +839,9 @@ document.getElementById('record-customer-save').addEventListener('click', async 
     if (IS_TEST_MODE) { fv2TestBlockedLog_('老爸提醒', t); if (skipped.indexOf('老爸提醒') < 0) skipped.push('老爸提醒'); }
     else await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
   }
+  // 階段2 項目2：這家店既有待追蹤的逐筆結果（完成/部分完成/改期/取消；「沒處理到」不送出）
+  const { sentCount, skippedForTest } = await fv2SubmitFollowupActions_(visitId);
+  if (skippedForTest && skipped.indexOf('待追蹤異動') < 0) skipped.push('待追蹤異動');
   fv2Toast_(skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存');
   showScreen('1-home');
 });

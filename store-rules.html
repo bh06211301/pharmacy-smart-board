@@ -176,7 +176,12 @@ const DEFAULT_ACTION_BY_TYPE = { 不拜訪日: '擋住', 在店時段: '自動�
 
 let allData = null;      // /api/rules 的完整回應
 let storeFilter = 'has-rule';
-let selectedStoreId = null;
+// 階段2：這頁拿掉主選單入口後，唯一進來的路徑是 A8 抽屜的「管理規則」連結（帶 ?store=），
+// 這裡直接預選那家店；篩選膠囊也切到「全部」，否則這家店剛好沒規則時會因為預設篩選「有規則」
+// 被擋住、列表裡完全看不到剛點進來要找的那家店。
+const DEEPLINK_STORE_ID = new URLSearchParams(location.search).get('store') || null;
+if (DEEPLINK_STORE_ID) storeFilter = 'all';
+let selectedStoreId = DEEPLINK_STORE_ID;
 let storeSearchQuery = '';   // 2026-11-01：左側清單搜尋框，切換篩選膠囊時不清空
 let regionFilter = 'all';    // 2026-11-01：'all' | city | 'city|district'，三個篩選條件互不清除
 let newRulePickedStore = null; // 2026-11-01：頁頂「＋新增規則」目前選到的店

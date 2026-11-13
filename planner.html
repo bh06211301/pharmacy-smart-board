@@ -309,6 +309,16 @@
     padding: var(--sr-space-6); box-shadow: 0 2px 10px rgba(0,0,0,0.12);
   }
   .map-float-panel-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
+  /* 2026-11-13 項目7：地圖圖例，放左下角，跟右上角的「今天路線」面板分開，不互相遮擋 */
+  .map-legend-panel {
+    position: absolute; left: var(--sr-space-6); bottom: var(--sr-space-6); z-index: 5;
+    background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg);
+    padding: var(--sr-space-4) var(--sr-space-5); box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    display: flex; flex-direction: column; gap: var(--sr-space-2); font-size: var(--sr-text-xs); color: var(--sr-ink-2);
+  }
+  .map-legend-row { display: flex; align-items: center; gap: var(--sr-space-3); }
+  .map-legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .map-legend-dot.hollow { background: var(--sr-bg); border: 2px solid var(--sr-ink); box-sizing: border-box; }
   .map-info-card { font-family: var(--sr-font); min-width: 180px; }
   .map-info-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: 4px; }
   .map-info-line { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-bottom: 4px; }
@@ -401,6 +411,14 @@
   <div class="map-float-panel">
     <div class="map-float-panel-title">今天路線</div>
     <div id="map-route-root"><div class="empty-hint">在清單模式選好店家並按「計算路線」</div></div>
+  </div>
+  <div class="map-legend-panel" aria-label="地圖圖例">
+    <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-ink)"></span>已排進今天（錨點／補的站）</div>
+    <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-1)"></span>還早</div>
+    <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-2)"></span>快到了</div>
+    <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-3)"></span>該去了</div>
+    <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-4)"></span>很久了</div>
+    <div class="map-legend-row"><span class="map-legend-dot hollow"></span>開發中新店（不分級）</div>
   </div>
 </div>
 
@@ -1177,8 +1195,10 @@ function ratioTierOf(ratio) {
   if (ratio >= 0.5) return 'soon';
   return 'early';
 }
+// 2026-11-13：地圖 marker 改用 --sr-map-ratio-*（跟客戶總覽表格格子那組 --sr-ratio-* 分開，
+// 表格的淡色縮成地圖小圓點太淺看不清楚，見 design-tokens.css 註解）。
 function ratioColorVar(tier) {
-  return tier === 'very-late' ? '--sr-ratio-4' : tier === 'late' ? '--sr-ratio-3' : tier === 'soon' ? '--sr-ratio-2' : '--sr-ratio-1';
+  return tier === 'very-late' ? '--sr-map-ratio-4' : tier === 'late' ? '--sr-map-ratio-3' : tier === 'soon' ? '--sr-map-ratio-2' : '--sr-map-ratio-1';
 }
 // marker 顏色只能吃實際色碼，不能直接吃 CSS 變數名——讀 design-tokens.css 當下算好的值，
 // 不要另外寫死 hex（CLAUDE.md「新頁面一律引用 design-tokens.css 的變數」）。
