@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜紀錄</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* B 紀錄分頁（階段2 項目11）。導覽列跟 customers.html／followups.html 同一套樣式（刻意複製）。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; }
+
+  .page-header { display: flex; align-items: center; gap: var(--sr-space-7); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); display: flex; flex-direction: column; gap: var(--sr-space-6); }
+
+  .filter-form {
+    background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg);
+    padding: var(--sr-space-6); display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sr-space-4); align-items: end;
+  }
+  .filter-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .filter-form select, .filter-form input {
+    height: var(--sr-input-h); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
+    padding: 0 var(--sr-space-4); font-family: var(--sr-font); font-size: var(--sr-text-sm); color: var(--sr-ink); background: var(--sr-bg); box-sizing: border-box;
+  }
+  .tag-row { grid-column: 1 / -1; display: flex; gap: var(--sr-space-3); flex-wrap: wrap; }
+  .filter-pill {
+    height: 28px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+    font-size: var(--sr-text-xs); background: var(--sr-bg); border: 1px solid var(--sr-line);
+    color: var(--sr-ink-2); cursor: pointer; font-family: var(--sr-font);
+  }
+  .filter-pill.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
+
+  .stats-line { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+  .stats-line b { color: var(--sr-ink); }
+
+  .day-group { display: flex; flex-direction: column; gap: var(--sr-space-3); }
+  .day-group-title { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
+  .table-scroll { overflow-x: auto; min-width: 0; background: var(--sr-bg); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); }
+  table.record-table { width: 100%; border-collapse: collapse; font-size: var(--sr-text-sm); min-width: 680px; }
+  table.record-table td { padding: var(--sr-space-4) var(--sr-space-5); border-bottom: 1px solid var(--sr-line-row); vertical-align: top; }
+  table.record-table tr:last-child td { border-bottom: none; }
+  .store-link { background: none; border: none; padding: 0; color: var(--sr-ink); font-weight: var(--sr-weight-bold); text-decoration: underline; cursor: pointer; font-family: var(--sr-font); font-size: var(--sr-text-sm); white-space: nowrap; }
+  .purpose-tag { font-size: var(--sr-text-2xs); background: var(--sr-primary-tint); color: var(--sr-primary-hover); border-radius: var(--sr-radius-sm); padding: 2px 8px; white-space: nowrap; }
+  .record-content { cursor: pointer; }
+  .record-content:hover { color: var(--sr-primary-hover); }
+  .record-tags { font-size: var(--sr-text-xs); color: var(--sr-ink-3); white-space: nowrap; }
+  .record-full { font-size: var(--sr-text-xs); color: var(--sr-ink-2); margin-top: var(--sr-space-3); padding: var(--sr-space-4); background: var(--sr-bg-subtle); border-radius: var(--sr-radius-md); display: flex; flex-direction: column; gap: var(--sr-space-2); white-space: pre-wrap; }
+  .record-full[hidden] { display: none; } /* [hidden] 的 UA 樣式 specificity 輸給上面那條 class 規則，要自己補回來，不然 hidden 屬性形同虛設 */
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title">拜訪紀錄</span>
+</div>
+
+<div class="page-body">
+  <form class="filter-form" id="filter-form" onsubmit="return false">
+    <label>日期範圍
+      <select id="f-range">
+        <option value="all">全部</option>
+        <option value="month" selected>本月</option>
+        <option value="lastmonth">上個月</option>
+        <option value="week">本週</option>
+      </select>
+    </label>
+    <label>分區（縣市）
+      <select id="f-city"><option value="">全部</option></select>
+    </label>
+    <label>拜訪類型
+      <select id="f-purpose"><option value="">全部</option></select>
+    </label>
+    <label>關鍵字（拜訪內容／Summary／Pain Points）
+      <input type="search" id="f-keyword" placeholder="輸入關鍵字">
+    </label>
+    <div class="tag-row" id="f-tags"></div>
+  </form>
+
+  <div class="stats-line" id="stats-line"></div>
+  <div id="records-root"><div class="empty-hint">載入中…</div></div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script src="store-drawer.js"></script>
+<script>
+const { get, escapeHtml } = window.PlannerAPI;
+window.SRNav.render({ active: 'records' });
+
+let allVisits = [];     // /all-visits 的 visits，補上 storeName/city 查表結果
+let pharmacyById = {};  // id -> {name, city, district}
+let activeTag = null;   // 單選（階段2 第一版先不做多選，之後有需要再加）
+
+function monthKeyOf_(iso) { return iso ? iso.slice(0, 7) : null; }
+function isoOfRaw_(raw) {
+  if (!raw) return null;
+  const d = new Date(String(raw).replace(/\//g, '-'));
+  return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function mondayOf_(d) {
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  const m = new Date(d); m.setDate(d.getDate() + diff); m.setHours(0, 0, 0, 0);
+  return m;
+}
+
+// 標籤欄位格式不確定（既有資料是業務手打，可能用逗號、頓號或空白分隔的 #標籤，且原始文字
+// 常常自己就帶 # 開頭），拆成陣列時幾種常見分隔符都接受，並統一去掉開頭的 #（顯示時再統一補一個，
+// 不然原始資料帶 # 時會變成 ##標籤）。
+function splitTags_(raw) {
+  return String(raw || '').split(/[,，、\s]+/).map(s => s.trim().replace(/^#+/, '')).filter(Boolean);
+}
+
+function dayLabel_(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`;
+}
+
+function recordRowHtml(v) {
+  const hasMore = !!(v.content || v.painPoints || v.actionItems || v.rawTranscript);
+  const shortText = v.summary || (v.content || '').split('\n').slice(0, 2).join(' ') || '（無內容）';
+  const tags = splitTags_(v.tags);
+  return `<tr>
+    <td><button class="store-link" data-action="open-drawer" data-id="${escapeHtml(v.pharmacyId)}">${escapeHtml(v.storeName || v.pharmacyId)}</button></td>
+    <td><span class="purpose-tag">${escapeHtml(v.purpose || '—')}</span></td>
+    <td>
+      <div class="record-content" ${hasMore ? 'data-action="toggle-record-detail"' : ''}>${escapeHtml(shortText)}${hasMore ? '（點看全文）' : ''}</div>
+      <div class="record-full" hidden>
+        ${v.content ? `<div><b>拜訪內容：</b>${escapeHtml(v.content)}</div>` : ''}
+        ${v.painPoints ? `<div><b>Pain Points：</b>${escapeHtml(v.painPoints)}</div>` : ''}
+        ${v.actionItems ? `<div><b>Action Items：</b>${escapeHtml(v.actionItems)}</div>` : ''}
+        ${v.rawTranscript ? `<div><b>逐字稿：</b>${escapeHtml(v.rawTranscript)}</div>` : ''}
+      </div>
+    </td>
+    <td class="record-tags">${tags.map(t => '#' + escapeHtml(t)).join(' ')}</td>
+  </tr>`;
+}
+
+function dayGroupHtml(iso, visits) {
+  return `<div class="day-group">
+    <div class="day-group-title">${dayLabel_(iso)}</div>
+    <div class="table-scroll"><table class="record-table"><tbody>${visits.map(recordRowHtml).join('')}</tbody></table></div>
+  </div>`;
+}
+
+function rangeMatches_(iso, range) {
+  if (!iso) return range === 'all';
+  if (range === 'all') return true;
+  const d = new Date(iso + 'T00:00:00');
+  const now = new Date();
+  if (range === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  if (range === 'lastmonth') {
+    const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return d.getFullYear() === last.getFullYear() && d.getMonth() === last.getMonth();
+  }
+  if (range === 'week') {
+    const monday = mondayOf_(now);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23, 59, 59, 999);
+    return d >= monday && d <= sunday;
+  }
+  return true;
+}
+
+function applyFiltersAndRender() {
+  const range = document.getElementById('f-range').value;
+  const city = document.getElementById('f-city').value;
+  const purpose = document.getElementById('f-purpose').value;
+  const keyword = document.getElementById('f-keyword').value.trim().toLowerCase();
+
+  const filtered = allVisits.filter(v => {
+    if (!rangeMatches_(v.iso, range)) return false;
+    if (city && v.city !== city) return false;
+    if (purpose && v.purpose !== purpose) return false;
+    if (activeTag && splitTags_(v.tags).indexOf(activeTag) < 0) return false;
+    if (keyword) {
+      const hay = `${v.content || ''} ${v.summary || ''} ${v.painPoints || ''}`.toLowerCase();
+      if (hay.indexOf(keyword) < 0) return false;
+    }
+    return true;
+  });
+
+  // 統計行：本期筆數/家數＋依拜訪類型分組次數
+  const storeCount = new Set(filtered.map(v => v.pharmacyId)).size;
+  const byPurpose = {};
+  filtered.forEach(v => { const p = v.purpose || '其他'; byPurpose[p] = (byPurpose[p] || 0) + 1; });
+  const purposeText = Object.entries(byPurpose).sort((a, b) => b[1] - a[1]).map(([p, n]) => `${escapeHtml(p)} ${n}`).join('・');
+  document.getElementById('stats-line').innerHTML = `本期 <b>${filtered.length}</b> 筆 · <b>${storeCount}</b> 家${purposeText ? ' · ' + purposeText : ''}`;
+
+  const root = document.getElementById('records-root');
+  if (!filtered.length) { root.innerHTML = '<div class="empty-hint">沒有符合條件的紀錄</div>'; return; }
+
+  const byDate = {};
+  filtered.forEach(v => { (byDate[v.iso || '日期不詳'] = byDate[v.iso || '日期不詳'] || []).push(v); });
+  const dates = Object.keys(byDate).sort((a, b) => b > a ? 1 : -1);
+  root.innerHTML = dates.map(iso => iso === '日期不詳'
+    ? `<div class="day-group"><div class="day-group-title">日期不詳</div><div class="table-scroll"><table class="record-table"><tbody>${byDate[iso].map(recordRowHtml).join('')}</tbody></table></div></div>`
+    : dayGroupHtml(iso, byDate[iso])
+  ).join('');
+}
+
+function populateSelectOptions_(selectEl, values) {
+  const current = selectEl.value;
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    selectEl.appendChild(opt);
+  });
+  selectEl.value = current;
+}
+
+async function load() {
+  try {
+    const [visitsRes, pharmaciesRes] = await Promise.all([get('/all-visits'), get('/pharmacies')]);
+    (pharmaciesRes.pharmacies || []).forEach(p => { pharmacyById[p.id] = p; });
+    allVisits = (visitsRes.visits || []).map(v => {
+      const ph = pharmacyById[v.pharmacyId];
+      return { ...v, storeName: ph ? ph.name : v.pharmacyId, city: ph ? ph.city : '', iso: isoOfRaw_(v.date) };
+    });
+
+    const cities = [...new Set(allVisits.map(v => v.city).filter(Boolean))].sort();
+    populateSelectOptions_(document.getElementById('f-city'), cities);
+    const purposes = [...new Set(allVisits.map(v => v.purpose).filter(Boolean))].sort();
+    populateSelectOptions_(document.getElementById('f-purpose'), purposes);
+    // 標籤是業務手打/AI產生的自由文字，實際資料裡異質程度很高（上百種不重複標籤），全部列出來
+    // 篩選列會長到沒辦法用，只取出現次數最多的前 20 個，常見標籤才有篩選意義。
+    const tagCounts = {};
+    allVisits.forEach(v => splitTags_(v.tags).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([t]) => t);
+    document.getElementById('f-tags').innerHTML = topTags.length
+      ? topTags.map(t => `<button type="button" class="filter-pill" data-action="toggle-tag" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</button>`).join('')
+      : '';
+
+    applyFiltersAndRender();
+  } catch (e) {
+    document.getElementById('records-root').innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById('filter-form').addEventListener('input', applyFiltersAndRender);
+document.getElementById('filter-form').addEventListener('change', applyFiltersAndRender);
+
+document.body.addEventListener('click', (e) => {
+  const tagBtn = e.target.closest('[data-action="toggle-tag"]');
+  if (tagBtn) {
+    activeTag = activeTag === tagBtn.dataset.tag ? null : tagBtn.dataset.tag;
+    document.querySelectorAll('#f-tags .filter-pill').forEach(b => b.classList.toggle('active', b.dataset.tag === activeTag));
+    applyFiltersAndRender();
+    return;
+  }
+  const detail = e.target.closest('[data-action="toggle-record-detail"]');
+  if (detail) {
+    const full = detail.nextElementSibling;
+    if (full) full.hidden = !full.hidden;
+    return;
+  }
+  const storeBtn = e.target.closest('[data-action="open-drawer"]');
+  if (storeBtn && window.StoreDrawer) window.StoreDrawer.open(storeBtn.dataset.id);
+});
+
+load();
+window.SRNav.loadBadges();
+</script>
+
+</body>
+</html>

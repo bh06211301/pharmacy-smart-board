@@ -17,6 +17,7 @@
     { id: 'week', label: '本週', href: 'weekly.html' },
     { id: 'month', label: '本月', href: 'monthly.html' },
     { id: 'customers', label: '客戶', href: 'customers.html', badge: 'badge-customers' },
+    { id: 'records', label: '紀錄', href: 'records.html' },
     { id: 'new-store', label: '新店開發', href: 'funnel.html', badge: 'badge-new-store' },
   ];
   // 階段2：「店家規則」拿掉主選單入口，改成只能從 A8 藥局檔案抽屜的「店家規則」區塊點進去

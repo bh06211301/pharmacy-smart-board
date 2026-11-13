@@ -218,7 +218,7 @@ export default {
 
       // ★ 藥局資訊總覽（出貨明細 + 退貨紀錄 + 盤點歷史）
       if (path === '/pharmacy-profile' && request.method === 'GET') {
-        return await handlePharmacyProfile(request, env);
+        return await handlePharmacyProfile(request, env, ctx);
       }
 
       // ★ SmartRoute 規劃流程 v2 第 1 階段：推薦清單（倍數＋待追蹤分）
@@ -273,6 +273,19 @@ export default {
       // ★ Phase 2：A8 藥局檔案抽屜要的單店全部資料（分級、規則、待追蹤）
       if (path === '/api/store' && request.method === 'GET') {
         return await handleStoreDetail(request, env, ctx);
+      }
+
+      // ★ 階段2 項目8：A8 抽屜時間軸（拜訪/叫貨/退貨/待追蹤建立結案/新店階段變化合併排序）
+      if (path === '/api/store-timeline' && request.method === 'GET') {
+        return await handleStoreTimeline(request, env, ctx);
+      }
+
+      // ★ 階段2 項目8：A8 抽屜 AI 月摘要（GET 讀快取，POST 產生/重新產生）
+      if (path === '/api/store-summary' && request.method === 'GET') {
+        return await handleGetStoreSummary(request, env);
+      }
+      if (path === '/api/store-summary' && request.method === 'POST') {
+        return await handlePostStoreSummary(request, env);
       }
 
       // ★ A10 新店開發：頂部數字＋每欄卡片＋轉換率
@@ -1711,18 +1724,17 @@ function extractOrderDateFromNo(orderNo) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
 }
 
-async function handlePharmacyProfile(request, env) {
-  const reqUrl = new URL(request.url);
-  const pharmacy = reqUrl.searchParams.get('pharmacy') || '';
-  if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
-
-  const [orderData, productData, returnDetailData, returnOrderData, invMasterData, invDetailData] = await Promise.all([
-    fetchGvizSheet(env.SHEET_ORDER, null, env),
-    fetchGvizSheet(env.SHEET_PRODUCT, null, env),
-    fetchGvizSheet(env.SHEET_RETURN, null, env),
-    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
-    fetchGvizSheet(env.SHEET_INVENTORY, '盤點主檔'),
-    fetchGvizSheet(env.SHEET_INVENTORY, '盤點明細'),
+// 共用：某店的叫貨明細（orders，一列=一個品項）＋退貨紀錄（returns，一列=一張退貨單含明細）。
+// handlePharmacyProfile（藥局資訊總覽）跟 handleStoreTimeline（A8 抽屜時間軸，2026-11-13 新增）
+// 都要用同一份資料，2026-11-13 從 handlePharmacyProfile 抽出來，避免兩處各自重新讀取/解析一次
+// SHEET_ORDER／SHEET_RETURN／SHEET_RETURN_ORDER（跟這份專案其他 helper 的「複製不共用」慣例
+//不同——這幾張表資料量大、join 邏輯有十幾行，值得抽成函式，不是幾行就能複製的小工具）。
+async function fetchStoreOrdersAndReturns_(pharmacy, env, ctx) {
+  const [orderData, productData, returnDetailData, returnOrderData] = await Promise.all([
+    fetchGvizSheet(env.SHEET_ORDER, null, env, ctx),
+    fetchGvizSheet(env.SHEET_PRODUCT, null, env, ctx),
+    fetchGvizSheet(env.SHEET_RETURN, null, env, ctx),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx),
   ]);
 
   const productNameMap = {};
@@ -1781,6 +1793,19 @@ async function handlePharmacyProfile(request, env) {
     });
   });
   const returns = Object.values(myReturnOrders).sort((a, b) => dateSortKey_(b.date) - dateSortKey_(a.date));
+  return { orders, returns };
+}
+
+async function handlePharmacyProfile(request, env, ctx) {
+  const reqUrl = new URL(request.url);
+  const pharmacy = reqUrl.searchParams.get('pharmacy') || '';
+  if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
+
+  const [{ orders, returns }, invMasterData, invDetailData] = await Promise.all([
+    fetchStoreOrdersAndReturns_(pharmacy, env, ctx),
+    fetchGvizSheet(env.SHEET_INVENTORY, '盤點主檔'),
+    fetchGvizSheet(env.SHEET_INVENTORY, '盤點明細'),
+  ]);
 
   // ── 盤點歷史（盤點主檔=場次，盤點明細=品項，透過盤點編號 join，只取這家店的） ──
   const mySessions = {};
@@ -1810,6 +1835,204 @@ async function handlePharmacyProfile(request, env) {
   const inventory = Object.values(mySessions).sort((a, b) => dateSortKey_(b.date) - dateSortKey_(a.date));
 
   return json({ ok: true, pharmacy, orders, returns, inventory });
+}
+
+// 把各種來源的原始日期統一轉成 YYYY-MM-DD，給時間軸依日期分組/排序用（排序一律另外用
+// dateSortKey_()，這裡只是給前端顯示跟分組 key 用的正規化格式）。來源包含：gviz 未補零
+// 「Y/M/D」字串、GAS 寫入的「yyyy-MM-dd」文字、以及 Google Sheets 把文字日期自動轉型後
+// gviz 讀回來的「Date(y,m,d)」字面值（待追蹤表的建立日期/完成日期、階段歷程的日期都踩過
+// 這個坑，跟 gvizDateToIso() 是同一種問題）——先用既有 parseGvizDate() 處理字面值，一般
+// 字串原樣通過，再轉 Date 物件。
+function rawDateToIso_(raw) {
+  if (!raw) return null;
+  const normalized = parseGvizDate(raw);
+  const d = new Date(String(normalized).replace(/\//g, '-'));
+  return isNaN(d) ? null : formatDateIso_(d);
+}
+
+// ============================================================
+// 階段2 項目8：A8 藥局檔案抽屜的時間軸（拜訪／叫貨／退貨／待追蹤建立/結案／新店階段變化
+// 合併依日期排序）。拜訪紀錄只有日期沒有時間，同一天多筆只能依資料表原始順序，不裝有精確時間。
+// ============================================================
+async function handleStoreTimeline(request, env, ctx) {
+  const url = new URL(request.url);
+  const id = url.searchParams.get('id');
+  if (!id) return json({ error: '缺少 id' }, 400);
+
+  const [allVisitsRes, { orders, returns }, followupRows, stageHistoryRows] = await Promise.all([
+    handleAllVisits(env).then(r => r.json()),
+    fetchStoreOrdersAndReturns_(id, env, ctx),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '待追蹤', env, ctx) : Promise.resolve([]),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx) : Promise.resolve([]),
+  ]);
+
+  const events = [];
+
+  // 拜訪：handleAllVisits() 只回最近500筆全公司（跟 monthly.html 等既有端點同一個已知限制），
+  // 對單店歷史通常夠用；Summary/Pain Points/Action Items 都已經在 handleAllVisits 裡
+  // cleanField() 過，不會把 [Ljava.lang.Object... 這種壞資料帶出來。
+  (allVisitsRes.visits || []).filter(v => v.pharmacyId === id).forEach(v => {
+    events.push({
+      type: 'visit', date: rawDateToIso_(v.date), visitId: v.visitId,
+      purpose: v.purpose, tags: v.tags, summary: v.summary, content: v.content,
+      painPoints: v.painPoints, actionItems: v.actionItems, rawTranscript: v.rawTranscript,
+    });
+  });
+
+  // 叫貨：orders 是一列一個品項（fetchStoreOrdersAndReturns_），依訂單編號分組成一筆事件
+  const orderGroups = {};
+  orders.forEach(o => {
+    const key = o.orderNo || o.date;
+    if (!orderGroups[key]) orderGroups[key] = { orderNo: o.orderNo, date: o.date, items: [], total: 0 };
+    orderGroups[key].items.push(`${o.productName}×${o.qty}`);
+    orderGroups[key].total += o.subtotal;
+  });
+  Object.values(orderGroups).forEach(g => {
+    events.push({ type: 'order', date: rawDateToIso_(g.date), orderNo: g.orderNo, amount: g.total, itemsText: g.items.join('、') });
+  });
+
+  // 退貨
+  returns.forEach(r => {
+    events.push({
+      type: 'return', date: rawDateToIso_(r.date), returnNo: r.returnNo, amount: r.amount,
+      itemsText: r.items.map(i => `${i.productName}×${i.qty}`).join('、'),
+      reasons: [...new Set(r.items.map(i => i.reason).filter(Boolean))].join('、'),
+    });
+  });
+
+  // 待追蹤建立/結案：同一筆待追蹤可能貢獻兩個事件（建立時一個、結案時再一個）
+  followupRows.forEach(f => {
+    if (f.get('店家代號') !== id) return;
+    const item = f.get('事項') || '';
+    const created = f.get('建立日期');
+    if (created) events.push({ type: 'followup_created', date: rawDateToIso_(created), item });
+    if (f.get('狀態') === '已完成') {
+      const resolved = f.get('完成日期');
+      if (resolved) events.push({ type: 'followup_resolved', date: rawDateToIso_(resolved), item, resolvedFrom: f.get('完成來源') || '' });
+    }
+  });
+
+  // 新店階段變化（正式客戶不會有列，篩不到東西，不特別排除）
+  stageHistoryRows.forEach(h => {
+    if (h.get('店代號') !== id) return;
+    events.push({ type: 'stage_change', date: rawDateToIso_(h.get('日期')), from: h.get('從階段'), to: h.get('到階段'), source: h.get('來源') || '' });
+  });
+
+  events.sort((a, b) => dateSortKey_(b.date) - dateSortKey_(a.date));
+
+  return json({ ok: true, id, events: events.slice(0, 80) });
+}
+
+// ============================================================
+// 階段2 項目8：AI 月摘要（預設不產生，按「產生本月摘要」才呼叫；結果存 KV，
+// key＝store-summary:{storeId}:{yyyy-MM}，同月再開直接回快取，「重新產生」才覆蓋）。
+// 用該月拜訪的 Summary／Pain Points／Action Items／拜訪內容整理成「談了什麼／藥師反應／要跟進」。
+// ============================================================
+function storeSummaryKvKey_(id, month) { return `store-summary:${id}:${month}`; }
+
+async function handleGetStoreSummary(request, env) {
+  const url = new URL(request.url);
+  const id = url.searchParams.get('id');
+  const month = url.searchParams.get('month');
+  if (!id || !month) return json({ error: '缺少 id 或 month' }, 400);
+  if (!env.TODOS_KV) return json({ error: 'KV binding 未設定' }, 500);
+  const raw = await env.TODOS_KV.get(storeSummaryKvKey_(id, month));
+  return json({ ok: true, id, month, summary: raw ? JSON.parse(raw) : null });
+}
+
+async function handlePostStoreSummary(request, env) {
+  const body = await request.json();
+  const { id, month } = body;
+  if (!id || !month || !/^\d{4}-\d{2}$/.test(month)) return json({ error: '缺少 id 或 month 格式不對（要 YYYY-MM）' }, 400);
+
+  const allVisitsRes = await handleAllVisits(env).then(r => r.json());
+  const monthVisits = (allVisitsRes.visits || []).filter(v => v.pharmacyId === id && rawDateToIso_(v.date)?.slice(0, 7) === month);
+  if (!monthVisits.length) {
+    return json({ ok: true, id, month, summary: null, note: '這個月沒有拜訪紀錄可以整理' });
+  }
+
+  // 拜訪紀錄只有日期沒有時間，依原始列順序當次序；外勤文字紀錄沒有 Summary/Pain Points/
+  // Action Items（只有錄音被 AppSheet 的 AI 機器人處理過才會有），缺的欄位就不塞進 prompt，
+  // 不要假裝每筆都有結構化欄位。
+  const linesForPrompt = monthVisits.map(v => {
+    const parts = [`[${v.date}] 拜訪內容：${v.content || '（無內容）'}`];
+    if (v.summary) parts.push(`Summary：${v.summary}`);
+    if (v.painPoints) parts.push(`Pain Points：${v.painPoints}`);
+    if (v.actionItems) parts.push(`Action Items：${v.actionItems}`);
+    return parts.join('；');
+  }).join('\n');
+
+  const prompt = `以下是同一家藥局在同一個月份的所有拜訪紀錄（可能有的只有拜訪內容、沒有 Summary/Pain Points/Action Items，因為那些欄位只有錄音被 AI 分析過才會有）：
+
+${linesForPrompt}
+
+請整理成三段話，分別是「這個月談了什麼」「藥師反應」「要跟進的事」，只根據上面實際出現的內容整理，不要自己掰內容，缺的部分可以寫「沒有特別記錄」。
+只輸出 JSON，不要 markdown 包裹、不要任何說明文字。
+輸出格式（嚴格遵守，不要多加欄位）：
+{"talked":"...","reaction":"...","followUp":"..."}`;
+
+  // 照抄 handleParseLineNotes 已驗證過的可靠模式：多模型備援＋雙重逾時＋JSON驗證重試，
+  // 不是只要「有回應」就算數（跟話術生成 handleGenerateScript 那套直打 Gemini、無備援不一樣）。
+  const models = [
+    'nvidia/nemotron-3.5-super-vl:free',
+    'nvidia/nemotron-3.5-lightning:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    'xingchen-agi/xing4.0-29b-a4b:free',
+    'google/gemma-4-31b-it:free',
+    'google/gemma-4-26b-a4b-it:free',
+    'cohere/north-mini-code:free',
+  ];
+  function extractJson(content) {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try { JSON.parse(match[0]); return match[0]; } catch (e) { return null; }
+  }
+  let parsed = null, lastError = '';
+  const tStart = Date.now();
+  const OVERALL_DEADLINE_MS = 25000;
+  for (const model of models) {
+    if (Date.now() - tStart > OVERALL_DEADLINE_MS) { lastError = lastError || '整體逾時'; break; }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('逾時（超過10秒未回應）')), 10000));
+    try {
+      const res = await Promise.race([
+        fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.OPENROUTER_KEY}`,
+            'HTTP-Referer': 'https://bh06211301.github.io',
+            'X-Title': 'Pharmacy Smart Board',
+          },
+          body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 2000, temperature: 0.3 }),
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content || !content.trim()) { lastError = data.error?.message || 'empty content'; continue; }
+      const jsonStr = extractJson(content);
+      if (!jsonStr) { lastError = '回應不是有效 JSON'; continue; }
+      parsed = JSON.parse(jsonStr);
+      if (!parsed.talked && !parsed.reaction && !parsed.followUp) { parsed = null; lastError = 'JSON缺必要欄位'; continue; }
+      break;
+    } catch (e) {
+      clearTimeout(timeoutId);
+      lastError = e.message;
+    }
+  }
+  if (!parsed) return json({ error: 'AI 摘要產生失敗（已試完備援模型清單）：' + lastError }, 502);
+
+  const summary = {
+    talked: parsed.talked || '', reaction: parsed.reaction || '', followUp: parsed.followUp || '',
+    visitCount: monthVisits.length, generatedAt: new Date().toISOString(),
+  };
+  if (env.TODOS_KV) await env.TODOS_KV.put(storeSummaryKvKey_(id, month), JSON.stringify(summary));
+  return json({ ok: true, id, month, summary });
 }
 
 // ============================================================

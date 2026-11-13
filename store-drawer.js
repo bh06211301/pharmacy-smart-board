@@ -189,6 +189,24 @@
         background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-sm);
         padding: 10px 20px; border-radius: var(--sr-radius-md); font-family: var(--sr-font);
       }
+      /* 2026-11-13 項目8：AI 月摘要、時間軸 */
+      .sr-ai-summary p { margin: 0 0 var(--sr-space-3); font-size: var(--sr-text-sm); line-height: 1.8; }
+      .sr-ai-summary p:last-child { margin-bottom: 0; }
+      .sr-timeline-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: var(--sr-space-5); }
+      .sr-filter-chip {
+        height: 28px; padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-pill);
+        border: 1px solid var(--sr-line); background: var(--sr-bg); color: var(--sr-ink-2);
+        font-size: var(--sr-text-xs); font-family: var(--sr-font); cursor: pointer;
+      }
+      .sr-filter-chip.selected { border-color: var(--sr-primary); background: var(--sr-primary-tint); color: var(--sr-primary-hover); font-weight: var(--sr-weight-bold); }
+      .sr-timeline-item { border-left: 2px solid var(--sr-line); padding: 0 0 var(--sr-space-5) var(--sr-space-5); margin-bottom: var(--sr-space-5); }
+      .sr-timeline-item:last-child { margin-bottom: 0; }
+      .sr-timeline-date { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-bottom: 2px; }
+      .sr-timeline-tag { font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
+      .sr-timeline-body { font-size: var(--sr-text-sm); }
+      .sr-timeline-expand { background: none; border: none; color: var(--sr-primary); font-size: var(--sr-text-xs); padding: 2px 0; cursor: pointer; font-family: var(--sr-font); }
+      .sr-timeline-full { margin-top: var(--sr-space-3); padding: var(--sr-space-4); background: var(--sr-bg-subtle); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); color: var(--sr-ink-2); display: flex; flex-direction: column; gap: var(--sr-space-2); white-space: pre-wrap; }
+      .sr-timeline-full[hidden] { display: none; } /* [hidden] 的 UA 樣式specificity輸給上面那條 class 規則，要自己補回來，不然 hidden 屬性形同虛設 */
     `;
     document.head.appendChild(style);
   }
@@ -227,6 +245,12 @@
       else if (action === 'toggle-rule-form') toggleRuleForm();
       else if (action === 'submit-rule') submitRule(t);
       else if (action === 'gen-briefing') genBriefing();
+      else if (action === 'gen-ai-summary') genAiSummary(t);
+      else if (action === 'timeline-filter') setTimelineFilter(t.dataset.filter);
+      else if (action === 'toggle-timeline-detail') {
+        const full = t.nextElementSibling;
+        if (full) { full.hidden = !full.hidden; t.textContent = full.hidden ? '展開全文' : '收起'; }
+      }
     });
     root.addEventListener('change', (e) => {
       const t = e.target.closest('[data-action]');
@@ -446,19 +470,140 @@
     }
   }
 
-  // ---------- 拜訪紀錄（最近4筆，沿用既有 /visits/:id） ----------
-  async function loadVisits(id) {
-    const root = document.getElementById('sr-visits-root');
+  // ---------- AI 月摘要（預設不產生，按「產生本月摘要」才呼叫，沿用 /api/store-summary） ----------
+  function currentYm_() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  function aiSummaryBlockHtml() {
+    const month = currentYm_();
+    return `<div class="sr-section">
+      <div class="sr-section-title">AI 月摘要：${Number(month.slice(5, 7))} 月</div>
+      <div id="sr-ai-summary-root" class="sr-ai-summary"><div class="sr-empty">載入中…</div></div>
+    </div>`;
+  }
+  function renderAiSummary(summary, month) {
+    const root = document.getElementById('sr-ai-summary-root');
+    if (!root) return;
+    if (!summary) {
+      root.innerHTML = `<button class="sr-btn sr-btn-secondary" data-action="gen-ai-summary" data-month="${escapeHtml(month)}">產生本月摘要</button>`;
+      return;
+    }
+    root.innerHTML = `
+      <p><b>談了什麼：</b>${escapeHtml(summary.talked || '—')}</p>
+      <p><b>藥師反應：</b>${escapeHtml(summary.reaction || '—')}</p>
+      <p><b>要跟進：</b>${escapeHtml(summary.followUp || '—')}</p>
+      <button class="sr-btn-sm" data-action="gen-ai-summary" data-month="${escapeHtml(month)}">重新產生</button>`;
+  }
+  async function loadAiSummary(id) {
+    const month = currentYm_();
     try {
-      const d = await get('/visits/' + encodeURIComponent(id));
-      const visits = (d.visits || []).slice(0, 4);
-      if (!visits.length) { root.innerHTML = '<div class="sr-empty">還沒有拜訪紀錄</div>'; return; }
-      root.innerHTML = visits.map(v => `<div class="sr-visit-item">
-        <span class="sr-visit-date">${escapeHtml(v.date)}</span>　${escapeHtml(v.purpose || '拜訪')}
-        <div style="color:var(--sr-ink-2);margin-top:2px">${escapeHtml(v.summary || v.content || '')}</div>
-      </div>`).join('');
+      const d = await get('/api/store-summary?id=' + encodeURIComponent(id) + '&month=' + month);
+      renderAiSummary(d.summary, month);
     } catch (e) {
-      root.innerHTML = `<div class="sr-empty">載入失敗：${escapeHtml(e.message)}</div>`;
+      const root = document.getElementById('sr-ai-summary-root');
+      if (root) root.innerHTML = `<button class="sr-btn sr-btn-secondary" data-action="gen-ai-summary" data-month="${escapeHtml(month)}">產生本月摘要</button><div class="sr-empty" style="margin-top:var(--sr-space-3)">讀取快取失敗：${escapeHtml(e.message)}</div>`;
+    }
+  }
+  async function genAiSummary(btn) {
+    const month = btn.dataset.month || currentYm_();
+    await withBusy(btn, '產生中…', async () => {
+      const d = await post('/api/store-summary', { id: currentId, month });
+      if (d.summary) { renderAiSummary(d.summary, month); toast('已產生本月摘要'); }
+      else { toast(d.note || '沒有可整理的拜訪紀錄'); renderAiSummary(null, month); }
+    });
+  }
+
+  // ---------- 時間軸（拜訪/叫貨/退貨/待追蹤建立結案/新店階段變化，沿用 /api/store-timeline） ----------
+  const TIMELINE_FILTERS = [
+    { key: 'all', label: '全部' }, { key: 'visit', label: '拜訪' }, { key: 'order', label: '叫貨' },
+    { key: 'return', label: '退貨' }, { key: 'followup', label: '待追蹤' }, { key: 'stage', label: '新店階段' },
+  ];
+  let timelineEvents = [];
+  let timelineFilter = 'all';
+  function timelineFilterKeyOf_(type) {
+    if (type === 'followup_created' || type === 'followup_resolved') return 'followup';
+    if (type === 'stage_change') return 'stage';
+    return type; // visit / order / return
+  }
+  // 拜訪預設顯示 Summary，沒有就顯示拜訪內容前兩行（外勤打字紀錄沒有 AI 欄位，常常只有這個）；
+  // 有內容或逐字稿才給「展開全文」，純粹只有 Summary、沒有其他東西時不需要展開按鈕。
+  function timelineVisitHtml_(ev) {
+    const shortText = ev.summary || (ev.content || '').split('\n').slice(0, 2).join(' ') || '（沒有內容）';
+    const hasMore = !!(ev.content || ev.rawTranscript);
+    const fullParts = [];
+    if (ev.content) fullParts.push(`<div><b>拜訪內容：</b>${escapeHtml(ev.content)}</div>`);
+    if (ev.painPoints) fullParts.push(`<div><b>Pain Points：</b>${escapeHtml(ev.painPoints)}</div>`);
+    if (ev.actionItems) fullParts.push(`<div><b>Action Items：</b>${escapeHtml(ev.actionItems)}</div>`);
+    if (ev.rawTranscript) fullParts.push(`<div><b>逐字稿：</b>${escapeHtml(ev.rawTranscript)}</div>`);
+    return `<div class="sr-timeline-item" data-timeline-type="visit">
+      <div class="sr-timeline-date">${escapeHtml(ev.date || '日期不詳')}　<span class="sr-timeline-tag">拜訪${ev.purpose ? '・' + escapeHtml(ev.purpose) : ''}</span>${ev.tags ? '　' + escapeHtml(ev.tags) : ''}</div>
+      <div class="sr-timeline-body">${escapeHtml(shortText)}</div>
+      ${hasMore ? `<button class="sr-timeline-expand" data-action="toggle-timeline-detail">展開全文</button>
+      <div class="sr-timeline-full" hidden>${fullParts.join('')}</div>` : ''}
+    </div>`;
+  }
+  function timelineEventHtml_(ev) {
+    if (ev.type === 'visit') return timelineVisitHtml_(ev);
+    const dateLabel = escapeHtml(ev.date || '日期不詳');
+    if (ev.type === 'order') {
+      return `<div class="sr-timeline-item" data-timeline-type="order">
+        <div class="sr-timeline-date">${dateLabel}　<span class="sr-timeline-tag">叫貨</span></div>
+        <div class="sr-timeline-body">$${Math.round(ev.amount || 0).toLocaleString()}　${escapeHtml(ev.itemsText || '')}</div>
+      </div>`;
+    }
+    if (ev.type === 'return') {
+      return `<div class="sr-timeline-item" data-timeline-type="return">
+        <div class="sr-timeline-date">${dateLabel}　<span class="sr-timeline-tag">退貨</span></div>
+        <div class="sr-timeline-body">$${Math.round(ev.amount || 0).toLocaleString()}　${escapeHtml(ev.itemsText || '')}${ev.reasons ? '　原因：' + escapeHtml(ev.reasons) : ''}</div>
+      </div>`;
+    }
+    if (ev.type === 'followup_created') {
+      return `<div class="sr-timeline-item" data-timeline-type="followup">
+        <div class="sr-timeline-date">${dateLabel}　<span class="sr-timeline-tag">待追蹤建立</span></div>
+        <div class="sr-timeline-body">${escapeHtml(ev.item || '')}</div>
+      </div>`;
+    }
+    if (ev.type === 'followup_resolved') {
+      return `<div class="sr-timeline-item" data-timeline-type="followup">
+        <div class="sr-timeline-date">${dateLabel}　<span class="sr-timeline-tag">待追蹤結案</span></div>
+        <div class="sr-timeline-body">${escapeHtml(ev.item || '')}${ev.resolvedFrom ? '　（' + escapeHtml(ev.resolvedFrom) + '）' : ''}</div>
+      </div>`;
+    }
+    if (ev.type === 'stage_change') {
+      return `<div class="sr-timeline-item" data-timeline-type="stage">
+        <div class="sr-timeline-date">${dateLabel}　<span class="sr-timeline-tag">新店階段</span></div>
+        <div class="sr-timeline-body">${escapeHtml(ev.from || '')} → ${escapeHtml(ev.to || '')}</div>
+      </div>`;
+    }
+    return '';
+  }
+  function timelineBlockHtml() {
+    return `<div class="sr-section">
+      <div class="sr-section-title">時間軸</div>
+      <div class="sr-timeline-filters">${TIMELINE_FILTERS.map(f => `<button class="sr-filter-chip${f.key === 'all' ? ' selected' : ''}" data-action="timeline-filter" data-filter="${f.key}">${f.label}</button>`).join('')}</div>
+      <div id="sr-timeline-root"><div class="sr-empty">載入中…</div></div>
+    </div>`;
+  }
+  function renderTimeline() {
+    const root = document.getElementById('sr-timeline-root');
+    if (!root) return;
+    const filtered = timelineFilter === 'all' ? timelineEvents : timelineEvents.filter(e => timelineFilterKeyOf_(e.type) === timelineFilter);
+    root.innerHTML = filtered.length ? filtered.map(timelineEventHtml_).join('') : '<div class="sr-empty">這個分類沒有紀錄</div>';
+  }
+  function setTimelineFilter(key) {
+    timelineFilter = key;
+    document.querySelectorAll('.sr-filter-chip').forEach(b => b.classList.toggle('selected', b.dataset.filter === key));
+    renderTimeline();
+  }
+  async function loadTimeline(id) {
+    const root = document.getElementById('sr-timeline-root');
+    try {
+      const d = await get('/api/store-timeline?id=' + encodeURIComponent(id));
+      timelineEvents = d.events || [];
+      renderTimeline();
+    } catch (e) {
+      if (root) root.innerHTML = `<div class="sr-empty">載入失敗：${escapeHtml(e.message)}</div>`;
     }
   }
 
@@ -573,16 +718,14 @@
       </div>` : ''}
       <div class="sr-drawer-body">
         ${tieringBlockHtml(data)}
+        ${aiSummaryBlockHtml()}
         ${followupsBlockHtml(data)}
         ${rulesBlockHtml(data)}
         <div class="sr-section">
           <div class="sr-section-title">拜訪前簡報</div>
           <div id="sr-briefing-root"><button class="sr-btn sr-btn-secondary" data-action="gen-briefing">產生話術</button></div>
         </div>
-        <div class="sr-section">
-          <div class="sr-section-title">拜訪紀錄（最近4筆）</div>
-          <div id="sr-visits-root"><div class="sr-empty">載入中…</div></div>
-        </div>
+        ${timelineBlockHtml()}
         <div class="sr-section">
           <div class="sr-section-title">進貨</div>
           <div id="sr-orders-root"><div class="sr-empty">載入中…</div></div>
@@ -594,7 +737,9 @@
         </div>
       </div>
     `;
-    loadVisits(data.id);
+    timelineFilter = 'all';
+    loadAiSummary(data.id);
+    loadTimeline(data.id);
     loadOrders(data.id);
   }
 
