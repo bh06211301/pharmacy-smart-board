@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜成果</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* C 成果分頁（階段3）。導覽列跟 customers.html／followups.html 同一套樣式（刻意複製）。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; }
+
+  .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sr-space-4); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .page-header-note { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); display: flex; flex-direction: column; gap: var(--sr-space-7); }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sr-space-6); }
+  .metric-card { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-6); background: var(--sr-bg); display: flex; flex-direction: column; gap: var(--sr-space-3); }
+  .metric-label { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+  .metric-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .metric-value .unit { font-size: var(--sr-text-md); color: var(--sr-ink-2); font-weight: var(--sr-weight-regular); }
+  .metric-bar { height: 8px; background: var(--sr-bg-track); border-radius: var(--sr-radius-pill); overflow: hidden; }
+  .metric-bar-fill { height: 8px; background: var(--sr-primary); }
+  .metric-sub { font-size: var(--sr-text-sm); color: var(--sr-ink-2); }
+  .metric-breakdown { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px var(--sr-space-5); font-size: var(--sr-text-sm); }
+  .metric-breakdown-row { display: flex; justify-content: space-between; }
+  .metric-breakdown-row dt { color: var(--sr-ink-2); }
+
+  .panel { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-6); background: var(--sr-bg); }
+  .panel-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
+  .tier-row { display: flex; justify-content: space-between; align-items: center; padding: var(--sr-space-4) 0; border-bottom: 1px solid var(--sr-line-row); flex-wrap: wrap; gap: var(--sr-space-4); }
+  .tier-row:last-child { border-bottom: none; }
+  .tier-row-label { font-size: var(--sr-text-md); }
+  .tier-row-count { font-weight: var(--sr-weight-bold); color: var(--sr-danger); }
+  .tier-row-count.zero { color: var(--sr-ink); }
+  .btn-outline { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); border: 1px solid var(--sr-line); background: var(--sr-bg); color: var(--sr-ink); font-size: var(--sr-text-sm); cursor: pointer; font-family: var(--sr-font); }
+  .btn-outline:hover { background: var(--sr-bg-subtle); }
+  .btn-outline.active { border-color: var(--sr-primary); background: var(--sr-primary-tint); color: var(--sr-primary-hover); font-weight: var(--sr-weight-bold); }
+
+  .store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sr-space-3); flex-basis: 100%; }
+  .store-chip { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); padding: var(--sr-space-3) var(--sr-space-4); display: flex; flex-direction: column; gap: var(--sr-space-2); font-size: var(--sr-text-sm); }
+  .store-chip-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sr-space-3); }
+  .store-chip-days { font-size: var(--sr-text-xs); color: var(--sr-ink-3); white-space: nowrap; }
+  .assign-row { display: flex; gap: var(--sr-space-2); align-items: center; }
+  .assign-row input[type=date] { height: 30px; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); font-size: var(--sr-text-xs); flex: 1; min-width: 0; }
+  .btn-xs { height: 30px; padding: 0 var(--sr-space-3); border-radius: var(--sr-radius-sm); border: none; background: var(--sr-primary); color: var(--sr-on-dark); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); white-space: nowrap; }
+  .btn-xs:hover { background: var(--sr-primary-hover); }
+  .btn-xs:disabled { background: var(--sr-ink-3); cursor: default; }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title">拜訪成果</span>
+  <span class="page-header-note" id="header-note">統計到— · 不含老爸的店、新竹、死客戶</span>
+</div>
+
+<div class="page-body">
+  <div class="metric-grid" id="metric-grid"><div class="empty-hint">載入中…</div></div>
+  <div class="panel">
+    <div class="panel-title">本月還沒碰到（依分級）</div>
+    <div id="not-covered-root"><div class="empty-hint">載入中…</div></div>
+  </div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script>
+const { get, post, escapeHtml, genRequestId, toast } = window.PlannerAPI;
+window.SRNav.render({ active: 'recap' });
+window.SRNav.loadBadges();
+
+function fmtMonthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+const currentMonth = new URL(location.href).searchParams.get('month') || fmtMonthKey(new Date());
+let expandedTiers = new Set(); // 可以同時展開多個分級
+
+function metricCardsHtml(d) {
+  const covPct = d.coverage.rate;
+  const purposeEntries = Object.entries(d.visitTypeCounts || {}).sort((a, b) => b[1] - a[1]);
+  return `
+    <div class="metric-card">
+      <div class="metric-label">覆蓋率（有拜訪或叫貨）</div>
+      <div class="metric-value">${d.coverage.covered} <span class="unit">/ ${d.coverage.total} 家</span></div>
+      <div class="metric-bar"><div class="metric-bar-fill" style="width:${Math.min(100, covPct)}%"></div></div>
+      <div class="metric-sub">${covPct}%</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">拜訪次數</div>
+      <div class="metric-value">${d.visitTotal}</div>
+      <dl class="metric-breakdown">${purposeEntries.map(([p, n]) => `<div class="metric-breakdown-row"><dt>${escapeHtml(p)}</dt><dd>${n}</dd></div>`).join('')}</dl>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">新店推進</div>
+      <div class="metric-value">${d.newStoreProgress.total} <span class="unit">家有動</span></div>
+      <div class="metric-sub">往下一階段 ${d.newStoreProgress.advanced} · 轉正式 ${d.newStoreProgress.converted} · 放棄 ${d.newStoreProgress.dropped}</div>
+    </div>`;
+}
+
+function storeChipHtml(s) {
+  const todayStr = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; })();
+  return `<div class="store-chip">
+    <div class="store-chip-top">
+      <span>${escapeHtml(s.name)}</span>
+      <span class="store-chip-days">${s.daysSince !== null ? s.daysSince + ' 天' : '從未接觸'}</span>
+    </div>
+    <div class="assign-row">
+      <input type="date" class="assign-date" value="${todayStr}">
+      <button type="button" class="btn-xs" data-action="assign-day" data-id="${escapeHtml(s.id)}" data-name="${escapeHtml(s.name)}">排進某天</button>
+    </div>
+  </div>`;
+}
+
+function tierRowHtml(tier, stores) {
+  const expanded = expandedTiers.has(tier);
+  const countCls = stores.length > 0 ? 'tier-row-count' : 'tier-row-count zero';
+  return `<div class="tier-row">
+    <span class="tier-row-label">${escapeHtml(tier)} <b class="${countCls}">${stores.length}</b> 家</span>
+    ${stores.length
+      ? `<button type="button" class="btn-outline${expanded ? ' active' : ''}" data-action="toggle-tier-expand" data-tier="${escapeHtml(tier)}">${expanded ? '收起名單' : '展開名單'}</button>`
+      : `<span style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">全部都碰過了</span>`}
+    ${expanded && stores.length ? `<div class="store-grid">${stores.map(storeChipHtml).join('')}</div>` : ''}
+  </div>`;
+}
+
+async function load() {
+  const metricGrid = document.getElementById('metric-grid');
+  const notCoveredRoot = document.getElementById('not-covered-root');
+  try {
+    const d = await get('/api/recap?month=' + currentMonth);
+    const now = new Date();
+    document.getElementById('header-note').textContent = `統計到${now.getMonth()+1}/${now.getDate()} · 不含老爸的店、新竹、死客戶`;
+    metricGrid.innerHTML = metricCardsHtml(d);
+    const tierOrder = ['大咖', '潛力新店', '冷淡', '一般'];
+    notCoveredRoot.innerHTML = tierOrder.map(t => tierRowHtml(t, d.notCoveredByTier[t] || [])).join('');
+  } catch (e) {
+    metricGrid.innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+    notCoveredRoot.innerHTML = '';
+  }
+}
+
+document.body.addEventListener('click', async (e) => {
+  const toggleBtn = e.target.closest('[data-action="toggle-tier-expand"]');
+  if (toggleBtn) {
+    const tier = toggleBtn.dataset.tier;
+    if (expandedTiers.has(tier)) expandedTiers.delete(tier); else expandedTiers.add(tier);
+    load();
+    return;
+  }
+  const assignBtn = e.target.closest('[data-action="assign-day"]');
+  if (assignBtn) {
+    const dateInput = assignBtn.closest('.assign-row').querySelector('.assign-date');
+    const dateStr = dateInput.value;
+    if (!dateStr) { alert('請先選日期'); return; }
+    assignBtn.disabled = true; assignBtn.textContent = '排入中…';
+    try {
+      // 跟 weekly.html 的 assignToDay('overdue', ...) 同一套邏輯：建一筆「拜訪：{店名}」待追蹤，
+      // 期限＝選的日期，不是直接塞進那天的今日行程（今日行程是當天早上在 A1 才決定要不要去）。
+      const resp = await post('/api/followups', {
+        storeId: assignBtn.dataset.id, item: `拜訪：${assignBtn.dataset.name}`,
+        who: '我', deadlineType: '指定日期前', deadline: dateStr, requestId: genRequestId(),
+      });
+      if (resp && resp.duplicate) toast(`${assignBtn.dataset.name}已經有這筆待追蹤，沒有重複新增`);
+      else toast(`已排到 ${dateStr}`);
+      assignBtn.textContent = '已排入';
+    } catch (err) {
+      alert('排入失敗：' + err.message);
+      assignBtn.disabled = false; assignBtn.textContent = '排進某天';
+    }
+  }
+});
+
+load();
+</script>
+
+</body>
+</html>

@@ -318,6 +318,34 @@ export default {
         return await handleMonthOverview(request, env, ctx);
       }
 
+      // ★ 階段3：單日詳情（本月頁點某天、昨日頁都共用），純讀取
+      if (path === '/api/day-detail' && request.method === 'GET') {
+        return await handleDayDetail(request, env, ctx);
+      }
+
+      // ★ 階段3：成果分頁（覆蓋率/拜訪次數分類/新店推進數/本月還沒碰到依分級），純讀取
+      if (path === '/api/recap' && request.method === 'GET') {
+        return await handleRecap(request, env, ctx);
+      }
+
+      // ★ 階段3 昨日頁 B：紅單放進抽屜候選清單，純讀取
+      if (path === '/api/red-slips' && request.method === 'GET') {
+        return await handleRedSlips(request, env, ctx);
+      }
+      // ★ 階段3 昨日頁 B：標記某張紅單已歸位（寫訂單主檔歸還日期，token保護，只允許 _TEST 分頁覆寫）
+      if (path === '/api/red-slips/mark-returned' && request.method === 'POST') {
+        return await handleMarkOrderReturned(request, env);
+      }
+
+      // ★ 階段3 昨日頁 A(a)：收款單「待繳回」清單（收款單試算表ID還沒設定前回 501）
+      if (path === '/api/collections/pending' && request.method === 'GET') {
+        return await handleCollectionPending(request, env, ctx);
+      }
+      // ★ 階段3 昨日頁 A(a)：標記某筆收款單已交給爸爸（同上，ID還沒設定前回 501）
+      if (path === '/api/collections/mark-handed-to-dad' && request.method === 'POST') {
+        return await handleMarkCollectionHandedToDad(request, env);
+      }
+
       // ★ 2026-11-04：新店定位永久快取（地圖模式用，避免每次重新整理都重打 Places API）
       if (path === '/api/geo' && request.method === 'POST') {
         return await handleSaveGeo(request, env);
@@ -3704,6 +3732,14 @@ async function handleMonthOverview(request, env, ctx) {
     (visitsByDate[iso] = visitsByDate[iso] || []).push(v);
     if (iso.slice(0, 7) === month) monthVisits.push(v);
   });
+  // 階段3：「去了但沒記紀錄」——那天 storeId 有沒有任何一筆拜訪紀錄，用 storeId 比對（不比對
+  // 店名文字，拜訪紀錄的 pharmacyId 就是店代號）。
+  const visitedStoreIdsByDate_ = {};
+  visits.forEach(v => {
+    const iso = visitDateToIso_(v.date);
+    if (!iso || !v.pharmacyId) return;
+    (visitedStoreIdsByDate_[iso] = visitedStoreIdsByDate_[iso] || new Set()).add(v.pharmacyId);
+  });
 
   const todayIso = formatDateIso_(now);
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -3729,15 +3765,22 @@ async function handleMonthOverview(request, env, ctx) {
     // 跟 A5 同一個門檻（SPEC 4.4 以外的另一組門檻，使用者原文就是「60%以上標紅」）。氣象署資料
     // 只涵蓋未來約7天，超出範圍 weatherByDate 查無資料，rainWarning 自然是 false，前端不顯示。
     const weather = (!isPast && !isToday) ? (weatherByDate[iso] || null) : null;
-    // 未來天的計畫家數：今日行程表那天的可見列數（已經排除「移除」）；過去/今天用 visitCount
-    // （實際拜訪紀錄）才對，今日行程是計畫不是事實，兩者故意不混用。
-    const plannedCount = (!isPast && !isToday) ? (todayPlanByDate2_[iso] || []).length : null;
+    // 階段3：過去/今天也要有 plannedCount（今日行程表那天排了幾家），用來跟 visitCount 一起組成
+    // 「完成／排定」格式；未來天維持原本只有 plannedCount（還沒發生，沒有 visitCount 可比）。
+    const dayPlanRows = todayPlanByDate2_[iso] || [];
+    const plannedCount = dayPlanRows.length;
+    // 「去了但沒記紀錄」：那天今日行程狀態＝完成的店，卻沒有對應的拜訪紀錄（用 storeId 比對），
+    // 只在過去/今天算（未來天狀態不可能是「完成」）。
+    const warnCount = (isPast || isToday)
+      ? dayPlanRows.filter(r => r.status === '完成' && r.storeId && !(visitedStoreIdsByDate_[iso] || new Set()).has(r.storeId)).length
+      : 0;
     days.push({
       date: iso, inMonth: true, isToday, isPast, visitCount, loadTier,
       mailingBand: dayNum >= 1 && dayNum <= 5,   // 寄單期，跟 weekly.html 同一套規則（SPEC/CLAUDE.md）
       billingBand: dayNum >= 25 && dayNum <= 30, // 請款期，個別店家例外走「店家規則」，這裡不特殊處理
       region: null, // 只有未來天才補（見下面），過去/今天不需要
       plannedCount,
+      warnCount,
       weather,
       rainWarning: !!(weather && weather.pop !== null && weather.pop >= 60),
     });
@@ -3794,6 +3837,275 @@ async function handleMonthOverview(request, env, ctx) {
       '請款進度數的是「待追蹤」表「請款：」開頭事項在這個月完成/建立的數量，不是 A5 即時寄賣金額判斷；' +
       '「覆蓋客戶數」「還沒去過的客戶數」只算排除規則篩過的名單內的正式客戶（跟 /api/plan 等一致）。',
   });
+}
+
+// ============================================================
+// 階段3：單日詳情——本月頁點某天、昨日頁（固定查昨天）都共用這支，不要各自算一套。
+// 過去/今天才判斷「已記/跳過/沒記」，未來天只回傳排定的站點（還沒發生，沒有結果可比）。
+// ============================================================
+async function handleDayDetail(request, env, ctx) {
+  const url = new URL(request.url);
+  const date = url.searchParams.get('date');
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: 'date 格式不對，要 YYYY-MM-DD' }, 400);
+
+  const [todayPlanRowsAll, allVisitsRes, pharmaciesRes] = await Promise.all([
+    fetchTodayPlanRows_(env, ctx),
+    handleAllVisits(env).then(r => r.json()),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+  ]);
+  const nameById = {};
+  (pharmaciesRes.pharmacies || []).forEach(p => { nameById[p.id] = p.name; });
+
+  const dayRows = todayPlanRowsAll.map(todayPlanRowToObj_).filter(r => r.date === date && r.status !== '移除')
+    .sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
+
+  function dayDetailVisitDateToIso_(s) {
+    const m = String(s).match(/^(\d+)\/(\d+)\/(\d+)$/);
+    if (!m) return null;
+    return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+  }
+  const dayVisits = (allVisitsRes.visits || []).filter(v => dayDetailVisitDateToIso_(v.date) === date);
+  const visitsByStoreId = {};
+  dayVisits.forEach(v => { if (v.pharmacyId) (visitsByStoreId[v.pharmacyId] = visitsByStoreId[v.pharmacyId] || []).push(v); });
+
+  const todayIso = formatDateIso_(new Date());
+  const isFuture = date > todayIso;
+
+  const stops = dayRows.map(r => {
+    const matched = r.storeId ? (visitsByStoreId[r.storeId] || []) : [];
+    let resultState;
+    if (isFuture) resultState = 'scheduled'; // 還沒發生
+    else if (r.status === '跳過') resultState = 'skipped';
+    else if (matched.length) resultState = 'recorded';
+    else if (r.status === '完成') resultState = 'missing'; // 標完成但找不到拜訪紀錄
+    else resultState = 'pending'; // 過去/今天但還沒處理（待去/已到，可能當天還沒走完）
+    return {
+      storeId: r.storeId, name: r.name, address: r.address, purposes: r.purposes,
+      purposeNote: r.purposeNote, status: r.status, note: r.note, resultState,
+      visitSummary: matched.length ? (matched[0].summary || matched[0].content || '') : null,
+    };
+  });
+
+  return json({
+    ok: true, date, isFuture, stops,
+    visits: dayVisits.map(v => ({
+      pharmacyId: v.pharmacyId, storeName: nameById[v.pharmacyId] || v.pharmacyId,
+      purpose: v.purpose, summary: v.summary, content: v.content,
+    })),
+    counts: {
+      scheduled: stops.length,
+      recorded: stops.filter(s => s.resultState === 'recorded').length,
+      skipped: stops.filter(s => s.resultState === 'skipped').length,
+      missing: stops.filter(s => s.resultState === 'missing').length,
+    },
+  });
+}
+
+// ============================================================
+// 階段3：成果分頁——覆蓋率／拜訪次數分類／新店推進數／本月還沒碰到依分級。
+// 分級/天數直接複用 buildCustomerOverview_（跟 /api/overview 同一套，數字不會對不起來）。
+// ============================================================
+async function handleRecap(request, env, ctx) {
+  const url = new URL(request.url);
+  const now = new Date();
+  const month = url.searchParams.get('month') || formatYearMonth_(now);
+  if (!/^\d{4}-\d{2}$/.test(month)) return json({ error: 'month 格式不對，要 YYYY-MM' }, 400);
+  if (!monthRangeOk_(month, now)) return json({ error: '只能查上個月／本月／下個月' }, 400);
+
+  const [pharmaciesRes, visitsRes, orderData, returnOrderData, stageHistoryRows] = await Promise.all([
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+    handleAllVisits(env).then(r => r.json()),
+    env.SHEET_ORDER_MASTER ? fetchOrderMasterRows(env, ctx) : Promise.resolve({ rows: [], colMap: {} }),
+    fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx),
+    env.SHEET_PLANNER ? fetchGvizRows(env.SHEET_PLANNER, '階段歷程', env, ctx) : Promise.resolve([]),
+  ]);
+  const visitsRes2 = await handleVisitsSummary(env, ctx).then(r => r.json());
+
+  const allPharmacies = pharmaciesRes.pharmacies || [];
+  const eligible = allPharmacies.filter(isEligibleForTiering_);
+  const eligibleIds = new Set(eligible.map(p => p.id));
+
+  function recapVisitDateToIso_(s) {
+    const m = String(s).match(/^(\d+)\/(\d+)\/(\d+)$/);
+    return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}` : null;
+  }
+  const monthVisits = (visitsRes.visits || []).filter(v => recapVisitDateToIso_(v.date)?.slice(0, 7) === month);
+  const visitedIds = new Set(monthVisits.map(v => v.pharmacyId).filter(id => eligibleIds.has(id)));
+
+  // 叫貨也算「有碰到」：訂單主檔用訂單編號解析日期（跟 handlePharmacyProfile 的
+  // extractOrderDateFromNo 同一個函式，YYMMDDNN 格式)。
+  const orderedIds = new Set();
+  orderData.rows.forEach(row => {
+    const id = String(row.c[orderData.colMap['店名']]?.v || '').trim();
+    if (!id || !eligibleIds.has(id)) return;
+    const d = extractOrderDateFromNo(row.c[orderData.colMap['訂單編號']]?.v);
+    if (d && d.slice(0, 7) === month) orderedIds.add(id);
+  });
+  const coveredIds = new Set([...visitedIds, ...orderedIds]);
+
+  // 拜訪次數依類型分類
+  const visitTypeCounts = {};
+  monthVisits.forEach(v => { const p = v.purpose || '其他'; visitTypeCounts[p] = (visitTypeCounts[p] || 0) + 1; });
+
+  // 新店推進數：這個月有階段歷程事件的不重複店數，細分推進中/轉正式/放棄
+  const monthStageEvents = stageHistoryRows.filter(h => monthKeyOfRaw_(h.get('日期')) === month);
+  const movedStoreIds = new Set(monthStageEvents.map(h => h.get('店代號')).filter(Boolean));
+  const convertedCount = monthStageEvents.filter(h => h.get('到階段') === '轉正式').length;
+  const droppedCount = monthStageEvents.filter(h => h.get('到階段') === '放棄').length;
+  const advancedCount = Math.max(0, movedStoreIds.size - convertedCount - droppedCount);
+
+  // 本月還沒碰到依分級＋天數：複用 /api/overview 同一套 buildCustomerOverview_，不是另外算一次
+  const statsById = buildOrderStatsById_(orderData.rows, orderData.colMap, returnOrderData.rows, returnOrderData.colMap, eligible, now);
+  const p70AvgMonthly = avgMonthlyPercentile_(statsById, 0.70);
+  const medianAvgMonthly = avgMonthlyPercentile_(statsById, 0.50);
+  const visitMap = visitsRes2.summary || {};
+  const customerOverview = buildCustomerOverview_(eligible, statsById, p70AvgMonthly, medianAvgMonthly, [], visitMap, [], {}, {}, now);
+  const notCovered = customerOverview.filter(c => !coveredIds.has(c.id));
+  const tierOrder = ['大咖', '潛力新店', '冷淡', '一般'];
+  const notCoveredByTier = {};
+  tierOrder.forEach(t => {
+    notCoveredByTier[t] = notCovered.filter(c => c.tier === t)
+      .sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0))
+      .map(c => ({ id: c.id, name: c.name, daysSince: c.daysSince }));
+  });
+
+  return json({
+    ok: true, month,
+    coverage: { covered: coveredIds.size, total: eligible.length, rate: eligible.length ? Math.round(coveredIds.size / eligible.length * 1000) / 10 : 0 },
+    visitTypeCounts, visitTotal: monthVisits.length,
+    newStoreProgress: { advanced: advancedCount, converted: convertedCount, dropped: droppedCount, total: movedStoreIds.size },
+    notCoveredByTier,
+    note: '覆蓋率＝本月有拜訪或叫貨的正式客戶數/應拜訪正式客戶數（不含老爸/新竹/死客戶，排除規則跟 /api/overview 一致）；' +
+      '新店推進數依「階段歷程」這個月的事件算，不是篩選分頁現在的「目前階段」文字。',
+  });
+}
+
+// ============================================================
+// 階段3 昨日頁 B：紅單放進抽屜——訂單主檔裡「訂單日期在起算日之後 且 歸還日期空白」的訂單，
+// 沒勾的一直累積（不是只看「訂單日期=昨天」那一天，使用者原文的「昨天」是描述每天檢查的典型
+// 情境，不是嚴格篩選條件，不然隔天沒勾的單就會從清單消失，跟「未勾的往後累積」互相矛盾）。
+// 只讀/寫 SHEET_ORDER_MASTER（訂單主檔），跟收款單是兩張完全獨立的表，不受「還沒拿到收款單
+// 試算表ID」卡住。
+// ============================================================
+const RED_SLIP_TEST_SHEET_NAME_ = '訂單主檔_TEST';
+// 只列這天之後的訂單，避免把歷史上大量沒填歸還日期的舊單全部翻出來——2026-11-14 是這個功能
+// 寫程式的日期，部署上線後才會真的開始累積，這天之前的舊單一律不算。
+const RED_SLIP_CUTOVER_DATE_ = '2026-11-14'; // 寫這支功能的日期；部署前請確認/改成實際上線那天
+
+async function handleRedSlips(request, env, ctx) {
+  const url = new URL(request.url);
+  const sheetNameParam = url.searchParams.get('sheetName');
+  if (sheetNameParam && sheetNameParam !== RED_SLIP_TEST_SHEET_NAME_) {
+    return json({ error: '不合法的 sheetName' }, 400);
+  }
+  const { rows, colMap } = await fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx);
+  // 2026-11-14 踩到的坑：daysBetween()／new Date(字串) 這條路徑，只要月、日剛好都是兩位數
+  // （像 11/14），不補零的「Y/M/D」字串跟補零的 ISO 字串長得一模一樣，一樣會被當成嚴格 ISO 8601
+  // 觸發 UTC 午夜解析，跟本地時間的 today 差 8 小時整天算錯（親自測到：當天建的測試訂單
+  // daysSince 算成 -1 不是 0）——這不是「補零 vs 不補零」能解的問題，兩位數的月/日本來就沒差。
+  // 改成完全不經過字串解析，直接用年/月/日數字組本地午夜 Date 物件相減，徹底避開這個模糊地帶。
+  const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+  function localMidnightFromIso_(iso) {
+    const parts = iso.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  const items = [];
+  rows.forEach(row => {
+    const orderNo = String(gvizGet(row, colMap, '訂單編號') || '').trim();
+    if (!orderNo) return;
+    const orderDateIso = rawDateToIso_(gvizGet(row, colMap, '訂單日期'));
+    if (!orderDateIso || orderDateIso < RED_SLIP_CUTOVER_DATE_) return;
+    const returnDateRaw = gvizGet(row, colMap, '歸還日期');
+    if (returnDateRaw) return; // 已經歸位了
+    const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
+    const storeName = String(gvizGet(row, colMap, '店名_中文') || storeId);
+    const daysSince = Math.floor((todayMidnight - localMidnightFromIso_(orderDateIso)) / 86400000);
+    items.push({ orderNo, storeId, storeName, orderDate: orderDateIso, daysSince, overdue: daysSince !== null && daysSince > 3 });
+  });
+  items.sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
+  return json({ ok: true, items, cutoverDate: RED_SLIP_CUTOVER_DATE_ });
+}
+
+// POST { orderNo, sheetName? }——sheetName 只允許白名單裡的測試分頁，不指定就是正式分頁，
+// 跟 /add-visit 的 sheetName 白名單同一個慣例。token 由 Worker 代填，前端不會看到密鑰。
+async function handleMarkOrderReturned(request, env) {
+  const body = await request.json();
+  const { orderNo, sheetName } = body;
+  if (!orderNo) return json({ error: '缺少訂單編號' }, 400);
+  if (sheetName && sheetName !== RED_SLIP_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'markOrderReturned', orderNo, sheetName, token: env.PLANNER_API_TOKEN }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetName || '');
+  return json({ ok: !!data.success, ...data });
+}
+
+// ============================================================
+// 階段3 昨日頁 A(a)：收款單「解繳狀態＝待繳回」清單——收款單試算表ID還沒拿到（待補，見
+// gas-backend/DadHandoffActions.js 的 COLLECTION_SHEET_ID 註解），env.SHEET_COLLECTION
+// 還沒設定時直接回明確的「還不能用」錯誤，不要悄悄回空清單假裝一切正常。
+// 收款單文件第19點記過的歷史髒資料：有些列「解繳狀態」被寫進不合法的 Enum 值
+// "請選擇收款方式"（手機端舊 bug 留下的），讀到這種值要忽略、不當成「待繳回」也不當機，
+// 並把忽略筆數算進 ignoredInvalidCount 讓使用者知道有多少筆髒資料還沒清。
+// ============================================================
+const COLLECTION_TEST_SHEET_NAME_ = '收款單_TEST';
+const COLLECTION_VALID_STATUS_ = ['待繳回', '已交給爸爸', '不需經手'];
+
+async function handleCollectionPending(request, env, ctx) {
+  if (!env.SHEET_COLLECTION) {
+    return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION），這個功能還不能用', items: [], ignoredInvalidCount: 0 }, 501);
+  }
+  const url = new URL(request.url);
+  const sheetNameParam = url.searchParams.get('sheetName');
+  if (sheetNameParam && sheetNameParam !== COLLECTION_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+
+  const [{ rows, colMap }, pharmaciesRes] = await Promise.all([
+    fetchGvizSheet(env.SHEET_COLLECTION, sheetNameParam || null, env, ctx),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+  ]);
+  const nameById = {};
+  (pharmaciesRes.pharmacies || []).forEach(p => { nameById[p.id] = p.name; });
+
+  let ignoredInvalidCount = 0;
+  const items = [];
+  rows.forEach(row => {
+    const id = String(gvizGet(row, colMap, '收款單號') || '').trim();
+    if (!id) return;
+    const status = String(gvizGet(row, colMap, '解繳狀態') || '').trim();
+    if (status && COLLECTION_VALID_STATUS_.indexOf(status) < 0) { ignoredInvalidCount++; return; }
+    if (status !== '待繳回') return;
+    const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
+    items.push({
+      id, storeId, storeName: nameById[storeId] || storeId,
+      amount: parseFloat(gvizGet(row, colMap, '實收金額')) || 0,
+      collectionDate: rawDateToIso_(gvizGet(row, colMap, '收款日期')),
+      note: String(gvizGet(row, colMap, '備註') || ''),
+    });
+  });
+  return json({ ok: true, items, ignoredInvalidCount });
+}
+
+// POST { collectionId, sheetName? }——跟 handleMarkOrderReturned 同一個模式：sheetName 只允許
+// COLLECTION_TEST_SHEET_NAME_，不給就是正式分頁。
+async function handleMarkCollectionHandedToDad(request, env) {
+  if (!env.SHEET_COLLECTION) return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION）' }, 501);
+  const body = await request.json();
+  const { collectionId, sheetName } = body;
+  if (!collectionId) return json({ error: '缺少收款單號' }, 400);
+  if (sheetName && sheetName !== COLLECTION_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'markCollectionHandedToDad', collectionId, sheetName, token: env.PLANNER_API_TOKEN }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_COLLECTION, sheetName || '');
+  return json({ ok: !!data.success, ...data });
 }
 
 // ============================================================
