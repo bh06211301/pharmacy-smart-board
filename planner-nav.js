@@ -12,10 +12,9 @@
 // followups.html 載入，planner.html 沒有，這支要三頁都能用，所以自己包一個最小的 fetch）。
 // ============================================================
 (function () {
-  // 階段3：目標最終順序是「昨日、今天、本週、本月、成果、客戶、紀錄、新店開發、待追蹤」，
-  // 「昨日」頁還沒上線（A/B 寫入動作要等 GAS 部署＋收款單試算表ID才能用，見
-  // docs/外勤模式_今日進度.md），先不排進主選單，只排其他已經上線的部分。
+  // 階段3：使用者2026-11-14確認「昨日」排在「今天」旁邊，照目標最終順序排進主選單。
   const TABS = [
+    { id: 'yesterday', label: '昨日', href: 'yesterday.html' },
     { id: 'today', label: '今天', href: 'planner.html' },
     { id: 'week', label: '本週', href: 'weekly.html' },
     { id: 'month', label: '本月', href: 'monthly.html' },
