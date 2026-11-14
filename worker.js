@@ -3988,6 +3988,9 @@ async function handleRecap(request, env, ctx) {
 // 試算表ID」卡住。
 // ============================================================
 const RED_SLIP_TEST_SHEET_NAME_ = '訂單主檔_TEST';
+// 2026-11-14 下載 xlsx 解析 workbook.xml 查證的正式分頁真實名稱（跟 gas-backend/DadHandoffActions.js
+// 的 ORDER_MASTER_FORMAL_SHEET_NAME 要完全一致，GAS 那邊現在用分頁名稱精確查找，不接受空白）。
+const ORDER_MASTER_FORMAL_SHEET_NAME_ = '訂單主檔';
 // 只列這天之後的訂單，避免把歷史上大量沒填歸還日期的舊單全部翻出來——2026-11-14 是這個功能
 // 寫程式的日期，部署上線後才會真的開始累積，這天之前的舊單一律不算。
 const RED_SLIP_CUTOVER_DATE_ = '2026-11-14'; // 寫這支功能的日期；部署前請確認/改成實際上線那天
@@ -4026,13 +4029,16 @@ async function handleRedSlips(request, env, ctx) {
   return json({ ok: true, items, cutoverDate: RED_SLIP_CUTOVER_DATE_ });
 }
 
-// POST { orderNo, sheetName? }——sheetName 只允許白名單裡的測試分頁，不指定就是正式分頁，
-// 跟 /add-visit 的 sheetName 白名單同一個慣例。token 由 Worker 代填，前端不會看到密鑰。
+// POST { orderNo, sheetName? }——sheetName 只允許 _TEST 測試分頁，不指定就一律代填正式分頁
+// 真實名稱（ORDER_MASTER_FORMAL_SHEET_NAME_），不再靠 GAS 端「沒給 sheetName 就用第一個分頁」
+// 這種位置性預設——2026-11-14 使用者要求 GAS 那邊改成只接受精確分頁名稱，Worker 這邊對應
+// 一定要明確傳 sheetName，不能再省略給 GAS 自己猜。
 async function handleMarkOrderReturned(request, env) {
   const body = await request.json();
-  const { orderNo, sheetName } = body;
+  const { orderNo, sheetName: sheetNameParam } = body;
   if (!orderNo) return json({ error: '缺少訂單編號' }, 400);
-  if (sheetName && sheetName !== RED_SLIP_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  if (sheetNameParam && sheetNameParam !== RED_SLIP_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  const sheetName = sheetNameParam || ORDER_MASTER_FORMAL_SHEET_NAME_;
   const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4040,7 +4046,7 @@ async function handleMarkOrderReturned(request, env) {
     redirect: 'follow',
   });
   const data = await res.json();
-  if (data.success) await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetName || '');
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetNameParam || '');
   return json({ ok: !!data.success, ...data });
 }
 
@@ -4060,6 +4066,9 @@ async function handleMarkOrderReturned(request, env) {
 // 並把忽略筆數算進 ignoredInvalidCount 讓使用者知道有多少筆髒資料還沒清。
 // ============================================================
 const COLLECTION_TEST_SHEET_NAME_ = '收款單_TEST';
+// 2026-11-14 下載 xlsx 解析 workbook.xml 查證的正式分頁真實名稱（跟 gas-backend/DadHandoffActions.js
+// 的 COLLECTION_FORMAL_SHEET_NAME 要完全一致，GAS 那邊現在用分頁名稱精確查找，不接受空白）。
+const COLLECTION_FORMAL_SHEET_NAME_ = '收款單';
 const COLLECTION_VALID_STATUS_ = ['待繳回', '已交給爸爸', '不需經手'];
 const COLLECTION_PENDING_STATUS_ = ['', '待繳回']; // 空白跟"待繳回"都算「還沒交給老爸」
 const COLLECTION_CUTOVER_DATE_ = '2026-11-14'; // 跟紅單抽屜的 RED_SLIP_CUTOVER_DATE_ 比照，部署前請確認/改成實際上線那天
@@ -4105,13 +4114,15 @@ async function handleCollectionPending(request, env, ctx) {
 }
 
 // POST { collectionId, sheetName? }——跟 handleMarkOrderReturned 同一個模式：sheetName 只允許
-// COLLECTION_TEST_SHEET_NAME_，不給就是正式分頁。
+// COLLECTION_TEST_SHEET_NAME_，不給就代填正式分頁真實名稱（COLLECTION_FORMAL_SHEET_NAME_），
+// 一定要明確傳給 GAS，不能再靠 GAS 端「沒給就用第一個分頁」。
 async function handleMarkCollectionHandedToDad(request, env) {
   if (!env.SHEET_COLLECTION) return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION）' }, 501);
   const body = await request.json();
-  const { collectionId, sheetName } = body;
+  const { collectionId, sheetName: sheetNameParam } = body;
   if (!collectionId) return json({ error: '缺少收款單號' }, 400);
-  if (sheetName && sheetName !== COLLECTION_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  if (sheetNameParam && sheetNameParam !== COLLECTION_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  const sheetName = sheetNameParam || COLLECTION_FORMAL_SHEET_NAME_;
   const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4119,7 +4130,7 @@ async function handleMarkCollectionHandedToDad(request, env) {
     redirect: 'follow',
   });
   const data = await res.json();
-  if (data.success) await invalidateGvizCache_(env, env.SHEET_COLLECTION, sheetName || '');
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_COLLECTION, sheetNameParam || '');
   return json({ ok: !!data.success, ...data });
 }
 
