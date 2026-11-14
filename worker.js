@@ -3204,7 +3204,7 @@ const TODAY_PLAN_ROW_PATCHABLE_FIELDS = ['狀態', '備註', '預計到達'];
 const TODAY_PLAN_SHEET_WHITELIST = ['今日行程', '今日行程_TEST'];
 async function handleUpdateTodayPlanRow(request, env) {
   const body = await request.json();
-  const { date, storeId, address, patch, insertRow, requestId } = body;
+  const { date, storeId, address, patch, insertRow, requestId, expectedUpdatedAt } = body;
   const sheetName = body.sheetName || TODAY_PLAN_SHEET_NAME;
   if (TODAY_PLAN_SHEET_WHITELIST.indexOf(sheetName) < 0) {
     return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
@@ -3227,13 +3227,14 @@ async function handleUpdateTodayPlanRow(request, env) {
     body: JSON.stringify({
       action: 'updateTodayPlanRow', sheetName,
       date, storeId, address, patch, insertRow: hasInsert ? todayPlanRowFromClient_(insertRow) : undefined,
-      requestId, token: env.PLANNER_API_TOKEN,
+      requestId, expectedUpdatedAt, token: env.PLANNER_API_TOKEN,
     }),
     redirect: 'follow',
   });
   const data = await res.json();
   if (data.success && data.row) data.row = todayPlanObjFromGasRow_(data.row);
-  if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  // conflict 時沒有真的寫入，不用清快取（也避免跟成功寫入的情況混在一起判斷）
+  if (data.success && !data.conflict) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
   return json(data);
 }
 

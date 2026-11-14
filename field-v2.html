@@ -23,6 +23,15 @@
     text-align: center; font-size: 12px; font-weight: 700;
     padding: 6px 10px; background: #ffb400; color: #1a1a1a;
   }
+  /* 正式模式角落小標示——跟測試模式的大橫幅刻意反差明顯（一個佔滿版面寬度顯眼示警，一個
+     只是角落小提示），避免兩種狀態在畫面上看起來差不多顯眼，造成分不清現在是哪個模式。 */
+  #fv2-prod-badge {
+    display: none;
+    position: fixed; top: 6px; right: 8px; z-index: 100;
+    font-size: 10px; font-weight: 700; letter-spacing: .02em;
+    padding: 2px 8px; border-radius: var(--sr-radius-pill);
+    background: var(--sr-ink); color: #fff; opacity: .55;
+  }
 
   body { background: var(--sr-bg-subtle); }
   .phone {
@@ -103,7 +112,7 @@
   .conflict-text { color: var(--sr-danger); font-size: var(--sr-text-xs); margin-top: 2px; }
 
   .section-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
-  textarea, input[type=text] {
+  textarea, input[type=text], input[type=date] {
     width: 100%; box-sizing: border-box; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
     padding: var(--sr-space-4); font-size: var(--sr-text-base); font-family: var(--sr-font);
   }
@@ -152,6 +161,7 @@
 <body>
 
 <div id="fv2-test-banner">⚠️ 測試模式：寫入會寫到 _TEST 分頁，不是正式資料</div>
+<div id="fv2-prod-badge">正式</div>
 <div id="dev-switch"></div>
 
 <div class="phone">
@@ -321,13 +331,12 @@
 
       <div class="section-label">改哪天</div>
       <div class="choice-group">
-        <label class="choice"><input type="radio" name="reschedule"><div><div>11/12（四）</div><div class="stop-sub">同區，當天已排 3 家</div></div></label>
-        <label class="choice"><input type="radio" name="reschedule"><div><div>11/14（六）</div><div class="stop-sub">這區最近還沒排的平日</div></div></label>
-        <label class="choice"><input type="radio" name="reschedule"><div>選其他日期</div></label>
-        <label class="choice"><input type="radio" name="reschedule"><div>先不排</div></label>
+        <label class="choice selected"><input type="radio" name="reschedule" value="none" checked><div>先不排</div></label>
+        <label class="choice"><input type="radio" name="reschedule" value="pick"><div>選日期</div></label>
       </div>
+      <input type="date" id="skip-resched-date" hidden style="margin-top:var(--sr-space-3)">
     </div>
-    <div class="bottombar"><button class="btn primary lg" data-go="4a-nearby">確定</button></div>
+    <div class="bottombar"><button class="btn primary lg" id="skip-submit">確定</button></div>
   </section>
 
   <!-- ============ 4a. 順路補一家（C） ============ -->
@@ -425,16 +434,15 @@ document.addEventListener('click', (e) => {
 });
 
 // ============================================================
-// 真實資料串接（field-v2 階段1）。寫入會不會動到正式資料，完全由 IS_TEST_MODE 決定
-// （預設 true，sheetName 一律帶 _TEST；上線前要把預設改成 false，或帶 ?test=0 明確指定正式分頁）。
+// 真實資料串接（field-v2 階段1）。寫入會不會動到正式資料，完全由 IS_TEST_MODE 決定。
+// 2026-11-14 切正式模式：預設 false（寫正式分頁），網址帶 ?test=1 才會明確切進測試模式
+// （寫 _TEST、攔下沒有 _TEST 姊妹分頁可用的寫入）——跟切換前相反，之前是預設 true。
 // ============================================================
 const WORKER = 'https://still-meadow-0efd.bh06211301.workers.dev';
 const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 planner.html／index.html 同一把前端 Maps key
 const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
 const DEST_ADDR = '台北市內湖區新民街422號';
-// 單一測試開關：網址帶 ?test=0 才會指向正式分頁，其餘情況（不帶參數／?test=1）一律先預設
-// 寫測試分頁——上線前要改成預設 false，只用 ?test=1 明確才切測試分頁。
-const IS_TEST_MODE = new URLSearchParams(location.search).get('test') !== '0';
+const IS_TEST_MODE = new URLSearchParams(location.search).get('test') === '1';
 function fv2SheetNameFor_(prodName, testName) { return IS_TEST_MODE ? testName : prodName; }
 // funnel/result（含confirmed）、addFollowup、todos-v2 老爸提醒這三種沒有 _TEST 姊妹分頁可用，
 // 測試模式下不能像拜訪紀錄/今日行程那樣換 sheetName 避開正式資料——改成測試模式一律不送出，
@@ -442,9 +450,15 @@ function fv2SheetNameFor_(prodName, testName) { return IS_TEST_MODE ? testName :
 function fv2TestBlockedLog_(label, payload) {
   console.log(`[field-v2] 測試模式：未送出 ${label}（沒有_TEST分頁可用）：`, payload);
 }
+// 正式/測試兩種狀態都要讓使用者一眼看出來，但刻意不同等級的顯眼程度：測試模式維持原本佔滿版面
+// 寬度的大橫幅（容易誤觸寫入測試分頁還不自知，風險較高，要很顯眼示警）；正式模式只在角落放一個
+// 小標示（風險低，純粹是「現在是正式環境」的提醒，不需要搶走版面注意力）。
 if (IS_TEST_MODE) {
   const banner = document.getElementById('fv2-test-banner');
   if (banner) banner.style.display = 'block';
+} else {
+  const badge = document.getElementById('fv2-prod-badge');
+  if (badge) badge.style.display = 'block';
 }
 
 // ---- 頁面內 toast（取代 alert()，不會中斷操作、不用使用者按確定）----
@@ -497,6 +511,46 @@ const FV2 = {
   currentFollowups: [], // 目前這家店未結案待追蹤（從 /api/store 的 detail.followups 存一份，記錄畫面要用）
   loaded: false,
 };
+
+// 今日行程單列狀態寫入共用函式——到店（已到）／記錄拜訪存檔（完成）／跳過（跳過+原因備註）
+// 三處都走同一支，統一處理：帶 expectedUpdatedAt（這一列手機上快取的「更新時間」）讓 GAS 判斷
+// 衝突（桌機 planner.html 剛好同時改了同一列）；requestId 在呼叫端（按鈕 click handler）按下
+// 當下產生一次，整次呼叫沿用同一個（不是這支函式裡重新產生），重送也不會重複寫（GAS
+// withRequestDedup_ 用同一個 requestId 直接回傳上次結果）。衝突時不覆蓋本地畫面資料，只提示、
+// 重新整理那一列，呼叫端自己決定要不要讓使用者再按一次。
+// FV2.currentStoreId／各畫面存的 key 本身是 `r.storeId || r.address` 併出來的，不確定是哪一種——
+// 找回那一列真正的 storeId/address，才能正確分辨要用 storeId 參數還是 address 參數定位列。
+function fv2StoreOrAddr_(key) {
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === key);
+  return row ? { storeId: row.storeId || undefined, address: row.storeId ? undefined : row.address } : { storeId: key };
+}
+async function fv2MarkTodayStatus_(storeId, address, patch, label, requestId) {
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === (storeId || address));
+  const body = {
+    date: FV2.date, storeId: storeId || undefined, address: storeId ? undefined : address,
+    patch, expectedUpdatedAt: row ? row.updatedAt : undefined,
+    requestId, sheetName: fv2SheetNameFor_(undefined, '今日行程_TEST'),
+  };
+  console.log(`[field-v2] ${label}準備送出的payload：`, body);
+  let resp;
+  try {
+    resp = await fetch(`${WORKER}/api/today-plan/row`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+  } catch (e) {
+    fv2Toast_(`${label}失敗（網路錯誤）：${e.message}`, true);
+    return { ok: false };
+  }
+  if (resp.conflict) {
+    fv2Toast_('這站剛被桌機改過，已重新整理資料，請確認後再試一次', true);
+    if (row && resp.row) Object.assign(row, resp.row);
+    return { ok: false, conflict: true };
+  }
+  if (!resp.success) {
+    fv2Toast_(`${label}失敗：${resp.error || '未知錯誤'}`, true);
+    return { ok: false };
+  }
+  if (row && resp.row) Object.assign(row, resp.row); // 更新本地快取，避免下一次操作用到舊的 updatedAt
+  return { ok: true, row: resp.row };
+}
 
 function fv2StoreMeta_(storeId) {
   const ph = FV2.pharmacies.find(p => p.id === storeId);
@@ -625,13 +679,21 @@ function escapeHtml_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// 「我到了」：記住 storeId，去抓真實的店家詳情
+// 「我到了」：記住 storeId，去抓真實的店家詳情，同時標記今日行程這一站「已到」。
+// 使用者明確要求：只有按這顆按鈕才寫「已到」，GPS 接近之類的提示（如果之後做）純畫面提示，
+// 不能自動觸發寫入。狀態已經是「已到」或更後面（完成/跳過）就不重送（避免白跑一次寫入）。
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-arrive-id]');
   if (!btn) return;
-  FV2.currentStoreId = btn.dataset.arriveId;
+  const key = btn.dataset.arriveId;
+  FV2.currentStoreId = key;
   showScreen('2-arrive');
-  fv2RenderArrive(FV2.currentStoreId);
+  fv2RenderArrive(key);
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === key);
+  if (row && row.status === '待去') {
+    const { storeId, address } = fv2StoreOrAddr_(key);
+    fv2MarkTodayStatus_(storeId, address, { 狀態: '已到' }, '標記已到', genRequestId_());
+  }
 });
 
 // ---- 2. 到店 ----
@@ -832,7 +894,19 @@ document.getElementById('record-customer-save').addEventListener('click', async 
 
   console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks });
   const skipped = [];
-  await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
+  let visitResp;
+  try {
+    visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
+  } catch (e) {
+    fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
+    return;
+  }
+  // 使用者明確要求：拜訪紀錄沒寫成功就不要標這站「完成」——紀錄寫失敗卻顯示行程完成，
+  // 回頭查會以為那天真的去過了。沒成功就在這裡停下，不繼續送待追蹤/老爸提醒/今日行程狀態。
+  if (!visitResp.success) {
+    fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
+    return;
+  }
   if (followupPayload) {
     if (IS_TEST_MODE) { fv2TestBlockedLog_('待追蹤', followupPayload); skipped.push('待追蹤'); }
     else await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
@@ -844,6 +918,8 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   // 階段2 項目2：這家店既有待追蹤的逐筆結果（完成/部分完成/改期/取消；「沒處理到」不送出）
   const { sentCount, skippedForTest } = await fv2SubmitFollowupActions_(visitId);
   if (skippedForTest && skipped.indexOf('待追蹤異動') < 0) skipped.push('待追蹤異動');
+  const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
+  await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_());
   fv2Toast_(skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存');
   showScreen('1-home');
 });
@@ -993,10 +1069,22 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
 
   console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload });
   (async () => {
-    await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) });
+    let visitResp;
+    try {
+      visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
+    } catch (e) {
+      fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
+      return;
+    }
+    if (!visitResp.success) {
+      fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
+      return;
+    }
     let skippedFunnel = false;
     if (IS_TEST_MODE) { fv2TestBlockedLog_('階段推進', funnelPayload); skippedFunnel = true; }
     else await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
+    const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
+    await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_());
     fv2Toast_(skippedFunnel ? '已儲存；測試模式：未送出（階段推進）' : '已儲存');
     showScreen('1-home');
   })();
@@ -1007,7 +1095,32 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-go="4-skip"]')) {
     const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
     document.getElementById('skip-title').textContent = row ? `跳過 · ${row.name}` : '跳過';
+    // 每次重新進這畫面都重置回預設（先不排），避免殘留上一家店選的日期
+    document.getElementById('skip-resched-date').hidden = true;
+    document.getElementById('skip-resched-date').value = '';
   }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'reschedule') {
+    document.getElementById('skip-resched-date').hidden = e.target.value !== 'pick';
+  }
+});
+// 跳過＋原因／改哪天：使用者明確要求只記備註文字（例如「原因：藥師不在｜改期：11/18」），
+// 不要自動把這家店插進改期那天的今日行程——插入今日行程是另一件事，由使用者自己之後在
+// planner.html 排，這裡只是留一句備註給自己參考，避免「跳過」順手造出一筆沒經過確認的排程。
+document.getElementById('skip-submit').addEventListener('click', async () => {
+  const reason = document.querySelector('input[name="skip"]:checked')?.closest('.choice')?.querySelector('div')?.textContent || '其他';
+  const reschedChoice = document.querySelector('input[name="reschedule"]:checked')?.value || 'none';
+  const reschedDate = document.getElementById('skip-resched-date').value;
+  if (reschedChoice === 'pick' && !reschedDate) { fv2Toast_('選了「選日期」但還沒選日期', true); return; }
+  let note = `原因：${reason}`;
+  if (reschedChoice === 'pick' && reschedDate) {
+    const d = new Date(reschedDate + 'T00:00:00');
+    note += `｜改期：${d.getMonth() + 1}/${d.getDate()}`;
+  }
+  const { storeId, address } = fv2StoreOrAddr_(FV2.currentStoreId);
+  const result = await fv2MarkTodayStatus_(storeId, address, { 狀態: '跳過', 備註: note }, '標記跳過', genRequestId_());
+  if (result.ok) { fv2Toast_('已標記跳過'); showScreen('4a-nearby'); fv2RenderNearby_(); }
 });
 
 // ---- 1a／4a：插入位置 Routes API 試算（瀏覽器端直連 Google，不經過 Worker）----
@@ -1143,7 +1256,9 @@ async function fv2RenderNearby_() {
     } catch { rows[i].querySelector('.stop-sub').textContent = `距離 ${p.distKm.toFixed(1)} 公里 · 車程試算失敗`; }
   }
 }
-document.addEventListener('click', (e) => { if (e.target.closest('[data-go="4a-nearby"]')) fv2RenderNearby_(); });
+// 2026-11-14：「跳過」確定按鈕改成 #skip-submit（標記狀態成功才進這畫面），不再是
+// data-go="4a-nearby" 導覽按鈕，進畫面時改由 #skip-submit 的 click handler 直接呼叫
+// fv2RenderNearby_()，這支全域委派監聽已經沒有對應元素，移除。
 
 // ---- 5. 收工 ----
 function fv2RenderFinish() {
