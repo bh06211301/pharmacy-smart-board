@@ -4045,19 +4045,28 @@ async function handleMarkOrderReturned(request, env) {
 }
 
 // ============================================================
-// 階段3 昨日頁 A(a)：收款單「解繳狀態＝待繳回」清單——收款單試算表ID還沒拿到（待補，見
-// gas-backend/DadHandoffActions.js 的 COLLECTION_SHEET_ID 註解），env.SHEET_COLLECTION
-// 還沒設定時直接回明確的「還不能用」錯誤，不要悄悄回空清單假裝一切正常。
+// 階段3 昨日頁 A(a)：收款單「現金交付、還沒交給老爸」清單。
+// 2026-11-14 使用者確認正式資料後定案的判斷條件（不是只認「解繳狀態＝待繳回」字面值）：
+//   收款方式="現金交付" AND 解繳狀態∈{空白,"待繳回"} AND 收款日期不是空白且 >= COLLECTION_CUTOVER_DATE_
+// 原因：使用者的 AppSheet 實際流程是收款當下就選好收款方式，現金的話狀態留"待繳回"，
+// 之後用 AppSheet 既有的「交給爸爸」按鈕結案（這支 worker 的 markCollectionHandedToDad
+// 寫的是同一個欄位，兩邊並存不衝突）——正式表現在之所以 0 筆"待繳回"，是因為現有88筆都已
+// 經處理完，不是這個狀態值沒人用。空白視為「還沒處理」一起算進來，是因為舊資料裡"解繳狀態"
+// 欄本身沒有 Initial Value（AppSheet 新增列時這欄預設就是空白，不會自動帶"待繳回"）。
+// 收款日期空白的現金收款不靜默排除——計入 missingDateCount，昨日頁要顯示提醒請業務補填，
+// 跟"起算日之前的舊單直接不顯示"是兩件不同的事，不能混在一起用同一個數字。
 // 收款單文件第19點記過的歷史髒資料：有些列「解繳狀態」被寫進不合法的 Enum 值
-// "請選擇收款方式"（手機端舊 bug 留下的），讀到這種值要忽略、不當成「待繳回」也不當機，
+// "請選擇收款方式"（手機端舊 bug 留下的），讀到這種值要忽略、不當成待處理也不當機，
 // 並把忽略筆數算進 ignoredInvalidCount 讓使用者知道有多少筆髒資料還沒清。
 // ============================================================
 const COLLECTION_TEST_SHEET_NAME_ = '收款單_TEST';
 const COLLECTION_VALID_STATUS_ = ['待繳回', '已交給爸爸', '不需經手'];
+const COLLECTION_PENDING_STATUS_ = ['', '待繳回']; // 空白跟"待繳回"都算「還沒交給老爸」
+const COLLECTION_CUTOVER_DATE_ = '2026-11-14'; // 跟紅單抽屜的 RED_SLIP_CUTOVER_DATE_ 比照，部署前請確認/改成實際上線那天
 
 async function handleCollectionPending(request, env, ctx) {
   if (!env.SHEET_COLLECTION) {
-    return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION），這個功能還不能用', items: [], ignoredInvalidCount: 0 }, 501);
+    return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION），這個功能還不能用', items: [], ignoredInvalidCount: 0, missingDateCount: 0 }, 501);
   }
   const url = new URL(request.url);
   const sheetNameParam = url.searchParams.get('sheetName');
@@ -4071,22 +4080,28 @@ async function handleCollectionPending(request, env, ctx) {
   (pharmaciesRes.pharmacies || []).forEach(p => { nameById[p.id] = p.name; });
 
   let ignoredInvalidCount = 0;
+  let missingDateCount = 0;
   const items = [];
   rows.forEach(row => {
     const id = String(gvizGet(row, colMap, '收款單號') || '').trim();
     if (!id) return;
     const status = String(gvizGet(row, colMap, '解繳狀態') || '').trim();
     if (status && COLLECTION_VALID_STATUS_.indexOf(status) < 0) { ignoredInvalidCount++; return; }
-    if (status !== '待繳回') return;
+    if (COLLECTION_PENDING_STATUS_.indexOf(status) < 0) return;
+    const method = String(gvizGet(row, colMap, '收款方式') || '').trim();
+    if (method !== '現金交付') return;
+    const collectionDate = rawDateToIso_(gvizGet(row, colMap, '收款日期'));
+    if (!collectionDate) { missingDateCount++; return; }
+    if (collectionDate < COLLECTION_CUTOVER_DATE_) return;
     const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
     items.push({
       id, storeId, storeName: nameById[storeId] || storeId,
       amount: parseFloat(gvizGet(row, colMap, '實收金額')) || 0,
-      collectionDate: rawDateToIso_(gvizGet(row, colMap, '收款日期')),
+      collectionDate,
       note: String(gvizGet(row, colMap, '備註') || ''),
     });
   });
-  return json({ ok: true, items, ignoredInvalidCount });
+  return json({ ok: true, items, ignoredInvalidCount, missingDateCount });
 }
 
 // POST { collectionId, sheetName? }——跟 handleMarkOrderReturned 同一個模式：sheetName 只允許

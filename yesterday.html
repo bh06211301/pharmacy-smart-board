@@ -7,9 +7,8 @@
 <link rel="stylesheet" href="design-tokens.css">
 <style>
   /* D 昨日分頁（階段3）。導覽列跟 customers.html／followups.html 同一套樣式（刻意複製）。
-     ⚠️ 這個頁面目前還沒上線（store-drawer.js/nav 都沒有連過來），A(a)收款單/B紅單抽屜
-     寫入動作需要先部署 GAS 新 action、設定收款單試算表ID 才能真的運作，部署前只在
-     wrangler dev 對 _TEST 分頁驗證過。 */
+     A(a)收款單/B紅單抽屜寫入動作走 gas-backend/DadHandoffActions.js 的 markCollectionHandedToDad／
+     markOrderReturned，部署前已在 wrangler dev 對 _TEST 分頁驗證過，見部署記錄。 */
   * { box-sizing: border-box; }
   body { overflow-x: hidden; }
 
@@ -167,16 +166,17 @@ async function loadDadTodos() {
   }
 }
 
-// ---- A(a)：收款單待繳回（⚠️ 還沒上線：收款單試算表ID還沒設定，呼叫會回 501） ----
+// ---- A(a)：收款單「現金交付、還沒交給老爸」清單 ----
 async function loadDadCollections() {
   const root = document.getElementById('dad-collection-root');
   try {
     const d = await get('/api/collections/pending');
     if (!d.ok) { root.innerHTML = `<div class="checklist-sub">⚠ ${escapeHtml(d.error || '收款單功能還沒設定')}</div>`; return; }
-    root.innerHTML = d.items.length
+    root.innerHTML = (d.items.length
       ? d.items.map(c => `<label class="checklist-item"><input type="checkbox" data-action="mark-handed" data-id="${escapeHtml(c.id)}"> ${escapeHtml(c.storeName)} 請款 $${c.amount.toLocaleString()} 已收</label>`).join('')
-        + (d.ignoredInvalidCount ? `<div class="checklist-sub">另外有 ${d.ignoredInvalidCount} 筆解繳狀態是歷史無效值，已略過不顯示</div>` : '')
-      : '<div class="checklist-sub">目前沒有待繳回的收款單</div>';
+      : '<div class="checklist-sub">目前沒有待繳回的收款單</div>')
+      + (d.missingDateCount ? `<div class="checklist-sub" style="color:var(--sr-danger)">有 ${d.missingDateCount} 筆現金收款沒填日期，請補</div>` : '')
+      + (d.ignoredInvalidCount ? `<div class="checklist-sub">另外有 ${d.ignoredInvalidCount} 筆解繳狀態是歷史無效值，已略過不顯示</div>` : '');
   } catch (e) {
     root.innerHTML = `<div class="checklist-sub">⚠ 收款單功能還沒上線：${escapeHtml(e.message)}</div>`;
   }
