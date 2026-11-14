@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoute｜昨日</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* D 昨日分頁（階段3）。導覽列跟 customers.html／followups.html 同一套樣式（刻意複製）。
+     ⚠️ 這個頁面目前還沒上線（store-drawer.js/nav 都沒有連過來），A(a)收款單/B紅單抽屜
+     寫入動作需要先部署 GAS 新 action、設定收款單試算表ID 才能真的運作，部署前只在
+     wrangler dev 對 _TEST 分頁驗證過。 */
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; }
+
+  .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sr-space-4); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
+  .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
+  .page-header-note { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .page-body { padding: var(--sr-space-7) var(--sr-space-8); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sr-space-7); align-content: start; }
+  @media (max-width: 900px) { .page-body { grid-template-columns: 1fr; } }
+  .full-row { grid-column: 1 / -1; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sr-space-4); }
+  .stat-card { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-5); background: var(--sr-bg); }
+  .stat-card.warn { border-color: var(--sr-danger); background: var(--sr-danger-tint); }
+  .stat-label { display: block; font-size: var(--sr-text-xs); color: var(--sr-ink-2); }
+  .stat-card.warn .stat-label { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .stat-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
+  .stat-card.warn .stat-value { color: var(--sr-danger); }
+
+  .panel { border: 1px solid var(--sr-line); border-radius: var(--sr-radius-lg); padding: var(--sr-space-6); background: var(--sr-bg); display: flex; flex-direction: column; gap: var(--sr-space-4); }
+  .panel.dad { border-color: var(--sr-billing-soft); background: var(--sr-billing-tint); }
+  .panel.redslip { border-color: var(--sr-danger); }
+  .panel-title { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); }
+
+  .checklist-item { display: flex; align-items: center; gap: var(--sr-space-4); font-size: var(--sr-text-md); min-height: 44px; padding: var(--sr-space-2) 0; border-bottom: 1px solid var(--sr-line-row); }
+  .checklist-item:last-child { border-bottom: none; }
+  .checklist-item input { width: 20px; height: 20px; margin: 0; flex-shrink: 0; }
+  .checklist-item.done-fading { opacity: 0.4; }
+  .checklist-sub { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+
+  .redslip-row { display: flex; justify-content: space-between; align-items: center; gap: var(--sr-space-4); padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); flex-wrap: wrap; }
+  .redslip-row:last-child { border-bottom: none; }
+  .redslip-row.overdue { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
+  .btn-sm:hover { background: var(--sr-primary-hover); }
+  .btn-sm:disabled { background: var(--sr-ink-3); cursor: default; }
+
+  .missing-item { display: flex; justify-content: space-between; align-items: center; gap: var(--sr-space-4); padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); flex-wrap: wrap; }
+  .missing-item:last-child { border-bottom: none; }
+
+  .record-row { display: grid; grid-template-columns: 120px 80px 1fr; gap: var(--sr-space-4); font-size: var(--sr-text-sm); padding: var(--sr-space-2) 0; border-bottom: 1px solid var(--sr-line-row); }
+  .record-row:last-child { border-bottom: none; }
+  .link { color: var(--sr-primary); text-decoration: none; font-size: var(--sr-text-sm); }
+  .link:hover { text-decoration: underline; }
+
+  .empty-hint {
+    font-size: var(--sr-text-sm); color: var(--sr-ink-3);
+    border: 1px dashed var(--sr-line-dashed); border-radius: var(--sr-radius-md);
+    padding: var(--sr-space-6); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="app-nav"></nav>
+
+<div class="page-header">
+  <span class="page-header-title" id="page-title">昨日回顧</span>
+  <span class="page-header-note" id="page-note"></span>
+</div>
+
+<div class="page-body">
+  <div class="stat-grid full-row" id="stat-grid"><div class="empty-hint">載入中…</div></div>
+
+  <div class="panel full-row" id="missing-panel">
+    <div class="panel-title">要補記的店</div>
+    <div id="missing-root"><div class="empty-hint">載入中…</div></div>
+  </div>
+
+  <div class="panel dad">
+    <div class="panel-title">A　今天要交給老爸</div>
+    <div id="dad-collection-root"></div>
+    <div id="dad-todo-root"></div>
+  </div>
+
+  <div class="panel redslip">
+    <div class="panel-title">B　紅單放進抽屜</div>
+    <div id="redslip-root"><div class="empty-hint">載入中…</div></div>
+  </div>
+
+  <div class="panel full-row">
+    <div class="panel-title" id="records-title">昨天記的</div>
+    <div id="records-root"><div class="empty-hint">載入中…</div></div>
+    <a class="link" href="records.html">看全部紀錄 →</a>
+  </div>
+</div>
+
+<script src="worker-url.js"></script>
+<script src="planner-shared.js"></script>
+<script src="planner-nav.js"></script>
+<script>
+const { get, post, escapeHtml } = window.PlannerAPI;
+window.SRNav.render({ active: 'yesterday' });
+window.SRNav.loadBadges();
+
+function yesterdayIso_() {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const YESTERDAY = yesterdayIso_();
+
+function backfillFormHtml() {
+  const VISIT_PURPOSES_ = ['例行拜訪', '新店開發', '送貨', '對帳請款', '介紹新品', '其他'];
+  return `<div style="display:flex;flex-direction:column;gap:var(--sr-space-2);margin-top:var(--sr-space-2);width:100%">
+    <select class="bf-purpose">${VISIT_PURPOSES_.map(p => `<option>${escapeHtml(p)}</option>`).join('')}</select>
+    <textarea class="bf-content" placeholder="拜訪內容…" style="min-height:50px"></textarea>
+    <button type="button" class="btn-sm" data-action="submit-backfill" style="align-self:flex-start">送出</button>
+  </div>`;
+}
+
+async function loadDayPart() {
+  const statGrid = document.getElementById('stat-grid');
+  const missingRoot = document.getElementById('missing-root');
+  const recordsRoot = document.getElementById('records-root');
+  try {
+    const [d, followupsRes] = await Promise.all([get('/api/day-detail?date=' + YESTERDAY), get('/api/followups').catch(() => ({ followups: [] }))]);
+    const resolvedYesterday = (followupsRes.followups || []).filter(f => f.resolvedDate === YESTERDAY).length;
+    const createdYesterday = (followupsRes.followups || []).filter(f => f.createdDate === YESTERDAY).length;
+
+    statGrid.innerHTML = `
+      <div class="stat-card"><span class="stat-label">已記紀錄</span><span class="stat-value">${d.counts.recorded}</span></div>
+      <div class="stat-card"><span class="stat-label">跳過</span><span class="stat-value">${d.counts.skipped}</span></div>
+      <div class="stat-card${d.counts.missing > 0 ? ' warn' : ''}"><span class="stat-label">去了但沒記</span><span class="stat-value">${d.counts.missing}</span></div>
+      <div class="stat-card"><span class="stat-label">待追蹤 結案／新增</span><span class="stat-value">${resolvedYesterday} / ${createdYesterday}</span></div>`;
+
+    const missing = d.stops.filter(s => s.resultState === 'missing');
+    missingRoot.innerHTML = missing.length
+      ? missing.map(s => `<div class="missing-item">
+          <span>${escapeHtml(s.name)} <span class="checklist-sub">${escapeHtml((s.purposes||[]).join('、')||'—')}・狀態「完成」但無紀錄</span></span>
+          <button type="button" class="btn-sm" data-action="toggle-backfill" data-store-id="${escapeHtml(s.storeId)}" data-store-name="${escapeHtml(s.name)}">補記（日期＝昨天）</button>
+        </div><div class="backfill-wrap" hidden></div>`).join('')
+      : '<div class="empty-hint">昨天排定的都記了，沒有缺的</div>';
+
+    document.getElementById('records-title').textContent = `昨天記的 ${d.visits.length} 筆`;
+    recordsRoot.innerHTML = d.visits.length
+      ? d.visits.map(v => `<div class="record-row"><b>${escapeHtml(v.storeName)}</b><span>${escapeHtml(v.purpose || '')}</span><span>${escapeHtml(v.summary || v.content || '')}</span></div>`).join('')
+      : '<div class="empty-hint">昨天沒有拜訪紀錄</div>';
+  } catch (e) {
+    statGrid.innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+    missingRoot.innerHTML = '';
+    recordsRoot.innerHTML = '';
+  }
+}
+
+// ---- A(b)：老爸交代事項（todos-v2 dad quadrant，不限哪天建立，沒勾的一直累積） ----
+async function loadDadTodos() {
+  const root = document.getElementById('dad-todo-root');
+  try {
+    const d = await get('/todos-v2');
+    const items = (d.todos || []).filter(t => t.quadrant === 'dad' && !t.done);
+    root.innerHTML = items.length
+      ? items.map(t => `<label class="checklist-item"><input type="checkbox" data-action="done-dad-todo" data-id="${escapeHtml(t.id)}"> ${escapeHtml(t.task)}</label>`).join('')
+      : '<div class="checklist-sub">目前沒有老爸交代的事項</div>';
+  } catch (e) {
+    root.innerHTML = `<div class="checklist-sub">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ---- A(a)：收款單待繳回（⚠️ 還沒上線：收款單試算表ID還沒設定，呼叫會回 501） ----
+async function loadDadCollections() {
+  const root = document.getElementById('dad-collection-root');
+  try {
+    const d = await get('/api/collections/pending');
+    if (!d.ok) { root.innerHTML = `<div class="checklist-sub">⚠ ${escapeHtml(d.error || '收款單功能還沒設定')}</div>`; return; }
+    root.innerHTML = d.items.length
+      ? d.items.map(c => `<label class="checklist-item"><input type="checkbox" data-action="mark-handed" data-id="${escapeHtml(c.id)}"> ${escapeHtml(c.storeName)} 請款 $${c.amount.toLocaleString()} 已收</label>`).join('')
+        + (d.ignoredInvalidCount ? `<div class="checklist-sub">另外有 ${d.ignoredInvalidCount} 筆解繳狀態是歷史無效值，已略過不顯示</div>` : '')
+      : '<div class="checklist-sub">目前沒有待繳回的收款單</div>';
+  } catch (e) {
+    root.innerHTML = `<div class="checklist-sub">⚠ 收款單功能還沒上線：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ---- B：紅單放進抽屜 ----
+async function loadRedSlips() {
+  const root = document.getElementById('redslip-root');
+  try {
+    const d = await get('/api/red-slips');
+    root.innerHTML = d.items.length
+      ? d.items.map(it => `<div class="redslip-row${it.overdue ? ' overdue' : ''}">
+          <span>${escapeHtml(it.storeName)}　訂單 ${escapeHtml(it.orderDate)}${it.overdue ? '（已超過3天）' : ''}</span>
+          <button type="button" class="btn-sm" data-action="mark-returned" data-order-no="${escapeHtml(it.orderNo)}">紅單已歸位</button>
+        </div>`).join('') + `<div class="checklist-sub" style="margin-top:var(--sr-space-2)">只列 ${escapeHtml(d.cutoverDate)} 之後的訂單</div>`
+      : '<div class="empty-hint">目前沒有還沒歸位的紅單</div>';
+  } catch (e) {
+    root.innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.body.addEventListener('click', async (e) => {
+  const toggleBtn = e.target.closest('[data-action="toggle-backfill"]');
+  if (toggleBtn) {
+    const wrap = toggleBtn.closest('.missing-item').nextElementSibling;
+    if (!wrap.innerHTML) wrap.innerHTML = backfillFormHtml();
+    wrap.hidden = !wrap.hidden;
+    return;
+  }
+  const submitBtn = e.target.closest('[data-action="submit-backfill"]');
+  if (submitBtn) {
+    const wrap = submitBtn.closest('.backfill-wrap');
+    const item = wrap.previousElementSibling;
+    const toggleEl = item.querySelector('[data-action="toggle-backfill"]');
+    const storeId = toggleEl.dataset.storeId, storeName = toggleEl.dataset.storeName;
+    const purpose = wrap.querySelector('.bf-purpose').value;
+    const content = wrap.querySelector('.bf-content').value.trim();
+    if (!content) { alert('拜訪內容不能空白'); return; }
+    submitBtn.disabled = true; submitBtn.textContent = '送出中…';
+    try {
+      await post('/add-visit', { visitId: 'backfill-' + Date.now(), pharmacyName: storeName || storeId, date: YESTERDAY, purpose, content });
+      await loadDayPart();
+    } catch (err) {
+      alert('補記失敗：' + err.message);
+      submitBtn.disabled = false; submitBtn.textContent = '送出';
+    }
+    return;
+  }
+  const markReturnedBtn = e.target.closest('[data-action="mark-returned"]');
+  if (markReturnedBtn) {
+    markReturnedBtn.disabled = true; markReturnedBtn.textContent = '處理中…';
+    try {
+      const resp = await post('/api/red-slips/mark-returned', { orderNo: markReturnedBtn.dataset.orderNo });
+      if (!resp.ok) throw new Error(resp.error || '失敗');
+      markReturnedBtn.closest('.redslip-row').style.opacity = '0.4';
+      markReturnedBtn.textContent = '已歸位';
+    } catch (err) {
+      alert('標記失敗：' + err.message);
+      markReturnedBtn.disabled = false; markReturnedBtn.textContent = '紅單已歸位';
+    }
+  }
+});
+
+document.body.addEventListener('change', async (e) => {
+  const cb = e.target.closest('[data-action="mark-handed"]');
+  if (cb) {
+    cb.disabled = true;
+    try {
+      const resp = await post('/api/collections/mark-handed-to-dad', { collectionId: cb.dataset.id });
+      if (!resp.ok) throw new Error(resp.error || '失敗');
+      cb.closest('.checklist-item').classList.add('done-fading');
+    } catch (err) {
+      alert('標記失敗：' + err.message);
+      cb.checked = false; cb.disabled = false;
+    }
+    return;
+  }
+  const dadCb = e.target.closest('[data-action="done-dad-todo"]');
+  if (dadCb) {
+    dadCb.disabled = true;
+    try {
+      await fetch(window.SR_WORKER_URL + '/todos-v2', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: dadCb.dataset.id, done: true }),
+      });
+      dadCb.closest('.checklist-item').classList.add('done-fading');
+    } catch (err) {
+      alert('標記失敗：' + err.message);
+      dadCb.checked = false; dadCb.disabled = false;
+    }
+  }
+});
+
+(async () => {
+  const d = new Date(YESTERDAY + 'T00:00:00');
+  document.getElementById('page-title').textContent = `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）昨日回顧`;
+  document.getElementById('page-note').textContent = '昨天行程 × 昨天的拜訪紀錄';
+  await Promise.all([loadDayPart(), loadDadTodos(), loadDadCollections(), loadRedSlips()]);
+})();
+</script>
+
+</body>
+</html>
