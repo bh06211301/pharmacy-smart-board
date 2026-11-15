@@ -139,7 +139,7 @@ export default {
 
       // ★ 新版待辦清單（KV 持久化）
       if (path === '/todos-v2') {
-        return await handleTodosV2(request, env);
+        return await handleTodosV2(request, env, ctx);
       }
 
       // ★ AI 待辦建議
@@ -334,7 +334,7 @@ export default {
       }
       // ★ 階段3 昨日頁 B：標記某張紅單已歸位（寫訂單主檔歸還日期，token保護，只允許 _TEST 分頁覆寫）
       if (path === '/api/red-slips/mark-returned' && request.method === 'POST') {
-        return await handleMarkOrderReturned(request, env);
+        return await handleMarkOrderReturned(request, env, ctx);
       }
 
       // ★ 階段3 昨日頁 A(a)：收款單「待繳回」清單（收款單試算表ID還沒設定前回 501）
@@ -343,7 +343,13 @@ export default {
       }
       // ★ 階段3 昨日頁 A(a)：標記某筆收款單已交給爸爸（同上，ID還沒設定前回 501）
       if (path === '/api/collections/mark-handed-to-dad' && request.method === 'POST') {
-        return await handleMarkCollectionHandedToDad(request, env);
+        return await handleMarkCollectionHandedToDad(request, env, ctx);
+      }
+
+      // ★ Google Tasks 雙向同步（smartroute-tasks-sync GAS）：昨日頁「小工具上次同步」用。
+      // 純讀取、不碰 KV：現場問 GAS 的 status action（3 秒逾時），Cache API 快取 60 秒。
+      if (path === '/api/tasks-sync/status' && request.method === 'GET') {
+        return await handleTasksSyncStatus(request, env, ctx);
       }
 
       // ★ 2026-11-04：新店定位永久快取（地圖模式用，避免每次重新整理都重打 Places API）
@@ -1052,14 +1058,22 @@ async function handleCustomerStatus(request, env) {
 // ============================================================
 const TODOS_KV_KEY = 'todos:all';
 
-async function handleTodosV2(request, env) {
+async function handleTodosV2(request, env, ctx) {
   const kv = env.TODOS_KV;
   if (!kv) return json({ error: 'KV binding 未設定' }, 500);
 
-  // GET — 讀取全部
+  // GET — 讀取全部；2026-11-15 Tasks 同步補：可帶 ?quadrant=dad&done=false 讓 Worker 端篩選，
+  // 同步 GAS 不自己重寫「老爸提醒」的篩選條件（跟 yesterday.html 的 dad 區塊同一組條件）。
+  // 不帶參數時行為完全照舊（回全部）。
   if (request.method === 'GET') {
     const raw = await kv.get(TODOS_KV_KEY);
-    const todos = raw ? JSON.parse(raw) : [];
+    let todos = raw ? JSON.parse(raw) : [];
+    const qs = new URL(request.url).searchParams;
+    const quadrant = qs.get('quadrant');
+    const doneParam = qs.get('done');
+    if (quadrant) todos = todos.filter(t => t.quadrant === quadrant);
+    if (doneParam === 'false' || doneParam === '0') todos = todos.filter(t => !t.done);
+    if (doneParam === 'true' || doneParam === '1') todos = todos.filter(t => !!t.done);
     return json({ todos });
   }
 
@@ -1112,6 +1126,8 @@ async function handleTodosV2(request, env) {
     if (body.done === false) updated.doneAt = null;
     todos[idx] = updated;
     await kv.put(TODOS_KV_KEY, JSON.stringify(todos));
+    // Tasks 同步：勾完成就背景通知 GAS 把對應 Task 標完成（失敗不影響這次寫入，定時比對會補）
+    if (body.done === true) notifyTasksSync_(env, ctx, `SR:todo:${updated.id}`);
     return json({ ok: true, todo: updated });
   }
 
@@ -4002,7 +4018,12 @@ async function handleRedSlips(request, env, ctx) {
   if (sheetNameParam && sheetNameParam !== RED_SLIP_TEST_SHEET_NAME_) {
     return json({ error: '不合法的 sheetName' }, 400);
   }
-  const { rows, colMap } = await fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx);
+  // 2026-11-15 Tasks 同步的完整比對帶 ?fresh=1：跳過 SWR 快取直接抓 gviz，而且「不寫回 KV」
+  // （使用者要求同步功能的 KV 寫入增加量為 0）。跟 /pharmacies 的 fresh=1 不一樣，那邊會寫回。
+  const fresh = url.searchParams.get('fresh') === '1';
+  const { rows, colMap } = fresh
+    ? await fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetNameParam || null)
+    : await fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx);
   // 2026-11-14 踩到的坑：daysBetween()／new Date(字串) 這條路徑，只要月、日剛好都是兩位數
   // （像 11/14），不補零的「Y/M/D」字串跟補零的 ISO 字串長得一模一樣，一樣會被當成嚴格 ISO 8601
   // 觸發 UTC 午夜解析，跟本地時間的 today 差 8 小時整天算錯（親自測到：當天建的測試訂單
@@ -4034,7 +4055,7 @@ async function handleRedSlips(request, env, ctx) {
 // 真實名稱（ORDER_MASTER_FORMAL_SHEET_NAME_），不再靠 GAS 端「沒給 sheetName 就用第一個分頁」
 // 這種位置性預設——2026-11-14 使用者要求 GAS 那邊改成只接受精確分頁名稱，Worker 這邊對應
 // 一定要明確傳 sheetName，不能再省略給 GAS 自己猜。
-async function handleMarkOrderReturned(request, env) {
+async function handleMarkOrderReturned(request, env, ctx) {
   const body = await request.json();
   const { orderNo, sheetName: sheetNameParam } = body;
   if (!orderNo) return json({ error: '缺少訂單編號' }, 400);
@@ -4047,7 +4068,10 @@ async function handleMarkOrderReturned(request, env) {
     redirect: 'follow',
   });
   const data = await res.json();
-  if (data.success) await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetNameParam || '');
+  if (data.success) {
+    await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetNameParam || '');
+    notifyTasksSync_(env, ctx, `SR:order:${orderNo}`);
+  }
   return json({ ok: !!data.success, ...data });
 }
 
@@ -4082,12 +4106,19 @@ async function handleCollectionPending(request, env, ctx) {
   const sheetNameParam = url.searchParams.get('sheetName');
   if (sheetNameParam && sheetNameParam !== COLLECTION_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
 
-  const [{ rows, colMap }, pharmaciesRes] = await Promise.all([
-    fetchGvizSheet(env.SHEET_COLLECTION, sheetNameParam || null, env, ctx),
-    handleGetPharmacies(null, env, ctx).then(r => r.json()),
+  // 2026-11-15 Tasks 同步完整比對帶 ?fresh=1：收款單直接抓 gviz 不寫回 KV；店名對照改走
+  // readPharmacyNameMapNoWrite_()（只讀 KV 既有快取、過期也不觸發背景重寫），整條路徑 KV 寫入為 0。
+  const fresh = url.searchParams.get('fresh') === '1';
+  const [{ rows, colMap }, nameById] = await Promise.all([
+    fresh
+      ? fetchGvizSheetRaw_(env.SHEET_COLLECTION, sheetNameParam || null)
+      : fetchGvizSheet(env.SHEET_COLLECTION, sheetNameParam || null, env, ctx),
+    fresh
+      ? readPharmacyNameMapNoWrite_(env)
+      : handleGetPharmacies(null, env, ctx).then(r => r.json()).then(res => {
+          const m = {}; (res.pharmacies || []).forEach(p => { m[p.id] = p.name; }); return m;
+        }),
   ]);
-  const nameById = {};
-  (pharmaciesRes.pharmacies || []).forEach(p => { nameById[p.id] = p.name; });
 
   let ignoredInvalidCount = 0;
   let missingDateCount = 0;
@@ -4117,7 +4148,7 @@ async function handleCollectionPending(request, env, ctx) {
 // POST { collectionId, sheetName? }——跟 handleMarkOrderReturned 同一個模式：sheetName 只允許
 // COLLECTION_TEST_SHEET_NAME_，不給就代填正式分頁真實名稱（COLLECTION_FORMAL_SHEET_NAME_），
 // 一定要明確傳給 GAS，不能再靠 GAS 端「沒給就用第一個分頁」。
-async function handleMarkCollectionHandedToDad(request, env) {
+async function handleMarkCollectionHandedToDad(request, env, ctx) {
   if (!env.SHEET_COLLECTION) return json({ error: '收款單試算表ID還沒設定（env.SHEET_COLLECTION）' }, 501);
   const body = await request.json();
   const { collectionId, sheetName: sheetNameParam } = body;
@@ -4131,8 +4162,83 @@ async function handleMarkCollectionHandedToDad(request, env) {
     redirect: 'follow',
   });
   const data = await res.json();
-  if (data.success) await invalidateGvizCache_(env, env.SHEET_COLLECTION, sheetNameParam || '');
+  if (data.success) {
+    await invalidateGvizCache_(env, env.SHEET_COLLECTION, sheetNameParam || '');
+    notifyTasksSync_(env, ctx, `SR:collection:${collectionId}`);
+  }
   return json({ ok: !!data.success, ...data });
+}
+
+// ============================================================
+// Google Tasks 雙向同步（2026-11-15，GAS 專案 smartroute-tasks-sync）
+// 這支 Worker 只做兩件事：(1) 三種勾選寫入成功後背景通知 GAS 把對應 Task 標完成；
+// (2) 昨日頁要顯示「小工具上次同步」時代問 GAS 的 status。兩件事都不碰 KV。
+// 需要兩個 wrangler secret：TASKS_SYNC_URL（GAS web app /exec 網址）、TASKS_SYNC_TOKEN。
+// 沒設定就整組靜默略過，不影響任何既有功能。
+// ============================================================
+function notifyTasksSync_(env, ctx, marker) {
+  if (!env || !env.TASKS_SYNC_URL || !env.TASKS_SYNC_TOKEN || !ctx || !ctx.waitUntil) return;
+  const p = fetch(env.TASKS_SYNC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'complete', token: env.TASKS_SYNC_TOKEN, marker }),
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
+  })
+    .then(r => r.text())
+    .then(t => console.log('tasks-sync 通知完成', marker, t.slice(0, 200)))
+    .catch(e => console.warn('tasks-sync 通知失敗（定時比對會補）', marker, e && e.message || e));
+  ctx.waitUntil(p);
+}
+
+// 收款單 fresh=1 路徑用：店名對照只讀 KV 既有的藥局快取，不經 swrFetch_（過期也不觸發背景重寫）；
+// KV 裡沒有才直接抓一次 gviz，同樣不寫回。店名變動極少，拿到稍舊的對照表不影響。
+async function readPharmacyNameMapNoWrite_(env) {
+  const sheetName = '新客戶資料表_AppSheet';
+  let data = null;
+  if (env.TODOS_KV) {
+    const cached = await env.TODOS_KV.get(`gviz:${env.SHEET_PHARMACY}:${sheetName}`, 'json').catch(() => null);
+    if (cached && cached.data && cached.data.rows) data = cached.data;
+  }
+  if (!data) data = await fetchGvizSheetRaw_(env.SHEET_PHARMACY, sheetName);
+  const m = {};
+  data.rows.forEach(row => {
+    const id = String(gvizGet(row, data.colMap, 'Customer_ID') || '').trim();
+    if (id) m[id] = String(gvizGet(row, data.colMap, '店名') || id);
+  });
+  return m;
+}
+
+const TASKS_SYNC_STATUS_CACHE_URL_ = 'https://tasks-sync-status.internal/status';
+async function handleTasksSyncStatus(request, env, ctx) {
+  if (!env.TASKS_SYNC_URL || !env.TASKS_SYNC_TOKEN) {
+    return json({ ok: false, configured: false, error: 'Tasks 同步尚未設定（缺 TASKS_SYNC_URL／TASKS_SYNC_TOKEN）' });
+  }
+  // Cache API 60 秒（不是 KV）：避免每次開昨日頁都打一次 GAS。wrangler dev 本機也支援 caches.default。
+  const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+  const cacheReq = new Request(TASKS_SYNC_STATUS_CACHE_URL_);
+  if (cache) {
+    const hit = await cache.match(cacheReq).catch(() => null);
+    if (hit) return hit;
+  }
+  let payload;
+  try {
+    const u = new URL(env.TASKS_SYNC_URL);
+    u.searchParams.set('action', 'status');
+    u.searchParams.set('token', env.TASKS_SYNC_TOKEN);
+    const r = await fetch(u.toString(), { redirect: 'follow', signal: AbortSignal.timeout(3000) });
+    const text = await r.text();
+    const data = JSON.parse(text);
+    payload = { ok: true, configured: true, ...data, fetchedAt: new Date().toISOString() };
+  } catch (e) {
+    payload = { ok: false, configured: true, error: '讀不到同步狀態：' + (e && e.message || e), fetchedAt: new Date().toISOString() };
+  }
+  const res = new Response(JSON.stringify(payload, null, 2), {
+    status: 200,
+    headers: { ...CORS_HEADERS, 'Cache-Control': 'public, max-age=60' },
+  });
+  if (cache && ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cacheReq, res.clone()).catch(() => {}));
+  return res;
 }
 
 // ============================================================

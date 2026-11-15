@@ -37,6 +37,8 @@
   .checklist-item input { width: 20px; height: 20px; margin: 0; flex-shrink: 0; }
   .checklist-item.done-fading { opacity: 0.4; }
   .checklist-sub { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .sync-status { font-weight: var(--sr-weight-normal); }
+  .sync-status.stale { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
 
   .redslip-row { display: flex; justify-content: space-between; align-items: center; gap: var(--sr-space-4); padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); flex-wrap: wrap; }
   .redslip-row:last-child { border-bottom: none; }
@@ -78,7 +80,10 @@
   </div>
 
   <div class="panel dad">
-    <div class="panel-title">A　今天要交給老爸</div>
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--sr-space-4);flex-wrap:wrap">
+      <span>A　今天要交給老爸</span>
+      <span class="checklist-sub sync-status" id="sync-status">小工具上次同步：載入中…</span>
+    </div>
     <div id="dad-collection-root"></div>
     <div id="dad-todo-root"></div>
   </div>
@@ -182,6 +187,33 @@ async function loadDadCollections() {
   }
 }
 
+// ---- 小工具（Google Tasks）上次同步時間 ----
+// 非同步載入，不擋其他區塊。判斷規則全部來自 GAS 回傳（inWindow／staleAfterMin／nextWindowStart），
+// 前端不寫死時段跟門檻：時段內超過門檻或讀不到才標紅；時段外顯示「休息中」不標紅。
+async function loadSyncStatus() {
+  const el = document.getElementById('sync-status');
+  function hhmm(iso) { const d = new Date(iso); return isNaN(d) ? '—' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+  try {
+    const s = await get('/api/tasks-sync/status');
+    if (s.configured === false) { el.textContent = '小工具同步：未設定'; return; }
+    if (!s.ok) { el.textContent = '小工具上次同步：讀不到'; el.classList.add('stale'); return; }
+    if (s.enabled === false) { el.textContent = '小工具同步：已關閉'; el.classList.add('stale'); return; }
+    const last = s.lastSyncAt ? hhmm(s.lastSyncAt) : '尚未同步';
+    const failedNote = s.failedCount ? `　⚠ 有 ${s.failedCount} 筆同步失敗` : '';
+    if (!s.inWindow) {
+      el.textContent = `小工具上次同步：${last}（休息中，${s.nextWindowStart || '—'} 恢復）${failedNote}`;
+      if (s.failedCount) el.classList.add('stale');
+      return;
+    }
+    const ageMin = s.lastSyncAt ? (Date.now() - new Date(s.lastSyncAt).getTime()) / 60000 : Infinity;
+    const stale = ageMin > (s.staleAfterMin || 15);
+    el.textContent = `小工具上次同步：${last}${stale ? `（超過 ${s.staleAfterMin || 15} 分鐘）` : ''}${failedNote}`;
+    if (stale || s.failedCount) el.classList.add('stale');
+  } catch (e) {
+    el.textContent = '小工具上次同步：讀不到'; el.classList.add('stale');
+  }
+}
+
 // ---- B：紅單放進抽屜 ----
 async function loadRedSlips() {
   const root = document.getElementById('redslip-root');
@@ -274,6 +306,7 @@ document.body.addEventListener('change', async (e) => {
   const d = new Date(YESTERDAY + 'T00:00:00');
   document.getElementById('page-title').textContent = `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）昨日回顧`;
   document.getElementById('page-note').textContent = '昨天行程 × 昨天的拜訪紀錄';
+  loadSyncStatus(); // 不 await，不擋其他內容
   await Promise.all([loadDayPart(), loadDadTodos(), loadDadCollections(), loadRedSlips()]);
 })();
 </script>
