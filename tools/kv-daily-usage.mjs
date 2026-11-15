@@ -6,6 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 const days = Math.max(1, parseInt(process.argv[2] || '1', 10));
+import { execSync } from 'node:child_process';
+
+// wrangler 的 OAuth token 約 1 小時過期，先跑一次 whoami 讓 wrangler 自己刷新並寫回檔案（輸出丟掉）。
+try { execSync('npx wrangler whoami', { stdio: 'ignore', timeout: 60000 }); } catch { /* 讀檔時再判斷 */ }
 const toml = fs.readFileSync(path.join(os.homedir(), '.wrangler', 'config', 'default.toml'), 'utf8');
 const token = (toml.match(/oauth_token\s*=\s*"([^"]+)"/) || [])[1];
 if (!token) { console.error('找不到 wrangler oauth_token，先 npx wrangler login'); process.exit(1); }
