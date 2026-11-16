@@ -90,6 +90,10 @@
   @media (max-width: 1100px) { .sidebar { width: 100%; border-left: none; border-top: 1px solid var(--sr-line); } }
   .sidebar-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-5); }
   .sidebar-group-title { font-size: var(--sr-text-xs); color: var(--sr-ink-3); font-weight: var(--sr-weight-bold); margin: var(--sr-space-5) 0 var(--sr-space-3); }
+  .sidebar-group-title.sidebar-group-toggle { cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+  .sidebar-group-toggle .sidebar-group-arrow { transition: transform .15s; }
+  .sidebar-group-toggle[aria-expanded="true"] .sidebar-group-arrow { transform: rotate(90deg); }
+  .sidebar-group-count { color: var(--sr-ink-3); font-weight: normal; }
   .sidebar-empty { font-size: var(--sr-text-xs); color: var(--sr-ink-3); padding: var(--sr-space-3) 0; }
 
   .todo-card {
@@ -135,12 +139,18 @@
   </div>
   <div class="sidebar">
     <div class="sidebar-title">這週要做的</div>
-    <div class="sidebar-group-title">還沒指定日期的請款</div>
-    <div id="sidebar-billing"><div class="sidebar-empty">載入中...</div></div>
-    <div class="sidebar-group-title">有期限的待追蹤</div>
-    <div id="sidebar-followups"><div class="sidebar-empty">載入中...</div></div>
-    <div class="sidebar-group-title">逾期沒去的店</div>
-    <div id="sidebar-overdue"><div class="sidebar-empty">載入中...</div></div>
+    <div class="sidebar-group-title sidebar-group-toggle" data-group="billing" aria-expanded="false">
+      <span><span class="sidebar-group-arrow">▸</span> 還沒指定日期的請款 <span class="sidebar-group-count" id="sidebar-billing-count"></span></span>
+    </div>
+    <div id="sidebar-billing" hidden><div class="sidebar-empty">載入中...</div></div>
+    <div class="sidebar-group-title sidebar-group-toggle" data-group="followups" aria-expanded="false">
+      <span><span class="sidebar-group-arrow">▸</span> 有期限的待追蹤 <span class="sidebar-group-count" id="sidebar-followups-count"></span></span>
+    </div>
+    <div id="sidebar-followups" hidden><div class="sidebar-empty">載入中...</div></div>
+    <div class="sidebar-group-title sidebar-group-toggle" data-group="overdue" aria-expanded="false">
+      <span><span class="sidebar-group-arrow">▸</span> 逾期沒去的店 <span class="sidebar-group-count" id="sidebar-overdue-count"></span></span>
+    </div>
+    <div id="sidebar-overdue" hidden><div class="sidebar-empty">載入中...</div></div>
   </div>
 </div>
 
@@ -154,6 +164,39 @@ window.SRNav.loadBadges();
 
 const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 const FOLLOWUP_LOOKAHEAD_DAYS = 21; // 側欄「有期限的待追蹤」只顯示逾期＋未來21天內，避免塞進太遠的事項
+
+// 側欄三區塊（請款／待追蹤／逾期）預設收合，展開狀態存 localStorage（沿用 store-rules.html 的
+// COLLAPSE_STORAGE_KEY 慣例：讀寫都包 try/catch，讀不到就當沒有任何例外）。這裡存的是「展開」
+// 而不是「收合」的 key，所以沒讀到資料時剛好自然等於全部收合，不用另外判斷。
+const SIDEBAR_EXPAND_KEY = 'sr-weekly-sidebar-expanded';
+function loadExpandedSidebarGroups_() {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_EXPAND_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) { return new Set(); }
+}
+function saveExpandedSidebarGroups_() {
+  try { localStorage.setItem(SIDEBAR_EXPAND_KEY, JSON.stringify([...expandedSidebarGroups])); } catch (e) {}
+}
+let expandedSidebarGroups = loadExpandedSidebarGroups_();
+function updateSidebarGroupUi_(key, count) {
+  const header = document.querySelector(`.sidebar-group-toggle[data-group="${key}"]`);
+  const body = document.getElementById(`sidebar-${key}`);
+  const countEl = document.getElementById(`sidebar-${key}-count`);
+  const expanded = expandedSidebarGroups.has(key);
+  if (countEl) countEl.textContent = count ? `(${count})` : '';
+  if (body) body.hidden = !expanded;
+  if (header) header.setAttribute('aria-expanded', String(expanded));
+}
+document.addEventListener('click', (e) => {
+  const header = e.target.closest('.sidebar-group-toggle');
+  if (!header) return;
+  const key = header.dataset.group;
+  if (expandedSidebarGroups.has(key)) expandedSidebarGroups.delete(key);
+  else expandedSidebarGroups.add(key);
+  saveExpandedSidebarGroups_();
+  updateSidebarGroupUi_(key, document.getElementById(`sidebar-${key}-count`).textContent.replace(/\D/g, ''));
+});
 
 function fmtDs(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function parseDs(s) { return new Date(String(s).replace(/\//g, '-') + 'T00:00:00'); }
@@ -544,6 +587,7 @@ async function loadWeek() {
   document.getElementById('sidebar-billing').innerHTML = weekData.billingDue.length
     ? weekData.billingDue.map(item => safeCardHtml(billingCardHtml, item)).join('')
     : '<div class="sidebar-empty">目前沒有待排的請款</div>';
+  updateSidebarGroupUi_('billing', weekData.billingDue.length);
 
   // 側欄：有期限的待追蹤（不在本週範圍內、且逾期或未來21天內）
   const weekDateSet = new Set(weekData.days.map(d => d.date));
@@ -554,11 +598,13 @@ async function loadWeek() {
   document.getElementById('sidebar-followups').innerHTML = sidebarFollowups.length
     ? sidebarFollowups.map(item => safeCardHtml(followupCardHtml, item)).join('')
     : '<div class="sidebar-empty">沒有待排的待追蹤</div>';
+  updateSidebarGroupUi_('followups', sidebarFollowups.length);
 
   // 側欄：逾期沒去的店
   document.getElementById('sidebar-overdue').innerHTML = weekData.overdueCustomers.length
     ? weekData.overdueCustomers.map(item => safeCardHtml(overdueCardHtml, item)).join('')
     : '<div class="sidebar-empty">目前沒有逾期沒去的店</div>';
+  updateSidebarGroupUi_('overdue', weekData.overdueCustomers.length);
 
   wireDragAndDrop();
 }

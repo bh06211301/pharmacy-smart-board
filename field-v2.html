@@ -70,6 +70,10 @@
   }
   .tag.tier-hot { background: var(--sr-danger-soft); color: var(--sr-ink); }
   .tag.warn { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .fixed-info summary { cursor: pointer; list-style: none; }
+  .fixed-info summary::-webkit-details-marker { display: none; }
+  .fixed-info summary::after { content: '▸'; float: right; color: var(--sr-ink-2); }
+  .fixed-info[open] summary::after { content: '▾'; }
   .btn {
     height: var(--sr-btn-h); border-radius: var(--sr-radius-md); border: 1px solid var(--sr-line);
     background: var(--sr-bg); color: var(--sr-ink); font-size: var(--sr-text-md);
@@ -243,6 +247,7 @@
       <div class="topbar-title" id="record-customer-title" style="margin-top:6px">記錄拜訪</div>
     </div>
     <div class="body-scroll">
+      <div id="record-customer-contact"></div>
       <div class="section-label">拜訪類型</div>
       <div id="record-customer-type-chips" class="chip-group" data-single="true">
         <span class="chip" data-value="送貨">送貨</span>
@@ -679,6 +684,26 @@ function escapeHtml_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// 聯絡人／固定資訊：唯讀顯示，到店頁跟記錄頁共用這兩個 helper（不新增欄位、不新增寫入）
+function fv2ContactLineHtml_(detail) {
+  const parts = [detail.greeting, detail.pharmacist].filter(Boolean);
+  if (!parts.length) return '';
+  return `<div class="store-meta" style="margin-top:4px">聯絡人：${escapeHtml_(parts.join('・'))}</div>`;
+}
+function fv2FixedInfoCardHtml_(detail) {
+  const groups = [
+    { label: '話題', value: detail.chatTopics },
+    { label: '家庭', value: detail.background },
+    { label: '其他', value: detail.profileNote },
+  ].filter(g => g.value);
+  if (!groups.length) return '';
+  return `
+    <details class="card fixed-info">
+      <summary class="section-label">固定資訊（${groups.length}項）</summary>
+      ${groups.map(g => `<div class="store-meta" style="margin-top:6px">${escapeHtml_(g.label)}：${escapeHtml_(g.value)}</div>`).join('')}
+    </details>`;
+}
+
 // 「我到了」：記住 storeId，去抓真實的店家詳情，同時標記今日行程這一站「已到」。
 // 使用者明確要求：只有按這顆按鈕才寫「已到」，GPS 接近之類的提示（如果之後做）純畫面提示，
 // 不能自動觸發寫入。狀態已經是「已到」或更後面（完成/跳過）就不重送（避免白跑一次寫入）。
@@ -706,6 +731,7 @@ async function fv2RenderArrive(storeId) {
     const detail = await fetch(`${WORKER}/api/store?id=${encodeURIComponent(storeId)}`).then(r => r.json());
     if (!detail.ok) { body.innerHTML = `<div class="center-note">讀取失敗：${escapeHtml_(detail.error || '未知錯誤')}</div>`; return; }
     FV2.currentFollowups = detail.followups || []; // 記錄拜訪畫面要用（階段2 項目2：逐筆待追蹤結果）
+    FV2.currentDetail = detail; // 記錄頁要重用這份（聯絡人／固定資訊），不用再打一次 /api/store
     const t = detail.tiering;
     const visitsData = await fetch(`${WORKER}/visits/${encodeURIComponent(storeId)}`).then(r => r.json()).catch(() => ({ visits: [] }));
     const visits = (visitsData.visits || []).slice(0, 2);
@@ -714,10 +740,12 @@ async function fv2RenderArrive(storeId) {
       <div class="card">
         <div class="store-name">${escapeHtml_(detail.name)} <span style="font-size:var(--sr-text-sm);color:var(--sr-ink-2)">${escapeHtml_(detail.id)}</span></div>
         <div class="store-meta">${escapeHtml_([detail.city, detail.district].filter(Boolean).join(''))}</div>
+        ${fv2ContactLineHtml_(detail)}
         <div class="tag-row">${tagRow}</div>
         <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? `已 ${t.daysSince ?? '—'} 天未訪 · 倍數 ${t.ratio ?? '—'}` : (detail.excludeReason || '不列入分級')}</div>
         ${detail.phone ? `<button class="btn" style="margin-top:var(--sr-space-4)" onclick="location.href='tel:${escapeHtml_(detail.phone)}'">📞 打電話</button>` : ''}
       </div>
+      ${fv2FixedInfoCardHtml_(detail)}
       <div class="card">
         <div class="section-label">這次要處理的事</div>
         <div class="store-meta" style="margin-top:4px">拜訪目的：${row ? escapeHtml_((row.purposes || []).join('、') || '—') : '—'}${row && row.purposeNote ? '　備註：' + escapeHtml_(row.purposeNote) : ''}${t && t.consignmentText ? '　' + escapeHtml_(t.consignmentText) : ''}</div>
@@ -752,6 +780,9 @@ function fv2RenderRecordCustomer(storeId) {
   const { ph } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
   document.getElementById('record-customer-title').textContent = `記錄拜訪 · ${ph ? ph.name : (row ? row.name : storeId)}`;
+  const contactEl = document.getElementById('record-customer-contact');
+  const detail = FV2.currentDetail && FV2.currentDetail.id === storeId ? FV2.currentDetail : null;
+  contactEl.innerHTML = detail ? fv2ContactLineHtml_(detail) + fv2FixedInfoCardHtml_(detail) : '';
   // 拜訪目的→拜訪類型優先序（使用者核准）：新案開發 > 收款 > 送貨 > 巡視；可手動改（chip 可點擊切換）
   const purposes = row ? (row.purposes || []) : [];
   const priority = ['新案開發', '收款', '送貨', '巡視'];

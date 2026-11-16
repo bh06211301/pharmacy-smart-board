@@ -1004,6 +1004,10 @@ async function addAnchor(a) {
 function renderSuggest() {
   const root = document.getElementById('suggest-root');
   if (!planData) { root.innerHTML = ''; return; }
+  // 使用者 2026-11-16 要求：寄賣待整理／該對帳只在每月 1-10 號顯示，11 號起這批多半還沒請款回來，
+  // 顯示了也沒用，徒增雜訊。判斷用「規劃那一天」（getPlanDate()，沒帶 ?date= 就是今天），不是系統當下日期。
+  const planDay = parseInt(getPlanDate().split('-')[2], 10);
+  if (planDay > 10) { root.innerHTML = ''; return; }
   const excludeIds = anchorIds();
   const candidates = (planData.recommended || [])
     .filter(item => !excludeIds.has(item.id))
