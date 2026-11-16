@@ -4034,6 +4034,19 @@ async function handleRedSlips(request, env, ctx) {
     const parts = iso.split('-').map(Number);
     return new Date(parts[0], parts[1] - 1, parts[2]);
   }
+  // 2026-11-16 使用者要求：紅單超時天數改算「工作日」（扣掉週六、週日），逾期門檻改成「超過3個
+  // 工作日」。從 fromMidnight 隔天數到 toMidnight（含 toMidnight 當天），只算週一～週五；
+  // 同一天回傳0。走純 Date 物件加減，不經字串解析，延續上面 localMidnightFromIso_ 的做法。
+  function workdaysBetween_(fromMidnight, toMidnight) {
+    let count = 0;
+    const cur = new Date(fromMidnight);
+    while (cur < toMidnight) {
+      cur.setDate(cur.getDate() + 1);
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
   const items = [];
   rows.forEach(row => {
     const orderNo = String(gvizGet(row, colMap, '訂單編號') || '').trim();
@@ -4044,7 +4057,7 @@ async function handleRedSlips(request, env, ctx) {
     if (returnDateRaw) return; // 已經歸位了
     const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
     const storeName = String(gvizGet(row, colMap, '店名_中文') || storeId);
-    const daysSince = Math.floor((todayMidnight - localMidnightFromIso_(orderDateIso)) / 86400000);
+    const daysSince = workdaysBetween_(localMidnightFromIso_(orderDateIso), todayMidnight);
     items.push({ orderNo, storeId, storeName, orderDate: orderDateIso, daysSince, overdue: daysSince !== null && daysSince > 3 });
   });
   items.sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));

@@ -15,6 +15,7 @@
   .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sr-space-4); padding: var(--sr-space-4) var(--sr-space-8); border-bottom: 1px solid var(--sr-line); }
   .page-header-title { font-size: var(--sr-text-xl); font-weight: var(--sr-weight-bold); }
   .page-header-note { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
+  .page-header-nav { display: flex; gap: var(--sr-space-3); }
   .page-body { padding: var(--sr-space-7) var(--sr-space-8); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sr-space-7); align-content: start; }
   @media (max-width: 900px) { .page-body { grid-template-columns: 1fr; } }
   .full-row { grid-column: 1 / -1; }
@@ -69,6 +70,11 @@
 <div class="page-header">
   <span class="page-header-title" id="page-title">昨日回顧</span>
   <span class="page-header-note" id="page-note"></span>
+  <div class="page-header-nav">
+    <button type="button" class="btn-sm" id="nav-prev">← 前一天</button>
+    <button type="button" class="btn-sm" id="nav-next">後一天 →</button>
+    <button type="button" class="btn-sm" id="nav-reset">回到上一個工作日</button>
+  </div>
 </div>
 
 <div class="page-body">
@@ -108,11 +114,43 @@ const { get, post, escapeHtml } = window.PlannerAPI;
 window.SRNav.render({ active: 'yesterday' });
 window.SRNav.loadBadges();
 
-function yesterdayIso_() {
-  const d = new Date(); d.setDate(d.getDate() - 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function isoOf_(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function addDaysIso_(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoOf_(d); }
+
+// 工作日＝週一到週五。週二～週五的「昨日」＝前一天；週一／週六／週日都回溯到上週五
+// （週一回溯3天、週日回溯2天、週六回溯1天，三者對應到同一個「上一個工作日」）。
+function yesterdayIso_(base) {
+  const b = base ? new Date(base) : new Date();
+  const day = b.getDay(); // 0=日 1=一 2=二 3=三 4=四 5=五 6=六
+  const back = day === 1 ? 3 : day === 0 ? 2 : 1;
+  const d = new Date(b); d.setDate(d.getDate() - back);
+  return isoOf_(d);
 }
-const YESTERDAY = yesterdayIso_();
+// 只有週一才需要把剛過完的週六、週日一併顯示（週二～週日都只看單一天，不用合併）
+function weekendMergeDates_(base) {
+  const b = base ? new Date(base) : new Date();
+  if (b.getDay() !== 1) return [];
+  const sat = new Date(b); sat.setDate(sat.getDate() - 2);
+  const sun = new Date(b); sun.setDate(sun.getDate() - 1);
+  return [isoOf_(sat), isoOf_(sun)];
+}
+function defaultViewDates_() {
+  const main = yesterdayIso_();
+  const extra = weekendMergeDates_();
+  return extra.length ? [main, ...extra] : [main];
+}
+function dateLabel_(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`;
+}
+let viewDates = defaultViewDates_(); // 目前顯示的日期（陣列，預設工作日=1筆；週一合併週末=3筆）
+
+function renderPageHeader_() {
+  document.getElementById('page-title').textContent = `${viewDates.map(dateLabel_).join('、')}昨日回顧`;
+  document.getElementById('page-note').textContent = viewDates.length > 1
+    ? '週末合併顯示：上一個工作日＋週六、週日'
+    : '昨天行程 × 昨天的拜訪紀錄';
+}
 
 function backfillFormHtml() {
   const VISIT_PURPOSES_ = ['例行拜訪', '新店開發', '送貨', '對帳請款', '介紹新品', '其他'];
@@ -128,28 +166,44 @@ async function loadDayPart() {
   const missingRoot = document.getElementById('missing-root');
   const recordsRoot = document.getElementById('records-root');
   try {
-    const [d, followupsRes] = await Promise.all([get('/api/day-detail?date=' + YESTERDAY), get('/api/followups').catch(() => ({ followups: [] }))]);
-    const resolvedYesterday = (followupsRes.followups || []).filter(f => f.resolvedDate === YESTERDAY).length;
-    const createdYesterday = (followupsRes.followups || []).filter(f => f.createdDate === YESTERDAY).length;
+    const dates = viewDates;
+    const dateSet = new Set(dates);
+    const multi = dates.length > 1;
+    const [dayResults, followupsRes] = await Promise.all([
+      Promise.all(dates.map(date => get('/api/day-detail?date=' + date))),
+      get('/api/followups').catch(() => ({ followups: [] })),
+    ]);
+    const resolvedCount = (followupsRes.followups || []).filter(f => dateSet.has(f.resolvedDate)).length;
+    const createdCount = (followupsRes.followups || []).filter(f => dateSet.has(f.createdDate)).length;
+
+    const counts = { recorded: 0, skipped: 0, missing: 0 };
+    const allMissing = [];
+    const allVisits = [];
+    dayResults.forEach((d, i) => {
+      counts.recorded += d.counts.recorded;
+      counts.skipped += d.counts.skipped;
+      counts.missing += d.counts.missing;
+      d.stops.filter(s => s.resultState === 'missing').forEach(s => allMissing.push({ ...s, date: dates[i] }));
+      d.visits.forEach(v => allVisits.push({ ...v, date: dates[i] }));
+    });
 
     statGrid.innerHTML = `
-      <div class="stat-card"><span class="stat-label">已記紀錄</span><span class="stat-value">${d.counts.recorded}</span></div>
-      <div class="stat-card"><span class="stat-label">跳過</span><span class="stat-value">${d.counts.skipped}</span></div>
-      <div class="stat-card${d.counts.missing > 0 ? ' warn' : ''}"><span class="stat-label">去了但沒記</span><span class="stat-value">${d.counts.missing}</span></div>
-      <div class="stat-card"><span class="stat-label">待追蹤 結案／新增</span><span class="stat-value">${resolvedYesterday} / ${createdYesterday}</span></div>`;
+      <div class="stat-card"><span class="stat-label">已記紀錄</span><span class="stat-value">${counts.recorded}</span></div>
+      <div class="stat-card"><span class="stat-label">跳過</span><span class="stat-value">${counts.skipped}</span></div>
+      <div class="stat-card${counts.missing > 0 ? ' warn' : ''}"><span class="stat-label">去了但沒記</span><span class="stat-value">${counts.missing}</span></div>
+      <div class="stat-card"><span class="stat-label">待追蹤 結案／新增</span><span class="stat-value">${resolvedCount} / ${createdCount}</span></div>`;
 
-    const missing = d.stops.filter(s => s.resultState === 'missing');
-    missingRoot.innerHTML = missing.length
-      ? missing.map(s => `<div class="missing-item">
-          <span>${escapeHtml(s.name)} <span class="checklist-sub">${escapeHtml((s.purposes||[]).join('、')||'—')}・狀態「完成」但無紀錄</span></span>
-          <button type="button" class="btn-sm" data-action="toggle-backfill" data-store-id="${escapeHtml(s.storeId)}" data-store-name="${escapeHtml(s.name)}">補記（日期＝昨天）</button>
+    missingRoot.innerHTML = allMissing.length
+      ? allMissing.map(s => `<div class="missing-item">
+          <span>${multi ? `<b>${dateLabel_(s.date)}</b> ` : ''}${escapeHtml(s.name)} <span class="checklist-sub">${escapeHtml((s.purposes||[]).join('、')||'—')}・狀態「完成」但無紀錄</span></span>
+          <button type="button" class="btn-sm" data-action="toggle-backfill" data-store-id="${escapeHtml(s.storeId)}" data-store-name="${escapeHtml(s.name)}" data-date="${escapeHtml(s.date)}">補記（日期＝${multi ? escapeHtml(s.date) : '昨天'}）</button>
         </div><div class="backfill-wrap" hidden></div>`).join('')
-      : '<div class="empty-hint">昨天排定的都記了，沒有缺的</div>';
+      : '<div class="empty-hint">排定的都記了，沒有缺的</div>';
 
-    document.getElementById('records-title').textContent = `昨天記的 ${d.visits.length} 筆`;
-    recordsRoot.innerHTML = d.visits.length
-      ? d.visits.map(v => `<div class="record-row"><b>${escapeHtml(v.storeName)}</b><span>${escapeHtml(v.purpose || '')}</span><span>${escapeHtml(v.summary || v.content || '')}</span></div>`).join('')
-      : '<div class="empty-hint">昨天沒有拜訪紀錄</div>';
+    document.getElementById('records-title').textContent = `${multi ? '這幾天' : '昨天'}記的 ${allVisits.length} 筆`;
+    recordsRoot.innerHTML = allVisits.length
+      ? allVisits.map(v => `<div class="record-row"><b>${multi ? dateLabel_(v.date) + ' ' : ''}${escapeHtml(v.storeName)}</b><span>${escapeHtml(v.purpose || '')}</span><span>${escapeHtml(v.summary || v.content || '')}</span></div>`).join('')
+      : '<div class="empty-hint">沒有拜訪紀錄</div>';
   } catch (e) {
     statGrid.innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
     missingRoot.innerHTML = '';
@@ -221,7 +275,7 @@ async function loadRedSlips() {
     const d = await get('/api/red-slips');
     root.innerHTML = d.items.length
       ? d.items.map(it => `<div class="redslip-row${it.overdue ? ' overdue' : ''}">
-          <span>${escapeHtml(it.storeName)}　訂單 ${escapeHtml(it.orderDate)}${it.overdue ? '（已超過3天）' : ''}</span>
+          <span>${escapeHtml(it.storeName)}　訂單 ${escapeHtml(it.orderDate)}${it.overdue ? '（已超過3個工作日）' : ''}</span>
           <button type="button" class="btn-sm" data-action="mark-returned" data-order-no="${escapeHtml(it.orderNo)}">紅單已歸位</button>
         </div>`).join('') + `<div class="checklist-sub" style="margin-top:var(--sr-space-2)">只列 ${escapeHtml(d.cutoverDate)} 之後的訂單</div>`
       : '<div class="empty-hint">目前沒有還沒歸位的紅單</div>';
@@ -243,13 +297,13 @@ document.body.addEventListener('click', async (e) => {
     const wrap = submitBtn.closest('.backfill-wrap');
     const item = wrap.previousElementSibling;
     const toggleEl = item.querySelector('[data-action="toggle-backfill"]');
-    const storeId = toggleEl.dataset.storeId, storeName = toggleEl.dataset.storeName;
+    const storeId = toggleEl.dataset.storeId, storeName = toggleEl.dataset.storeName, date = toggleEl.dataset.date;
     const purpose = wrap.querySelector('.bf-purpose').value;
     const content = wrap.querySelector('.bf-content').value.trim();
     if (!content) { alert('拜訪內容不能空白'); return; }
     submitBtn.disabled = true; submitBtn.textContent = '送出中…';
     try {
-      await post('/add-visit', { visitId: 'backfill-' + Date.now(), pharmacyName: storeName || storeId, date: YESTERDAY, purpose, content });
+      await post('/add-visit', { visitId: 'backfill-' + Date.now(), pharmacyName: storeName || storeId, date, purpose, content });
       await loadDayPart();
     } catch (err) {
       alert('補記失敗：' + err.message);
@@ -302,10 +356,24 @@ document.body.addEventListener('change', async (e) => {
   }
 });
 
+document.getElementById('nav-prev').addEventListener('click', async () => {
+  viewDates = [addDaysIso_(viewDates[0], -1)];
+  renderPageHeader_();
+  await loadDayPart();
+});
+document.getElementById('nav-next').addEventListener('click', async () => {
+  viewDates = [addDaysIso_(viewDates[viewDates.length - 1], 1)];
+  renderPageHeader_();
+  await loadDayPart();
+});
+document.getElementById('nav-reset').addEventListener('click', async () => {
+  viewDates = defaultViewDates_();
+  renderPageHeader_();
+  await loadDayPart();
+});
+
 (async () => {
-  const d = new Date(YESTERDAY + 'T00:00:00');
-  document.getElementById('page-title').textContent = `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）昨日回顧`;
-  document.getElementById('page-note').textContent = '昨天行程 × 昨天的拜訪紀錄';
+  renderPageHeader_();
   loadSyncStatus(); // 不 await，不擋其他內容
   await Promise.all([loadDayPart(), loadDadTodos(), loadDadCollections(), loadRedSlips()]);
 })();
