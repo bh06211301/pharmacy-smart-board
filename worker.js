@@ -4318,6 +4318,10 @@ async function handleStoreDetail(request, env, ctx) {
     const orderDate = stat.hasOrders ? stat.lastOrderDate : '';
     const lastContactDate = laterDateOrNull_(visitDate, orderDate);
     const daysSince = lastContactDate ? daysBetween(lastContactDate, planDate) : null;
+    // 2026-11-16 使用者要求：從沒拜訪紀錄的店，到店頁不該顯示「已N天未訪」（那個N其實是算最近一次
+    // 叫貨的天數，不是真的沒人去過N天），改標成「從未拜訪」。沿用 handleRecommendToday 已經在用的
+    // neverVisited 命名慣例（見該函式 v.visitCount 那段），這裡用 visitMap[id] 有沒有值來判斷。
+    const neverVisited = !visitDate;
     const rawRatio = daysSince === null ? 1.0 : daysSince / intervalDays;
     const ratioCapForTier = PLANNER_CONFIG.tierRatioCap[tier];
     const ratio = ratioCapForTier ? Math.min(rawRatio, ratioCapForTier) : rawRatio;
@@ -4363,7 +4367,7 @@ async function handleStoreDetail(request, env, ctx) {
     }
 
     tiering = {
-      tier, intervalDays, alert, avgMonthly, daysSince,
+      tier, intervalDays, alert, avgMonthly, daysSince, neverVisited,
       ratio: Math.round(ratio * 100) / 100, rawRatio: Math.round(rawRatio * 100) / 100,
       isContracted, contractAmount: isContracted ? contractAmount : null,
       consignmentAllTotal: Math.round(consignment.allTotal), consignmentStaleCount: consignment.staleCount,

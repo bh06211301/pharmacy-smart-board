@@ -703,6 +703,15 @@ function fv2FixedInfoCardHtml_(detail) {
       ${groups.map(g => `<div class="store-meta" style="margin-top:6px">${escapeHtml_(g.label)}：${escapeHtml_(g.value)}</div>`).join('')}
     </details>`;
 }
+// 2026-11-16 使用者要求：t.daysSince 其實是「最近一次拜訪或叫貨」的天數，從沒拜訪過但很久以前
+// 叫過一次貨的店，顯示「已N天未訪」會誤導成「N天前有人去過」。t.neverVisited 為真時改顯示
+// 「從未拜訪」，daysSince 這時候代表的是最近一次叫貨的天數（沒叫過貨就是 null，只顯示「從未拜訪」）。
+function fv2VisitStatusText_(t) {
+  if (t.neverVisited) {
+    return t.daysSince != null ? `從未拜訪（最近叫貨 ${t.daysSince} 天前）` : '從未拜訪';
+  }
+  return `已 ${t.daysSince ?? '—'} 天未訪 · 倍數 ${t.ratio ?? '—'}`;
+}
 
 // 「我到了」：記住 storeId，去抓真實的店家詳情，同時標記今日行程這一站「已到」。
 // 使用者明確要求：只有按這顆按鈕才寫「已到」，GPS 接近之類的提示（如果之後做）純畫面提示，
@@ -742,7 +751,7 @@ async function fv2RenderArrive(storeId) {
         <div class="store-meta">${escapeHtml_([detail.city, detail.district].filter(Boolean).join(''))}</div>
         ${fv2ContactLineHtml_(detail)}
         <div class="tag-row">${tagRow}</div>
-        <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? `已 ${t.daysSince ?? '—'} 天未訪 · 倍數 ${t.ratio ?? '—'}` : (detail.excludeReason || '不列入分級')}</div>
+        <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? fv2VisitStatusText_(t) : (detail.excludeReason || '不列入分級')}</div>
         ${detail.phone ? `<button class="btn" style="margin-top:var(--sr-space-4)" onclick="location.href='tel:${escapeHtml_(detail.phone)}'">📞 打電話</button>` : ''}
       </div>
       ${fv2FixedInfoCardHtml_(detail)}
