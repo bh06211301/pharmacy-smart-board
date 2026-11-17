@@ -529,7 +529,11 @@ function fv2StoreOrAddr_(key) {
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === key);
   return row ? { storeId: row.storeId || undefined, address: row.storeId ? undefined : row.address } : { storeId: key };
 }
-async function fv2MarkTodayStatus_(storeId, address, patch, label, requestId) {
+async function fv2MarkTodayStatus_(storeId, address, patch, label, requestId, opts) {
+  // 2026-11-17：opts.silent=true 時不要自己跳紅字 toast，改由呼叫端用回傳的 ok/error 自己組訊息
+  // （記錄拜訪存檔流程要跟「已儲存」合併成一句話，不要兩個 toast 疊在一起造成誤會）。
+  // 其他呼叫端（標記已到/標記跳過）沒傳 opts，行為跟原來完全一樣。
+  const silent = !!(opts && opts.silent);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === (storeId || address));
   const body = {
     date: FV2.date, storeId: storeId || undefined, address: storeId ? undefined : address,
@@ -541,17 +545,17 @@ async function fv2MarkTodayStatus_(storeId, address, patch, label, requestId) {
   try {
     resp = await fetch(`${WORKER}/api/today-plan/row`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
   } catch (e) {
-    fv2Toast_(`${label}失敗（網路錯誤）：${e.message}`, true);
-    return { ok: false };
+    if (!silent) fv2Toast_(`${label}失敗（網路錯誤）：${e.message}`, true);
+    return { ok: false, error: `網路錯誤：${e.message}` };
   }
   if (resp.conflict) {
-    fv2Toast_('這站剛被桌機改過，已重新整理資料，請確認後再試一次', true);
+    if (!silent) fv2Toast_('這站剛被桌機改過，已重新整理資料，請確認後再試一次', true);
     if (row && resp.row) Object.assign(row, resp.row);
-    return { ok: false, conflict: true };
+    return { ok: false, conflict: true, error: '這站剛被桌機改過' };
   }
   if (!resp.success) {
-    fv2Toast_(`${label}失敗：${resp.error || '未知錯誤'}`, true);
-    return { ok: false };
+    if (!silent) fv2Toast_(`${label}失敗：${resp.error || '未知錯誤'}`, true);
+    return { ok: false, error: resp.error || '未知錯誤' };
   }
   if (row && resp.row) Object.assign(row, resp.row); // 更新本地快取，避免下一次操作用到舊的 updatedAt
   return { ok: true, row: resp.row };
@@ -786,14 +790,20 @@ document.getElementById('arrive-record-btn').addEventListener('click', () => {
 
 // ---- 3. 記錄拜訪（正式客戶） ----
 let fv2LastRecordCustomerStoreId_ = null; // 2026-11-16：同一家店重進畫面保留草稿，換店才清空
+let fv2CurrentVisitId_ = null; // 2026-11-17：連按防呆，固定到存檔成功或換店才換新（見下方reset函式）
 function fv2ResetRecordCustomerFields_() {
   document.getElementById('record-customer-content').value = '';
   document.getElementById('record-customer-nextaction').value = '';
   document.getElementById('record-customer-urgent').value = '';
   document.querySelectorAll('#record-customer-tags .chip').forEach(c => c.classList.remove('selected'));
   document.getElementById('record-customer-followup-checkbox').checked = true; // 還原HTML原始預設值（285行 checked）
+  fv2CurrentVisitId_ = genRequestId_();
 }
 function fv2RenderRecordCustomer(storeId) {
+  // 連按防呆：每次進這個畫面都把按鈕恢復成可按狀態，避免上次存檔成功後按鈕卡在disabled
+  const saveBtnReset = document.getElementById('record-customer-save');
+  saveBtnReset.disabled = false;
+  saveBtnReset.textContent = '儲存並回首頁';
   if (storeId !== fv2LastRecordCustomerStoreId_) {
     fv2ResetRecordCustomerFields_();
     fv2LastRecordCustomerStoreId_ = storeId;
@@ -925,6 +935,10 @@ function fv2DadReminderTasks_(purpose, content, phId, phName, isDad, visitId, da
   return tasks;
 }
 document.getElementById('record-customer-save').addEventListener('click', async () => {
+  const saveBtn = document.getElementById('record-customer-save');
+  if (saveBtn.disabled) return; // 連按防呆：已經在送出中，不要再觸發一次
+  saveBtn.disabled = true;
+  saveBtn.textContent = '送出中…';
   const storeId = FV2.currentStoreId;
   const { ph } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
@@ -934,7 +948,9 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const nextAction = document.getElementById('record-customer-nextaction').value.trim();
   const content = fv2AppendNextAction_(contentRaw, nextAction);
   const wantFollowup = document.getElementById('record-customer-followup-checkbox').checked;
-  const visitId = genRequestId_();
+  // 2026-11-17 連按防呆：visitId 固定成進畫面時產生的那個（見 fv2ResetRecordCustomerFields_），
+  // 存檔成功才會換新；送出失敗或連按多次都沿用同一個，GAS 那邊的 visitId 去重才真的擋得住連點。
+  const visitId = fv2CurrentVisitId_;
   const dateStr = todayStr_();
   // 2026-11-16 補齊包：標籤／緊急問題，沿用 pharmacy-visit-app 的 saveToSheets() 同一套格式
   // （tags 逗號分隔字串、painPoints 就是「緊急問題」那格文字），GAS 那邊早就在接這兩個欄位
@@ -956,12 +972,16 @@ document.getElementById('record-customer-save').addEventListener('click', async 
     visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
   } catch (e) {
     fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
+    saveBtn.disabled = false;
+    saveBtn.textContent = '儲存並回首頁';
     return;
   }
   // 使用者明確要求：拜訪紀錄沒寫成功就不要標這站「完成」——紀錄寫失敗卻顯示行程完成，
   // 回頭查會以為那天真的去過了。沒成功就在這裡停下，不繼續送待追蹤/老爸提醒/今日行程狀態。
   if (!visitResp.success) {
     fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
+    saveBtn.disabled = false;
+    saveBtn.textContent = '儲存並回首頁';
     return;
   }
   if (followupPayload) {
@@ -976,11 +996,19 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const { sentCount, skippedForTest } = await fv2SubmitFollowupActions_(visitId);
   if (skippedForTest && skipped.indexOf('待追蹤異動') < 0) skipped.push('待追蹤異動');
   const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
-  await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_());
+  // 2026-11-17 送出提示修正：silent:true 讓 fv2MarkTodayStatus_ 不要自己先跳一次紅字，
+  // 這裡統一看結果組一句話，跟「已儲存」合併，不會讓人誤會成拜訪紀錄沒存成功。
+  const markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
   // 存檔成功才清（失敗就留著，避免白白弄丟使用者打的內容）。進畫面時的清空只在換店才做，
   // 這裡存檔成功後要清乾淨，不管下一步是同一家店重進還是換店，都不該留著剛存過的草稿。
   fv2ResetRecordCustomerFields_();
-  fv2Toast_(skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存');
+  saveBtn.textContent = '已儲存';
+  const baseMsg = skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存';
+  if (markResult.ok) {
+    fv2Toast_(baseMsg);
+  } else {
+    fv2Toast_(`拜訪紀錄已存，站點狀態未更新：${markResult.error}`, true);
+  }
   showScreen('1-home');
 });
 
