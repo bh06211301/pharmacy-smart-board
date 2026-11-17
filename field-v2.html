@@ -266,7 +266,7 @@
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
       <div class="section-label">標籤（可複選）</div>
-      <div class="chip-group">
+      <div id="record-customer-tags" class="chip-group">
         <span class="chip">競品</span>
         <span class="chip">缺貨</span>
         <span class="chip">客訴</span>
@@ -785,7 +785,19 @@ document.getElementById('arrive-record-btn').addEventListener('click', () => {
 });
 
 // ---- 3. 記錄拜訪（正式客戶） ----
+let fv2LastRecordCustomerStoreId_ = null; // 2026-11-16：同一家店重進畫面保留草稿，換店才清空
+function fv2ResetRecordCustomerFields_() {
+  document.getElementById('record-customer-content').value = '';
+  document.getElementById('record-customer-nextaction').value = '';
+  document.getElementById('record-customer-urgent').value = '';
+  document.querySelectorAll('#record-customer-tags .chip').forEach(c => c.classList.remove('selected'));
+  document.getElementById('record-customer-followup-checkbox').checked = true; // 還原HTML原始預設值（285行 checked）
+}
 function fv2RenderRecordCustomer(storeId) {
+  if (storeId !== fv2LastRecordCustomerStoreId_) {
+    fv2ResetRecordCustomerFields_();
+    fv2LastRecordCustomerStoreId_ = storeId;
+  }
   const { ph } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
   document.getElementById('record-customer-title').textContent = `記錄拜訪 · ${ph ? ph.name : (row ? row.name : storeId)}`;
@@ -924,9 +936,14 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const wantFollowup = document.getElementById('record-customer-followup-checkbox').checked;
   const visitId = genRequestId_();
   const dateStr = todayStr_();
+  // 2026-11-16 補齊包：標籤／緊急問題，沿用 pharmacy-visit-app 的 saveToSheets() 同一套格式
+  // （tags 逗號分隔字串、painPoints 就是「緊急問題」那格文字），GAS 那邊早就在接這兩個欄位
+  const tags = Array.from(document.querySelectorAll('#record-customer-tags .chip.selected')).map(c => c.textContent.trim()).join(',');
+  const painPoints = document.getElementById('record-customer-urgent').value.trim();
 
   const visitPayload = {
     visitId, pharmacyName: storeName, date: dateStr, purpose: visitType, content,
+    tags, painPoints,
     sheetName: fv2SheetNameFor_(undefined, '拜訪紀錄_TEST'),
   };
   const followupPayload = wantFollowup ? { action: 'addFollowup', storeId, item: nextAction || '拜訪後續', who: '我', deadlineType: '下次經過' } : null;
@@ -960,6 +977,9 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   if (skippedForTest && skipped.indexOf('待追蹤異動') < 0) skipped.push('待追蹤異動');
   const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
   await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_());
+  // 存檔成功才清（失敗就留著，避免白白弄丟使用者打的內容）。進畫面時的清空只在換店才做，
+  // 這裡存檔成功後要清乾淨，不管下一步是同一家店重進還是換店，都不該留著剛存過的草稿。
+  fv2ResetRecordCustomerFields_();
   fv2Toast_(skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存');
   showScreen('1-home');
 });

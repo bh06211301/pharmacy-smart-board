@@ -1227,6 +1227,10 @@ async function handleAddVisit(request, env) {
     date:        body.date,
     visitType:   body.purpose || body.visitType || '',
     note:        body.content  || body.note || '',
+    // 2026-11-16 field-v2補齊包：標籤／緊急問題，單純透傳給GAS（K欄Pain Points／M欄Tags
+    // 本來就在等這兩個欄位，見 VisitAppWebhook.js appendRow，不用動GAS那邊）
+    tags:        body.tags || '',
+    painPoints:  body.painPoints || '',
   };
   if (body.sheetName) gasPayload.sheetName = body.sheetName;
   const res = await fetch(env.GAS_VISIT_URL, {
