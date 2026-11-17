@@ -311,6 +311,19 @@
       <textarea id="record-newstore-content" placeholder="說說這次談的狀況…"></textarea>
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
+      <div class="section-label">標籤（可複選）</div>
+      <div id="record-newstore-tags" class="chip-group">
+        <span class="chip">競品</span>
+        <span class="chip">缺貨</span>
+        <span class="chip">客訴</span>
+        <span class="chip">價格</span>
+        <span class="chip">滿意</span>
+        <span class="chip">其他</span>
+      </div>
+
+      <div class="section-label">緊急問題</div>
+      <input type="text" id="record-newstore-urgent" placeholder="有的話才填">
+
       <div class="section-label">下次要記得</div>
       <input type="text" id="record-newstore-nextaction" placeholder="例如：帶報價單">
       <div class="stop-sub">文字會附在拜訪內容後面一起存檔</div>
@@ -1095,7 +1108,26 @@ async function fv2RefetchPharmacies_() {
 }
 
 // ---- 3b. 記錄拜訪（新店） ----
+// 2026-11-17：欄位清空＋連按防呆，邏輯跟「記錄拜訪（正式客戶）」的
+// fv2LastRecordCustomerStoreId_/fv2ResetRecordCustomerFields_ 同一套寫法。
+let fv2LastRecordNewstoreStoreId_ = null;
+let fv2CurrentNewstoreVisitId_ = null;
+function fv2ResetRecordNewstoreFields_() {
+  document.getElementById('record-newstore-content').value = '';
+  document.getElementById('record-newstore-nextaction').value = '';
+  document.getElementById('record-newstore-urgent').value = '';
+  document.querySelectorAll('#record-newstore-tags .chip').forEach(c => c.classList.remove('selected'));
+  fv2CurrentNewstoreVisitId_ = genRequestId_();
+}
 function fv2RenderRecordNewstore(storeId) {
+  // 連按防呆：每次進這個畫面都把按鈕恢復成可按狀態，避免上次存檔成功後按鈕卡在disabled
+  const saveBtnReset = document.getElementById('record-newstore-save');
+  saveBtnReset.disabled = false;
+  saveBtnReset.textContent = '儲存並回首頁';
+  if (storeId !== fv2LastRecordNewstoreStoreId_) {
+    fv2ResetRecordNewstoreFields_();
+    fv2LastRecordNewstoreStoreId_ = storeId;
+  }
   const { rec } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
   document.getElementById('record-newstore-title').textContent = `記錄拜訪 · ${rec ? rec.name : (row ? row.name : storeId)}`;
@@ -1140,6 +1172,10 @@ document.getElementById('confirm-customer-id-input')?.addEventListener('input', 
   el.style.color = hit ? 'var(--sr-primary)' : 'var(--sr-danger)';
 });
 document.getElementById('record-newstore-save').addEventListener('click', () => {
+  const saveBtn = document.getElementById('record-newstore-save');
+  if (saveBtn.disabled) return; // 連按防呆：已經在送出中，不要再觸發一次
+  saveBtn.disabled = true;
+  saveBtn.textContent = '送出中…';
   const storeId = FV2.currentStoreId;
   const { rec } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
@@ -1149,10 +1185,26 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
   const nextAction = document.getElementById('record-newstore-nextaction').value.trim();
   const content = fv2AppendNextAction_(contentRaw, nextAction);
   const customerId = document.getElementById('confirm-customer-id-input').value.trim();
-  if (action === 'confirmed' && !customerId) { fv2Toast_('轉正式必填代號', true); return; }
+  if (action === 'confirmed' && !customerId) {
+    fv2Toast_('轉正式必填代號', true);
+    saveBtn.disabled = false;
+    saveBtn.textContent = '儲存並回首頁';
+    return;
+  }
 
-  const visitId = genRequestId_();
-  const visitPayload = { visitId, pharmacyName: storeName, date: todayStr_(), purpose: '新案開發', content, sheetName: fv2SheetNameFor_(undefined, '拜訪紀錄_TEST') };
+  // 2026-11-17 新案開發補標籤：沿用「記錄拜訪（正式客戶）」同一套做法（tags 逗號分隔字串、
+  // painPoints 就是「緊急問題」那格文字），GAS 那邊早就在接這兩個欄位，不用動GAS。
+  const tags = Array.from(document.querySelectorAll('#record-newstore-tags .chip.selected')).map(c => c.textContent.trim()).join(',');
+  const painPoints = document.getElementById('record-newstore-urgent').value.trim();
+
+  // 2026-11-17 連按防呆：visitId 固定成進畫面時產生的那個（見 fv2ResetRecordNewstoreFields_），
+  // 存檔成功才會換新；送出失敗或連按多次都沿用同一個。
+  const visitId = fv2CurrentNewstoreVisitId_;
+  const visitPayload = {
+    visitId, pharmacyName: storeName, date: todayStr_(), purpose: '新案開發', content,
+    tags, painPoints,
+    sheetName: fv2SheetNameFor_(undefined, '拜訪紀錄_TEST'),
+  };
   const funnelPayload = { storeId, action, customerId: action === 'confirmed' ? customerId : undefined, requestId: genRequestId_() };
 
   console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload });
@@ -1162,10 +1214,14 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
       visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
     } catch (e) {
       fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
+      saveBtn.disabled = false;
+      saveBtn.textContent = '儲存並回首頁';
       return;
     }
     if (!visitResp.success) {
       fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
+      saveBtn.disabled = false;
+      saveBtn.textContent = '儲存並回首頁';
       return;
     }
     let skippedFunnel = false;
@@ -1173,6 +1229,9 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
     else await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
     const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
     await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_());
+    // 存檔成功才清（失敗就留著）。進畫面時的清空只在換店才做，這裡存檔成功後要清乾淨。
+    fv2ResetRecordNewstoreFields_();
+    saveBtn.textContent = '已儲存';
     fv2Toast_(skippedFunnel ? '已儲存；測試模式：未送出（階段推進）' : '已儲存');
     showScreen('1-home');
   })();
