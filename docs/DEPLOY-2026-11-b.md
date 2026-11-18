@@ -23,7 +23,7 @@
 
 | # | 步驟 | 備註 |
 |---|---|---|
-| 1.1 | **先記下來**：`npx wrangler deployments status`，記下目前 100% 流量的 version id | 部署前的狀態快照，回退時優先切回這個 id。寫這份清單當下查到的是 `082e83f2-ec0c-42f4-b585-051b3bfcc107`（2026-11-01 第一批部署的結果），但部署當天要重新查一次，不要直接沿用這個數字——中間可能又有別的改動 |
+| 1.1 | **先記下來**：`npx wrangler deployments status`，記下目前 100% 流量的 version id | 部署前的狀態快照，回退時優先切回這個 id。寫這份清單當下已查過一次（2026-11-01 第一批部署的結果），但部署當天要重新查一次，不要直接沿用舊紀錄——中間可能又有別的改動 |
 | 1.2 | `npx wrangler deploy` | 這次沒有新 secret 要補，直接部署 |
 | 1.3 | `curl https://still-meadow-0efd.bh06211301.workers.dev/health` 確認健康檢查正常 | 同上一批的做法 |
 | 1.4 | 另外用 `curl .../api/plan` 看一下 `badges.newStoreStuck` 這個新欄位有沒有出現、數字看起來合理 | 這是這次唯一的 worker.js 改動，單獨確認一下 |

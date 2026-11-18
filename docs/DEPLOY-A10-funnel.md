@@ -13,7 +13,7 @@
 |---|---|---|
 | 0.1 | 記錄 gas-backend 的 `GAS_VISIT_URL`（存於 Worker secret，見 CLAUDE.md）部署前版本號 | 2026-11-02 查過：對應 `@30`（標籤「scheduleAction改名+拜訪紀錄表寫入保護+token保護」）。部署前再查一次確認沒有變動 |
 | 0.2 | 記錄 new-pharmacy-screening 的 `SCREENING_API_URL`（存於 Worker secret，見 CLAUDE.md）部署前版本號 | 2026-11-02 查過：對應 `@2`（標籤「SmartRoute v2 第1階段：新店階段追蹤3欄」） |
-| 0.3 | 記錄 `still-meadow-0efd` 部署前的版本 id | 2026-11-02 查過：目前 100% 流量版本 `417746e8-86c8-4119-b3a1-17164d34b45b`（2026-11-01 建立），回退用 `npx wrangler rollback 417746e8-86c8-4119-b3a1-17164d34b45b` |
+| 0.3 | 記錄 `still-meadow-0efd` 部署前的版本 id | 2026-11-02 已用 `npx wrangler deployments status` 查過並記下（2026-11-01 建立），回退時用 `npx wrangler rollback <查到的 version id>` |
 
 ---
 
@@ -112,7 +112,7 @@
 **部署後追加的兩個畫面問題（2026-11-02 使用後發現，已修好並重新部署驗證）**：
 1. 六欄看板太寬、「放棄」欄被切掉拉不過去——改成六欄平均分配寬度（不再沿用 A1 三欄用的 `--sr-col-min`），900px 以下自動上下堆疊。
 2. 「轉正式」「放棄」是終點階段，卡片不該再顯示倍數/下一步/操作按鈕——改顯示正式代號／放棄原因；`worker.js` 的 `/api/funnel/overview` 卡片同步補上 `customerId`／`dropReason` 兩個欄位（沿用既有的階段歷程/篩選分頁資料，沒有新增呼叫或端點）。
-兩項都在 `wrangler dev` 用 Playwright 截圖（1440px 寬螢幕、500px 窄螢幕）驗證過，使用者確認後才 `wrangler deploy`（部署前版本 `16708e1a-4720-4d3d-88ec-cbf4ad20d485`，部署後 `91acfbd5-60e9-48e0-95c6-9bbad4fe8957`）＋ push main＋確認 GitHub Pages 更新。
+兩項都在 `wrangler dev` 用 Playwright 截圖（1440px 寬螢幕、500px 窄螢幕）驗證過，使用者確認後才 `wrangler deploy`（部署前後版本已各自記錄，見部署當下的 `wrangler deployments status`）＋ push main＋確認 GitHub Pages 更新。
 
 **延後驗證（等實際拜訪新店時再做，不是這次部署範圍）**：
 | # | 項目 | 預期結果 |

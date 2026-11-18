@@ -83,7 +83,7 @@
 - 「公休日」只有 5 家有值，且全是「正常營業」「未提供」這種空泛文字，**沒有一筆是具體規則，沒有轉**。
 - 「備註」只有 C014 來福藥局一筆真的是規則（「隔月5號請款」，真正意思是：寄賣通常約 7 個月才整理請款，來福是例外，下個月 5 號就要收）。已轉成店家規則：`店家代號=C014、規則類型=請款規則、每月日期=5-5、說明=「隔月5號請款（不走寄賣7個月）」、排程處理=提醒、來源=自己`。**2026-11-02 補：這個決定當時只記進店家規則分頁，從沒真的寫進計算邏輯**——C014 的寄賣訂單一直被 4.5 的通用7個月規則判定成「待整理」，跟這裡的決定矛盾。做 A5 本週時發現並修正：`worker.js` 新增 `hasActiveBillingRule_()`（檢查店家規則有沒有該店「請款規則」且狀態＝有效），`handlePlannerPlan`(`/api/plan`)／`handleWeekOverview`(`/api/week`)／`handleStoreDetail`(`/api/store`) 三處排除條件一致，已部署（詳見 CLAUDE.md「A5 本週」一節）。
 
-**GPS（緯度/經度）每日補空白（2026-10-25 完成）**：獨立小工具 `new-customer-gps-tool/`（Script ID `1hJZ0RzGDGHj0Noe0fntuCYAkH-FDVkckA_rONuQ7vg6XmQMX1CKQ4Lbc`，Container-bound 在這份試算表上），跟 SmartRoute 本身無關，但第 3 階段 A9/A1 的「2 公里錨點半徑篩選」（見 4.3）要靠 W/X 兩欄才能算距離，所以這裡記一筆：
+**GPS（緯度/經度）每日補空白（2026-10-25 完成）**：獨立小工具 `new-customer-gps-tool/`（Script ID 見該專案 `.clasp.json`，Container-bound 在這份試算表上），跟 SmartRoute 本身無關，但第 3 階段 A9/A1 的「2 公里錨點半徑篩選」（見 4.3）要靠 W/X 兩欄才能算距離，所以這裡記一筆：
 - 用 Apps Script 內建 `Maps.newGeocoder()` 查座標（不需要 API key），地址查詢前會整理過（去郵遞區號/台灣臺灣、臺→台、全形→半形、去「XX里」），整理後地址只用來查詢、不回寫 H 欄。
 - I 欄寫「緯度, 經度」（逗號後留空格，固定 7 位小數），同時分開寫入 W（緯度）、X（經度）兩欄。
 - 兩個可安裝觸發器：`handleEditTrigger`（編輯 B 店名或 H 地址時即時查）、`dailyFillBlanks`（每天 06:00 掃全表補空白）。**一律只補空白，已有座標的列不動**，不會覆蓋手動填過的資料。
@@ -317,7 +317,7 @@ reason 裡會顯示原始倍數跟「封頂算 X」，不會隱藏真實天數�
 | 叫貨回溫 | 近 3 個月月化金額 > 月均 × 200% |
 | 寄賣整理（2026-10-27 第二版，分兩種客人） | 有合約（見下）：寄賣中(資料夾)總額 ≥ 切口金額 × `consignmentReconcileMultiplier`（1.4）→「該對帳：寄賣中 $X / 切口 $Y」。沒合約：維持看天數，訂單「紅單實體狀態」＝寄賣中(資料夾) 且訂單日期距今 ≥ `consignmentCleanupMonths`（7個月）的那些訂單彙整成一行「寄賣N張待整理，最久M個月，共$X」。**兩種都限定在排除規則篩過的名單內**（2026-10-27 修正：第一版掃全部客戶，誤把死客戶 C015/C038 列進來）。**不進 `anchors`、不參加排名以外的位置**——直接顯示在該店自己的推薦理由裡，且沒合約那組的排序分會乘上 `consignmentMultiplier`（1.5），有合約那組目前不調整排序分，只顯示提醒文字 |
 
-**合約資料來源（2026-10-27 新增）**：獨立試算表「客戶合約」（`env.SHEET_CONTRACT` = `10zWisKoSqiMS1v6hwzy4lzIs4CkkCBhuhetN7_jlsbU`，分頁「客戶合約」，欄位：合約ID、Customer_ID、合約起始日、切口金額、合約狀態；另有分頁「客戶合約折扣級距」目前沒用到）。**這份表目前沒開「知道連結的人可檢視」**，gviz 讀回來是 Google 登入頁不是 JSON——`handlePlannerPlan` 用 `.catch()` 吞掉這個錯誤，讀不到就當作沒有任何合約資料（全部店都走沒合約的 7 個月規則），不會讓整個 `/api/plan` 掛掉。**要讓合約資料真正生效，需要把這份表的分享設定改成跟其他 SHEET_* 來源一樣「知道連結的人可檢視」**，使用者自己手動改，不是 Claude 代操作。目前表裡只有 1 筆（C064 成家健保，切口 $50,000），其他簽約店使用者會自己陸續補進去。
+**合約資料來源（2026-10-27 新增）**：獨立試算表「客戶合約」（`env.SHEET_CONTRACT`，Sheet ID 見 worker.js 的 `SHEET_CONTRACT` 常數，分頁「客戶合約」，欄位：合約ID、Customer_ID、合約起始日、切口金額、合約狀態；另有分頁「客戶合約折扣級距」目前沒用到）。**這份表目前沒開「知道連結的人可檢視」**，gviz 讀回來是 Google 登入頁不是 JSON——`handlePlannerPlan` 用 `.catch()` 吞掉這個錯誤，讀不到就當作沒有任何合約資料（全部店都走沒合約的 7 個月規則），不會讓整個 `/api/plan` 掛掉。**要讓合約資料真正生效，需要把這份表的分享設定改成跟其他 SHEET_* 來源一樣「知道連結的人可檢視」**，使用者自己手動改，不是 Claude 代操作。目前表裡只有 1 筆（C064 成家健保，切口 $50,000），其他簽約店使用者會自己陸續補進去。
 
 **實作**：`worker.js` 的 `/api/plan`（`handlePlannerPlan`）跟 `/api/customer-tiers`（`handleCustomerTiers`，客戶總覽頁用）共用同一組函數——`isEligibleForTiering_`（排除）、`buildOrderStatsById_`（叫貨統計，含退貨淨額）、`classifyTierAndAlert_`（分級＋首批沒回購判斷合一）、`detectMomentumAlert_`（下滑/回溫）、`laterDateOrNull_`（最後接觸日）。「寄賣整理」只在 `handlePlannerPlan` 裡算（`consignmentByStore`／`contractByStore`），不經過上述共用函數，也不寫入「店家規則」分頁（規則類型清單沒有新增任何項目）。**只在 `wrangler dev` 本機驗證過，沒有部署、沒有 commit。**
 
