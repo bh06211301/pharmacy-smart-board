@@ -3151,12 +3151,13 @@ async function handlePlannerPlan(request, env, ctx) {
 // 三個欄位 region/departMin/orderMode 各自獨立讀寫，不是整包覆蓋）。
 async function handleSavePlan(request, env) {
   const body = await request.json();
-  const { date, departMin, orderMode } = body;
+  const { date, departMin, orderMode, region } = body;
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!env.TODOS_KV) return json({ error: '未設定 TODOS_KV' }, 500);
   const existing = (await env.TODOS_KV.get(`plan:${date}`, 'json')) || {};
   if (typeof departMin === 'number') existing.departMin = departMin;
   if (orderMode) existing.orderMode = orderMode;
+  if (region) existing.region = region;
   delete existing.anchors; delete existing.route; // 清掉舊版殘留欄位，不要讓防呆 log 一直噴警告
   existing.savedAt = new Date().toISOString();
   await env.TODOS_KV.put(`plan:${date}`, JSON.stringify(existing));
