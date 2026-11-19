@@ -687,12 +687,24 @@ async function handleGetVisits(pharmacyId, env) {
 // ============================================================
 // 4b. 所有拜訪紀錄（依日期排序）
 // ============================================================
+// 2026-11-19「昨日頁補記不消失」追查：「店名」欄的歷史慣例是存店代號（Customer_ID，老app
+// selectPharmacy().id 就是這麼寫的），但 field-v2.html／yesterday.html 補記都改寫真正的店名
+// 文字（例如「良方藥局」而不是「C041」）。下面 pharmacyId 只是把這欄原文字直接當代號用，
+// 存的其實是店名文字時，跟今日行程/階段3比對用的真代號（r.storeId，例如「C041」）永遠對不起來
+// ——這是「補記不消失」的根因：補記成功把紀錄寫進表裡了，但 handleDayDetail 用 storeId 去比對
+// visitsByStoreId 時怎麼找都找不到剛補的那筆，missing 狀態永遠解不掉。
+// 修法：這欄不管存的是代號還是店名文字，都在這裡統一解析回真正的 Customer_ID——先查是不是已經
+// 是一個真代號，不是的話反查店名對應的代號，兩邊都查不到才維持原文字（暫存代號／手動輸入的店，
+// 本來就沒有真代號可以比對，呼叫端比對不到就是「沒有storeId」，跟現在的行為一致，不會更糟）。
 async function handleAllVisits(env) {
   const sheetId = env.SHEET_VISIT;
   const sheetName = '拜訪紀錄表';
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
 
-  const res = await fetch(url);
+  const [res, pharmaciesRes] = await Promise.all([
+    fetch(url),
+    handleGetPharmacies(null, env).then(r => r.json()).catch(() => ({ pharmacies: [] })),
+  ]);
   const text = await res.text();
   const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
   const data = JSON.parse(jsonStr);
@@ -701,6 +713,17 @@ async function handleAllVisits(env) {
   const cols = data?.table?.cols || [];
   const colMap = {};
   cols.forEach((c, i) => { colMap[c.label] = i; });
+
+  const pharmacies = pharmaciesRes.pharmacies || [];
+  const idSet = new Set(pharmacies.map(p => p.id));
+  const idByName = {};
+  pharmacies.forEach(p => { if (p.name && !(p.name in idByName)) idByName[p.name] = p.id; });
+  function resolvePharmacyId_(raw) {
+    if (!raw) return raw;
+    if (idSet.has(raw)) return raw; // 已經是真代號
+    if (idByName[raw]) return idByName[raw]; // 存的是店名文字，反查回代號
+    return raw; // 暫存代號／手動輸入的店名，兩邊都查不到，原樣保留
+  }
 
   function parseGvizDate(val) {
     if (!val) return '';
@@ -720,9 +743,11 @@ async function handleAllVisits(env) {
       const get = (label) => row.c[colMap[label]]?.v ?? '';
       const visitId = cleanField(get('Visit ID'));
       if (!visitId) return null;
+      const rawStore = cleanField(get('店名'));
       return {
         visitId,
-        pharmacyId:  cleanField(get('店名')),
+        pharmacyId:  resolvePharmacyId_(rawStore),
+        pharmacyName: rawStore, // 原文字保留一份，呼叫端要顯示文字或resolve不到時退回用
         date:        parseGvizDate(row.c[colMap['拜訪日期']]?.v || ''),
         purpose:     cleanField(get('拜訪目的')),
         summary:     cleanField(get('Summary')),
