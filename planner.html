@@ -1356,7 +1356,31 @@ let todaySavePending_ = false;
 // 分辨「使用者這段時間自己新增/移除了哪些店」，不是整包互相覆蓋對方的版本。每次成功存檔
 // （非衝突）或套用伺服器資料完成後都要更新，見 captureSyncedIds_()。
 let lastSyncedIds_ = new Set();
-function captureSyncedIds_() { lastSyncedIds_ = new Set(todayList.map(r => r.id)); }
+// 2026-11-19（修#3 欄位層級）：只記「使用者可能手動編輯」的這四個欄位——目的／備註／其他文字／
+// 手動停留分鐘。狀態（待去/已到/完成/跳過）跟預計到達刻意不記：那兩個規格要求永遠信任伺服器
+// （外勤模式在改這兩個欄位，見下面 mergeConflictAndRetry_ 的說明），不需要也不該拿本地值比對。
+function snapshotRowFields_(row) {
+  return {
+    purposes: [...row.purposes].sort().join('、'),
+    purposeNote: row.purposeNote || '',
+    otherPurposeText: row.otherPurposeText || '',
+    manualStayMin: row.manualStayMin,
+  };
+}
+// 這四個 key 要跟 snapshotRowFields_() 回傳物件的欄位名稱一致——逐欄位比較用（不是整組
+// 物件一次比對），見 mergeConflictAndRetry_ 的「哪些欄位本地改過」判斷。
+const SYNCED_FIELD_KEYS_ = ['purposes', 'purposeNote', 'otherPurposeText', 'manualStayMin'];
+// 回傳 a／b 兩份快照裡「值不一樣」的欄位名稱清單（Set）。
+function diffFields_(a, b) {
+  const changed = new Set();
+  SYNCED_FIELD_KEYS_.forEach(key => { if (a[key] !== b[key]) changed.add(key); });
+  return changed;
+}
+let lastSyncedFields_ = new Map(); // id -> snapshotRowFields_() 結果，衝突合併比對用
+function captureSyncedIds_() {
+  lastSyncedIds_ = new Set(todayList.map(r => r.id));
+  lastSyncedFields_ = new Map(todayList.map(r => [r.id, snapshotRowFields_(r)]));
+}
 // 還原讀到的資料時先關掉自動存檔，避免「剛讀進來」就立刻存一次——用計數器不是布林值，因為
 // restoreTodayPlanState_() 會呼叫 applyTodayPlanRows_()，兩層都各自管一次「關掉/恢復」，
 // 如果用布林值，內層那支自己的 finally 一結束就會把布林值改回 false，等於還沒輪到外層結束，
@@ -1846,20 +1870,51 @@ async function saveTodayPlanNow_(opts, retryCount) {
 // 算出「使用者這段時間自己新增/移除了哪些」，套用伺服器版本之後再把這些重新合併回去，
 // 然後拿新的基準（伺服器剛回的 updatedAt）重新存一次——最多重試 MAX_CONFLICT_RETRY_ 次，
 // 每次都還是衝突才真的放棄，顯示明顯的錯誤提示讓使用者自己決定。
+// 2026-11-19 補（修#3 欄位層級）：上面那段只處理「店家增減」，對「本地跟伺服器都存在的店」是
+// 整列信任伺服器版本——這會把使用者剛改的目的/備註/其他文字/手動停留分鐘蓋掉（見上次回報
+// 的已知限制）。現在對這種「兩邊都有」的店，逐欄位比對本地目前值跟 lastSyncedFields_ 快照：
+// 本地沒改（跟快照一樣）就沿用伺服器剛套用的值；本地改過（跟快照不一樣）就在套用伺服器版本
+// 之後把本地值補回去，不管伺服器那邊是否也改了同一欄位都以本地（使用者剛輸入的）為準——如果
+// 伺服器那邊也真的改了同一欄位，另外 console.warn 記錄，不要悄悄蓋過去沒有留痕跡。
+// 狀態（待去/已到/完成/跳過）跟預計到達刻意不比較、永遠用伺服器剛套用的值——那兩個是外勤模式
+// 在改的，本地的「狀態」欄位只是上次讀到的舊快照，拿本地去蓋伺服器才是真正的資料遺失。
 const MAX_CONFLICT_RETRY_ = 2;
 async function mergeConflictAndRetry_(serverRows, retryCount) {
   renderTodaySaveStatus_('conflict');
   const localIds = new Set(todayList.map(r => r.id));
   const addedLocallyIds = [...localIds].filter(id => !lastSyncedIds_.has(id));
   const removedLocallyIds = [...lastSyncedIds_].filter(id => !localIds.has(id));
+  const overlapIds_ = [...localIds].filter(id => lastSyncedIds_.has(id)); // 兩邊都存在的店
   // 連同這些列目前的完整畫面狀態（目的/備註/手動停留分鐘…）一起留著，合併回去時直接拿這份用，
   // 不是只記 id、之後用預設值重建一次（否則使用者剛改的備註/目的會在合併後消失）。
   const addedRowsSnapshot = addedLocallyIds.map(id => todayList.find(r => r.id === id)).filter(Boolean);
   const removedMarkersSnapshot = removedAnchorMarkers_.slice(); // 這次原本要一起送出的「移除」標記
 
+  // 「兩邊都存在」的店：先記住合併前的同步基準快照跟本地目前值，等 applyTodayPlanRows_ 套用完
+  // 伺服器版本之後才能比較「本地改過哪些欄位」跟「伺服器是不是也改了」。
+  const preMergeSyncedFields_ = new Map(overlapIds_.map(id => [id, lastSyncedFields_.get(id)]));
+  // id -> { changed: Set(改過的欄位名), purposes/purposeNote/otherPurposeText/manualStayMin/
+  //          purposesTouched（本地目前值，合併後只用 changed 裡列到的那幾個欄位去覆蓋）, snapshot }
+  const localFieldEdits_ = new Map();
+  overlapIds_.forEach(id => {
+    const localRow = todayList.find(r => r.id === id);
+    const synced = preMergeSyncedFields_.get(id);
+    if (!localRow || !synced) return; // 找不到快照（理論上不會，防禦性略過，交給伺服器版本）
+    const current = snapshotRowFields_(localRow);
+    const changed = diffFields_(current, synced);
+    if (changed.size) {
+      localFieldEdits_.set(id, {
+        changed,
+        purposes: localRow.purposes.slice(), purposeNote: localRow.purposeNote,
+        otherPurposeText: localRow.otherPurposeText, manualStayMin: localRow.manualStayMin,
+        purposesTouched: localRow.purposesTouched, snapshot: current,
+      });
+    }
+  });
+
   pushSuppressAutoSave_(); // 合併過程不要讓中間任何一次 render 誤觸發 debounce 存檔，最後我們自己決定何時存
   try {
-    await applyTodayPlanRows_(serverRows); // 先套用伺服器現在的版本當新基準（內部會重設 lastSyncedIds_）
+    await applyTodayPlanRows_(serverRows); // 先套用伺服器現在的版本當新基準（內部會重設 lastSyncedIds_/lastSyncedFields_）
 
     addedRowsSnapshot.forEach(row => {
       if (todayList.some(r => r.id === row.id)) return; // 伺服器版本剛好也有，不用再補
@@ -1874,6 +1929,36 @@ async function mergeConflictAndRetry_(serverRows, retryCount) {
     });
     removedMarkersSnapshot.forEach(m => {
       if (!removedAnchorMarkers_.some(x => x.storeId === m.storeId)) removedAnchorMarkers_.push(m);
+    });
+
+    // 欄位層級合併：把使用者這段時間真的改過的欄位逐一補回去——只動 edit.changed 裡列到的
+    // 那幾個欄位，其他欄位維持 applyTodayPlanRows_ 剛套用的伺服器值，不是整列四個欄位一起蓋
+    // （例如本地只改了備註，伺服器同一列改了手動停留分鐘，合併後備註用本地、停留分鐘用伺服器，
+    // 不會因為備註不同就連同沒改過的停留分鐘也一起用舊的本地值蓋掉伺服器剛更新的結果）。
+    // 狀態／預計到達完全不在 edit.changed 可能的範圍內，不會被這裡動到。
+    localFieldEdits_.forEach((edit, id) => {
+      const row = todayList.find(r => r.id === id);
+      if (!row) return; // overlap id 理論上套用後一定還在，防禦性略過
+      const serverNow = snapshotRowFields_(row);
+      const synced = preMergeSyncedFields_.get(id);
+      // 只針對「本地改過的那幾個欄位」檢查伺服器是否也改了同一欄位——本地沒動過的欄位本來
+      // 就不會進到這個迴圈的覆蓋動作，伺服器改不改都不算衝突，不用警告。
+      const changedByServerToo_ = synced ? [...edit.changed].filter(key => serverNow[key] !== synced[key]) : [];
+      if (changedByServerToo_.length) {
+        // 本地跟伺服器在同一次同步間都改了同一個欄位——以本地（使用者剛輸入的）為準，
+        // 但留下痕跡，不要悄悄蓋過去，方便事後追查是不是真的漏掉了伺服器那邊的異動。
+        console.warn(
+          `合併衝突：「${row.name || id}」的 ${changedByServerToo_.join('、')} 欄位在本地跟伺服器都改過，以本地（使用者剛輸入的）為準`,
+          { id, fields: changedByServerToo_, local: edit.snapshot, server: serverNow }
+        );
+      }
+      if (edit.changed.has('purposes')) {
+        row.purposes = edit.purposes;
+        row.purposesTouched = edit.purposesTouched; // 只在 purposes 真的被本地覆蓋時才一併帶回
+      }
+      if (edit.changed.has('purposeNote')) row.purposeNote = edit.purposeNote;
+      if (edit.changed.has('otherPurposeText')) row.otherPurposeText = edit.otherPurposeText;
+      if (edit.changed.has('manualStayMin')) row.manualStayMin = edit.manualStayMin;
     });
 
     renderAnchors(); renderRecommend(); renderSuggest();
