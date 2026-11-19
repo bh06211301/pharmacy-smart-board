@@ -635,10 +635,16 @@ document.body.addEventListener('change', (e) => {
   if (action === 'toggle-col2') toggleCol2(t.dataset.id);
   else if (action === 'toggle-tl-purpose') toggleTodayPurpose_(t.dataset.id, t.dataset.purpose);
   else if (action === 'tl-stay-min') setTodayStayMin_(t.dataset.id, t.value);
+  // 2026-11-19 修：文字輸入框用 'change' 事件（文字類 input 在失焦且值有變動時才會觸發，
+  // 等同「blur 時」）立即 flush，不用等 800ms debounce 跑完——使用者打完備註點掉欄位，
+  // 應該馬上看到存檔開始，不是還要再等快一秒。row 的值已經由上面 input 事件即時寫入，
+  // 這裡只負責提早觸發存檔，不用再重複設值。
+  else if (action === 'tl-note' || action === 'tl-other-text') flushTodayPlanSave_();
 });
-// 備註類文字欄位用 input（即時存進狀態，不觸發重算/重畫），出發時間用 input 讓拖拉時間選擇器
-// 即時反應——這兩類都不會造成輸入中被重繪打斷游標的問題（note/other-text 不重畫；depart-time
-// 是瀏覽器原生 time picker，不是使用者逐字打字）。
+// 備註類文字欄位用 input（即時存進狀態，2026-11-19 補上 800ms debounce 存檔觸發，見
+// setTodayNote_/setTodayOtherText_——scheduleTodayPlanSave_ 本身不呼叫 renderTodayList_()，
+// 不重畫），出發時間用 input 讓拖拉時間選擇器即時反應——這兩類都不會造成輸入中被重繪打斷
+// 游標的問題（note/other-text 不重畫；depart-time 是瀏覽器原生 time picker，不是使用者逐字打字）。
 document.body.addEventListener('input', (e) => {
   const t = e.target.closest('[data-action]');
   if (!t) return;
@@ -1728,11 +1734,17 @@ function renderTodaySaveStatus_(state) {
   }
 }
 
-function scheduleTodayPlanSave_() {
+// delayMs：預設 2000（既有行為不變，renderTodayList_ 結尾呼叫的就是這個預設值）。
+// 2026-11-19 修（目的備註／其他文字原本完全沒有存檔路徑）：文字欄位逐字輸入要用短一點的
+// debounce（見 setTodayNote_/setTodayOtherText_ 帶 800），不然等 2 秒使用者還在打字就先存一次
+// 沒意義；這支本身只標記 dirty＋更新存檔狀態字，不呼叫 renderTodayList_()，不會重畫輸入框、
+// 不會打斷游標——跟其他呼叫端（checkbox/停留分鐘/拖曳）共用同一顆 todaySaveTimer_，沿用既有
+// 「單一在途保護」機制，沒有另開一套。
+function scheduleTodayPlanSave_(delayMs) {
   todayPlanDirty_ = true;
   clearTimeout(todaySaveTimer_);
   renderTodaySaveStatus_('dirty');
-  todaySaveTimer_ = setTimeout(() => { flushTodayPlanSave_(); }, 2000);
+  todaySaveTimer_ = setTimeout(() => { flushTodayPlanSave_(); }, delayMs || 2000);
 }
 
 // 2026-11-08：切頁/換日期/visibilitychange(hidden)/pagehide 前都要呼叫這支，立刻送出還沒存的
@@ -2133,13 +2145,23 @@ function setTodayStayMin_(id, val) {
   row.manualStayMin = isNaN(n) || n <= 0 ? null : n;
   recomputeTodayListTimes_();
 }
+// 2026-11-19 修：這兩支原本只改記憶體裡的 row 欄位，沒有呼叫任何會存檔的函式——使用者打的備註／
+// 其他文字完全沒有路徑寫進「今日行程」表，重新整理就不見了（todayListRowToPayload_ 其實有把
+// purposeNote/otherPurposeText 包進 payload，欄位本身沒問題，純粹是沒人去觸發存檔）。
+// 用 800ms 短 debounce（不是 renderTodayList_ 那套 2000ms），逐字輸入也不會每個字都送一次；
+// scheduleTodayPlanSave_ 本身不呼叫 renderTodayList_()，不會重畫輸入框、不會打斷游標。
+// 真正立即送出的時機是下面 change 事件監聽器（blur/修改完成），不是這裡。
 function setTodayNote_(id, val) {
   const row = todayList.find(r => r.id === id);
-  if (row) row.purposeNote = val;
+  if (!row) return;
+  row.purposeNote = val;
+  scheduleTodayPlanSave_(800);
 }
 function setTodayOtherText_(id, val) {
   const row = todayList.find(r => r.id === id);
-  if (row) row.otherPurposeText = val;
+  if (!row) return;
+  row.otherPurposeText = val;
+  scheduleTodayPlanSave_(800);
 }
 function setDepartTime_(val) {
   const m = String(val || '').match(/^(\d{1,2}):(\d{2})$/);
