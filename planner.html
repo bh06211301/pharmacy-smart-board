@@ -78,8 +78,16 @@
   }
   .step-label { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); }
   .tl-save-status { margin-left: auto; font-size: var(--sr-text-2xs); color: var(--sr-ink-3); font-weight: normal; }
-  .tl-save-status.dirty { color: var(--sr-ink-2); font-weight: var(--sr-weight-bold); }
-  .tl-save-status.error { color: var(--sr-danger); font-weight: var(--sr-weight-bold); cursor: pointer; text-decoration: underline; }
+  /* 2026-11-19 補：「未存檔」明顯但不刺眼——跟請款期色帶同一個 billing-soft 琥珀色（檔案裡
+     既有的「用店名定位」提示同一套配色慣例），不是危險色，只是提醒還沒存檔。 */
+  .tl-save-status.dirty { color: var(--sr-billing-soft); font-weight: var(--sr-weight-bold); }
+  /* 存檔失敗／衝突重試失敗：要明顯到使用者一定會注意到，字放大＋底色淺紅底，不是跟平常
+     提示文字一樣大小的紅字，容易被忽略。 */
+  .tl-save-status.error {
+    color: var(--sr-danger); font-weight: var(--sr-weight-bold); cursor: pointer;
+    text-decoration: underline; font-size: var(--sr-text-sm);
+    background: var(--sr-danger-tint); padding: 2px var(--sr-space-4); border-radius: var(--sr-radius-sm);
+  }
 
   .empty-hint {
     font-size: var(--sr-text-sm); color: var(--sr-ink-3);
@@ -569,12 +577,14 @@ async function withBusy(btn, busyLabel, fn) {
     btn.textContent = originalLabel;
   }
 }
-function toast(msg) {
+// durationMs 預設 2000（原本行為不變）；衝突合併這種需要使用者看清楚發生了什麼的訊息
+// （修#3）帶久一點，不然 2 秒很容易在使用者還沒看完就消失。
+function toast(msg, durationMs) {
   const el = document.createElement('div');
   el.className = 'sr-toast-planner';
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2000);
+  setTimeout(() => el.remove(), durationMs || 2000);
 }
 
 // ══════════════════════════════
@@ -913,11 +923,16 @@ function pickRegion(key) {
   toast(`已選 ${key}：建議 ${regionSuggestedIds.size} 家，在②勾選要去的店才會真正加入今日清單`);
 }
 
-function toggleCol2(id) {
+// 2026-11-19（修#1）：勾選/取消是離散動作（使用者按一下、意圖確定），不是連續輸入，不該
+// 跟著備註/停留分鐘那種打字中的欄位一樣等 2 秒 debounce——實測抓到的風險見調查報告：等 debounce
+// 期間使用者剛好重新整理，這次勾選就有機會遺失。syncTodayList_() 跑完（今日清單真的建好那一列）
+// 才呼叫 flushTodayPlanSave_()，不是勾選完立刻存，不然存的可能是舊的 todayList。
+async function toggleCol2(id) {
   if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
   renderRecommend();
   if (viewMode === 'map') renderMap();
-  syncTodayList_();
+  await syncTodayList_();
+  await flushTodayPlanSave_();
 }
 
 function openStoreDrawer(id) {
@@ -1010,6 +1025,7 @@ async function removeAnchor(id) {
   // scheduleTodayPlanSave_() 存進「今日行程」表，不再呼叫 savePlanState()（那支現在存的是
   // departMin/orderMode，跟這裡的異動無關）。
   await syncTodayList_();
+  await flushTodayPlanSave_(); // 修#1：離散動作立即存檔，不等 2 秒 debounce
   toast('已移除');
 }
 
@@ -1021,6 +1037,7 @@ async function addAnchor(a) {
   renderSuggest();
   if (viewMode === 'map') renderMap();
   await syncTodayList_();
+  await flushTodayPlanSave_(); // 修#1：離散動作立即存檔，不等 2 秒 debounce
   toast('已加入今天');
 }
 
@@ -1321,6 +1338,16 @@ let todaySaveTimer_ = null;      // debounce 2 秒用
 // 立刻送出，不等 debounce；已經有一次存檔在跑時沿用同一個 promise，不疊加送出第二次。
 let todayPlanDirty_ = false;
 let todaySavePromise_ = null;
+// 2026-11-19（修#1）：存檔送出後（todaySavePromise_ 還沒結束）又有新的離散動作要求立即存檔時，
+// 不能真的疊加送出第二個請求（兩個請求用同一個 clientUpdatedAt 基準會互相衝突，見已知教訓），
+// 但也不能什麼都不做讓那個新動作被吞掉——記下來，等這次存檔做完再補存一次目前最新的狀態。
+// 跟 savePlanState() 的 savingPlan/savePending 是同一個模式，這裡是「今日行程」表那一份。
+let todaySavePending_ = false;
+// 2026-11-19（修#3）：上一次「確認跟伺服器同步」時 todayList 的 id 集合——衝突合併用這個當基準，
+// 分辨「使用者這段時間自己新增/移除了哪些店」，不是整包互相覆蓋對方的版本。每次成功存檔
+// （非衝突）或套用伺服器資料完成後都要更新，見 captureSyncedIds_()。
+let lastSyncedIds_ = new Set();
+function captureSyncedIds_() { lastSyncedIds_ = new Set(todayList.map(r => r.id)); }
 // 還原讀到的資料時先關掉自動存檔，避免「剛讀進來」就立刻存一次——用計數器不是布林值，因為
 // restoreTodayPlanState_() 會呼叫 applyTodayPlanRows_()，兩層都各自管一次「關掉/恢復」，
 // 如果用布林值，內層那支自己的 finally 一結束就會把布林值改回 false，等於還沒輪到外層結束，
@@ -1684,7 +1711,7 @@ function renderTodaySaveStatus_(state) {
     if (state === 'dirty') { el.textContent = '未存檔'; el.onclick = null; }
     else if (state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
     else if (state === 'saved') { el.textContent = `已存檔 ${hhmm}`; el.onclick = null; }
-    else if (state === 'conflict') { el.textContent = '外勤模式有更新，已載入最新版本'; el.onclick = null; }
+    else if (state === 'conflict') { el.textContent = '外勤模式有更新，合併中…'; el.onclick = null; }
     else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => flushTodayPlanSave_(); }
   }
   if (fieldEl) {
@@ -1693,7 +1720,7 @@ function renderTodaySaveStatus_(state) {
     if (state === 'dirty') { fieldEl.textContent = '尚未同步到外勤模式'; fieldEl.onclick = null; }
     else if (state === 'saving') { fieldEl.textContent = '同步外勤模式中…'; fieldEl.onclick = null; }
     else if (state === 'saved') { fieldEl.textContent = `已同步到外勤模式 ${hhmm}`; fieldEl.onclick = null; }
-    else if (state === 'conflict') { fieldEl.textContent = '外勤模式有更新，已載入最新版本'; fieldEl.onclick = null; }
+    else if (state === 'conflict') { fieldEl.textContent = '外勤模式有更新，合併中…'; fieldEl.onclick = null; }
     else if (state === 'error') { fieldEl.textContent = '⚠ 同步外勤模式失敗，點此重試'; fieldEl.onclick = () => flushTodayPlanSave_(); }
   }
 }
@@ -1707,54 +1734,150 @@ function scheduleTodayPlanSave_() {
 
 // 2026-11-08：切頁/換日期/visibilitychange(hidden)/pagehide 前都要呼叫這支，立刻送出還沒存的
 // 變更，不等 2 秒 debounce——實測抓到：①按✕移除某店後立刻切到本週，debounce 還沒跑完那次移除
-// 就遺失了。已經有一次存檔在跑時直接回傳同一個 promise，不疊加送出第二次（疊加送出會造成兩次
+// 就遺失了。已經有一次存檔在跑時沿用同一個 promise，不疊加送出第二次（疊加送出會造成兩次
 // 存檔用不同的 clientUpdatedAt 互相衝突，見 syncTodayList_ 併發問題的教訓）。
 // opts.useKeepalive：pagehide/visibilitychange(hidden) 這類「頁面可能馬上被砍掉」的時機用，
-// fetch 用 keepalive:true 確保請求能在頁面卸載後繼續送完，但也因此沒辦法等/讀回應——送出後
-// 就把 dirty 清掉（已經盡力送出，不能無限期把 UI 卡在「未存檔」）。
+// fetch 用 keepalive:true 確保請求能在頁面卸載後繼續送完，但也因此沒辦法等/讀回應。
+// 2026-11-19（修#1）：已經有存檔在跑時，不是單純回傳舊的 promise 就結束——如果這次呼叫是
+// 因為「存檔送出之後、回應回來之前」又發生了新的離散動作（todayPlanDirty_ 這時會是 true，
+// 因為 scheduleTodayPlanSave_ 剛被那個新動作重新標記過），要記下 todaySavePending_，等這次
+// 存檔做完（.finally）立刻用當下最新的 todayList 補存一次，不會把那個新動作吞掉不管。
 function flushTodayPlanSave_(opts) {
   clearTimeout(todaySaveTimer_);
-  if (todaySavePromise_) return todaySavePromise_;
+  if (todaySavePromise_) {
+    // 2026-11-19 修正（寫測試 harness 時抓到的真實邊界案例）：這裡原本是「todayPlanDirty_ 當下
+    // 是 true 才記 pending」，但 todayPlanDirty_ 是共用的單一旗標——在途的那次存檔完成時，
+    // 它的成功處理一律把 todayPlanDirty_ 設回 false，不管這段等待期間是不是又有新的離散動作
+    // 進來過。如果用「當下的 dirty 值」判斷要不要補存，那個新動作有可能在存檔完成的那一刻
+    // 被 dirty=false 蓋過去，變成「明明有新變動，卻沒有被送出」。所以只要「存檔進行中又被
+    // 呼叫一次 flush」這件事本身發生，就記 pending——不管那一刻 dirty 是 true 是 false，
+    // 都當作「可能有新東西，保險起見結束後再送一次」。多送一次內容相同的存檔是浪費但無害
+    // （伺服器端整天覆蓋本來就是可重複執行的），比漏送掉一次異動安全得多。
+    todaySavePending_ = true;
+    return todaySavePromise_;
+  }
   if (!todayPlanDirty_) return Promise.resolve();
-  todaySavePromise_ = saveTodayPlanNow_(opts).finally(() => { todaySavePromise_ = null; });
+  todaySavePromise_ = saveTodayPlanNow_(opts).finally(() => {
+    todaySavePromise_ = null;
+    if (todaySavePending_) {
+      todaySavePending_ = false;
+      todayPlanDirty_ = true; // 強制視為未存檔：剛才在途的存檔完成時可能已經把這個旗標清成
+                               // false，但 pending 本身就代表「有別的呼叫端在等這次結束後補存」，
+                               // 不能讓它被 dirty===false 擋下來、真正補送不出去。
+      flushTodayPlanSave_(); // 補存：讀的是此刻的 todayList/lastTodayPlanUpdatedAt_，不是舊快照
+    }
+  });
   return todaySavePromise_;
 }
 
-async function saveTodayPlanNow_(opts) {
+// retryCount：衝突合併後的重試次數（見 mergeConflictAndRetry_），一般呼叫端不用帶。
+async function saveTodayPlanNow_(opts, retryCount) {
   clearTimeout(todaySaveTimer_);
   renderTodaySaveStatus_('saving');
   const rows = todayList.map((row, i) => todayListRowToPayload_(row, i))
     .concat(removedAnchorMarkers_.map(todayListRemovedRowPayload_));
   const payload = { date: getPlanDate(), rows, clientUpdatedAt: lastTodayPlanUpdatedAt_ };
   if (opts && opts.useKeepalive) {
+    // 2026-11-19（修#2）：原本 fetch(...) 完全沒人接，非同步失敗（請求送出後網路中斷/被瀏覽器
+    // 丟棄）會變成沒人處理的 rejected promise，使用者毫無所覺，而且當時 todayPlanDirty_ 已經
+    // 被清成 false，之後也不會再補存。現在分兩層判斷：
+    //   - fetch() 這個呼叫本身同步丟錯（例如 URL 建構失敗）→ 請求根本沒送出，dirty 保持 true。
+    //   - fetch() 呼叫本身沒丟錯（瀏覽器已經收下這個 keepalive 請求，放進背景佇列）→ 視為
+    //     「確定送出」，dirty 才清成 false——跟原本「已經盡力送出，不能無限期卡住 UI」的精神一致，
+    //     只是把「送出」跟「呼叫 fetch() 沒有同步出錯」這兩件事分清楚，不是無條件清。
+    //   - 之後如果這個 fetch 的 promise 真的非同步 reject（送出後才失敗），接 .catch() 印出來；
+    //     如果頁面這時候還活著（例如只是切到背景分頁，不是真的要關掉/F5），順便把 dirty 改回
+    //     true、畫面改回「未存檔」，讓使用者切回分頁時至少看得到，下次有動作就會自然重試。
+    let dispatched = false;
     try {
       fetch(WORKER + '/api/today-plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload), keepalive: true,
+      }).catch(e => {
+        console.warn('keepalive 存檔的請求送出後失敗（頁面可能已經卸載，這裡的補救未必還能被看到）', e);
+        todayPlanDirty_ = true;
+        renderTodaySaveStatus_('error');
       });
-    } catch (e) { console.warn('keepalive 存檔送出失敗', e); }
-    todayPlanDirty_ = false; // 頁面要離開了，沒辦法等回應確認成功，盡力送出後就不再視為未存檔
+      dispatched = true;
+    } catch (e) {
+      console.warn('keepalive 存檔送出失敗（fetch() 呼叫本身就丟錯，請求從未送出）', e);
+    }
+    if (dispatched) todayPlanDirty_ = false; // 只有確定送出去了才清，呼叫本身失敗則保持 dirty
     return;
   }
   try {
     const resp = await post('/api/today-plan', payload);
     if (resp.conflict) {
-      await applyTodayPlanRows_(resp.rows || []);
-      todayPlanDirty_ = false;
-      renderTodaySaveStatus_('conflict');
-      toast('外勤模式有更新，已載入最新版本');
+      await mergeConflictAndRetry_(resp.rows || [], retryCount || 0);
       return;
     }
     // GAS/Worker 回 200 但內容是 {success:false,...} 或 {error:...}（例如 action 不認得、GAS 端拒絕寫入）
     // 時，post() 本身不會丟例外（HTTP 狀態是 200），這裡要自己判斷，不然會誤顯示「已存檔」。
     if (!resp.success) throw new Error(resp.error || '存檔失敗（伺服器回應沒有 success）');
     lastTodayPlanUpdatedAt_ = resp.updatedAt || lastTodayPlanUpdatedAt_;
+    captureSyncedIds_(); // 修#3：這次成功存檔的內容就是新的同步基準
     todayPlanDirty_ = false;
     renderTodaySaveStatus_('saved');
   } catch (e) {
     console.error('今日行程存檔失敗', e);
     renderTodaySaveStatus_('error'); // todayPlanDirty_ 保持 true，之後還會再試一次（點擊重試/下次切頁flush）
   }
+}
+
+// 2026-11-19（修#3）：conflict 代表「試算表上這天的資料比我這次存檔的基準更新」（通常是
+// field-v2 改過某一列的狀態，見調查報告 §3(b)）——原本直接拿伺服器的 resp.rows 整包蓋過
+// 本地畫面，使用者剛做的那個動作（這次存檔想寫入、但被拒絕的內容）就這樣悄悄消失。
+// 改成：先用 lastSyncedIds_（上次確認跟伺服器同步時的基準）跟目前 todayList 的 id 比對，
+// 算出「使用者這段時間自己新增/移除了哪些」，套用伺服器版本之後再把這些重新合併回去，
+// 然後拿新的基準（伺服器剛回的 updatedAt）重新存一次——最多重試 MAX_CONFLICT_RETRY_ 次，
+// 每次都還是衝突才真的放棄，顯示明顯的錯誤提示讓使用者自己決定。
+const MAX_CONFLICT_RETRY_ = 2;
+async function mergeConflictAndRetry_(serverRows, retryCount) {
+  renderTodaySaveStatus_('conflict');
+  const localIds = new Set(todayList.map(r => r.id));
+  const addedLocallyIds = [...localIds].filter(id => !lastSyncedIds_.has(id));
+  const removedLocallyIds = [...lastSyncedIds_].filter(id => !localIds.has(id));
+  // 連同這些列目前的完整畫面狀態（目的/備註/手動停留分鐘…）一起留著，合併回去時直接拿這份用，
+  // 不是只記 id、之後用預設值重建一次（否則使用者剛改的備註/目的會在合併後消失）。
+  const addedRowsSnapshot = addedLocallyIds.map(id => todayList.find(r => r.id === id)).filter(Boolean);
+  const removedMarkersSnapshot = removedAnchorMarkers_.slice(); // 這次原本要一起送出的「移除」標記
+
+  pushSuppressAutoSave_(); // 合併過程不要讓中間任何一次 render 誤觸發 debounce 存檔，最後我們自己決定何時存
+  try {
+    await applyTodayPlanRows_(serverRows); // 先套用伺服器現在的版本當新基準（內部會重設 lastSyncedIds_）
+
+    addedRowsSnapshot.forEach(row => {
+      if (todayList.some(r => r.id === row.id)) return; // 伺服器版本剛好也有，不用再補
+      todayList.push(row);
+      if (!anchors.some(a => a.id === row.id)) selectedCol2Ids.add(row.id); // 不是錨點來源就補回②欄確認狀態
+    });
+    removedLocallyIds.forEach(id => {
+      const ai = anchors.findIndex(a => a.id === id);
+      if (ai >= 0) anchors.splice(ai, 1);
+      selectedCol2Ids.delete(id);
+      todayList = todayList.filter(r => r.id !== id);
+    });
+    removedMarkersSnapshot.forEach(m => {
+      if (!removedAnchorMarkers_.some(x => x.storeId === m.storeId)) removedAnchorMarkers_.push(m);
+    });
+
+    renderAnchors(); renderRecommend(); renderSuggest();
+    if (viewMode === 'map') renderMap();
+    recomputeTodayListTimes_();
+  } finally {
+    popSuppressAutoSave_();
+  }
+
+  if (retryCount >= MAX_CONFLICT_RETRY_) {
+    todayPlanDirty_ = true;
+    renderTodaySaveStatus_('error');
+    toast(`外勤模式有更新，已合併你剛才的變更，但重試 ${MAX_CONFLICT_RETRY_} 次後仍衝突，請點擊存檔狀態重試`, 6000);
+    return;
+  }
+
+  toast('外勤模式有更新，已合併你剛才的變更', 4000);
+  todayPlanDirty_ = true;
+  await saveTodayPlanNow_(undefined, retryCount + 1); // 用合併後、剛從伺服器拿到的新基準重新存檔
 }
 
 // 點導覽列連結／換日期前呼叫：有未存變更就先 flush，最多等 8 秒；逾時或失敗都照常導覽
@@ -1785,6 +1908,17 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushTodayPlanSave_({ useKeepalive: true });
 });
 window.addEventListener('pagehide', () => { flushTodayPlanSave_({ useKeepalive: true }); });
+
+// 2026-11-19（修#2）：F5／關閉分頁本來完全沒有攔截，只能靠 pagehide 之後的 keepalive 盡力送出
+// （調查報告 §3(a) 確認過這段跟重新整理的 GET 之間有競態）。加 beforeunload：還有未存的變更
+// 或正在存檔中，就跳出瀏覽器原生的「確定要離開？」提示，給使用者機會按取消、等存檔做完再走——
+// 不是取代 keepalive 這個最後手段，是在那之前多一道「使用者自己決定要不要等」的機會。
+// 瀏覽器基於安全理由不給自訂提示文字，e.returnValue 只是觸發機制，不是真的會顯示這段文字。
+window.addEventListener('beforeunload', (e) => {
+  if (!todayPlanDirty_ && !todaySavePromise_) return;
+  e.preventDefault();
+  e.returnValue = '今日清單還有變更尚未存檔完成，確定要離開嗎？';
+});
 
 // 系統自動帶入的項目（送貨/待追蹤/本週排/寄賣對帳）被①的✕拿掉時記在這裡（見 removeTodayListRow_），
 // 下次存檔要把它們也送出去（狀態=移除），不然 GAS 整天覆蓋會把之前存的「移除」標記一起洗掉，
@@ -1850,6 +1984,10 @@ async function applyTodayPlanRows_(allRows) {
   } finally {
     popSuppressAutoSave_();
   }
+  // 修#3：這裡剛套用完「伺服器現在的版本」，此刻 todayList 的 id 集合就是新的同步基準——
+  // 不管是開頁還原還是衝突合併呼叫這支，都要在這裡重新記一次，下次衝突才能正確分辨
+  // 「使用者這段時間又自己新增/移除了哪些」。
+  captureSyncedIds_();
 }
 
 // 開頁/切日期：還原②勾選（含選區自動勾）、拜訪目的、目的備註、手動停留分鐘、拖曳後的順序、
@@ -1955,7 +2093,8 @@ async function removeTodayListRow_(id) {
   renderAnchors(); renderRecommend(); renderSuggest();
   if (viewMode === 'map') renderMap();
   invalidateRouteIfStopsChanged_();
-  recomputeTodayListTimes_();
+  recomputeTodayListTimes_(); // 同步執行，結尾已經呼叫過 renderTodayList_()→scheduleTodayPlanSave_()
+  await flushTodayPlanSave_(); // 修#1：✕ 是離散動作，立即存檔，不等 2 秒 debounce
   toast('已從今日清單移除');
 }
 
