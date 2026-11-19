@@ -1126,10 +1126,13 @@ async function savePlanState() {
   if (savingPlan) { savePending = true; return; }
   savingPlan = true;
   try {
-    // region：worker.js 的 GET /api/plan 已經會讀 saved.region 回傳成 savedRegion（見 handlePlannerPlan），
-    // 但目前 POST /api/plan 的 handleSavePlan 還沒有寫入這個欄位（只讀 departMin/orderMode）——這裡先把
-    // 欄位送出去，是前瞻性相容；要讓「選區」真的能跨重新整理/切日期保留，還需要 worker.js 补一行
-    // `if (region) existing.region = region;`，屬於 worker.js 異動，照約定先回報不動手。
+    // region：worker.js 的 GET /api/plan 讀 saved.region 回傳成 savedRegion（handlePlannerPlan），
+    // POST 這邊 handleSavePlan 也已經補上 `if (region) existing.region = region;`。
+    // 2026-11-19 留意：那一行是 if(region) 真值判斷，取消選區時這裡送出的 null 不會真的清掉
+    // KV 裡舊的值（worker.js 還沒支援「明確清除」，要分清楚「沒帶這個欄位」跟「要清空」才能做，
+    // 屬於 worker.js 異動，不在這次小修範圍，先不動手）。這裡仍然每次都把目前的
+    // selectedRegionKey（可能是 null）照實送出，保持前端行為單純、正確，等 worker.js 那邊
+    // 支援清除時，前端這裡完全不用再改。
     await post('/api/plan', { date: getPlanDate(), departMin, orderMode, region: selectedRegionKey });
   } catch (e) {
     console.error('存檔失敗', e);
@@ -2001,10 +2004,26 @@ async function restoreTodayPlanState_(plan) {
     lastRouteLegMinutes = null; lastRouteResolvedIds = null; lastRouteStopIds = null; lastRouteTotalKm = null;
     window._confirmedRoute = null;
     departMin = typeof plan.savedDepartMin === 'number' ? plan.savedDepartMin : START_MIN;
-    // savedRegion：worker.js 的 GET /api/plan 已經會回這個欄位，但 POST 還沒寫入（見 savePlanState()
-    // 註解）——補上那一行之前，這裡永遠讀到 null，等同重新整理後選區篩選重置成「全部」，
-    // 不影響已經確認的今日清單（selectedCol2Ids 存在「今日行程」表，不受這裡影響）。
-    selectedRegionKey = plan.savedRegion || null;
+    // 2026-11-19 修正：savedRegion 現在 worker.js 兩邊都會讀寫了（POST handleSavePlan 已補上
+    // `if (region) existing.region = region;`），但 KV 裡的值完全是「上次送進去是什麼就是什麼」，
+    // 不會跟著 planner-config.js 的 regionGroups 定義同步檢查——手動改過 KV、測試資料殘留、
+    // 或之後 regionGroups 改了 key 名稱，都可能讓 savedRegion 存著一個現在根本不存在的分區
+    // key（實際發生過："__TEST_REGION_VERIFY__" 被誤寫進今天的 plan:{date}）。這種值如果直接
+    // 套用，filterMode 會變成 'region' 但 renderRecommend() 用
+    // `list.filter(item => item.region === selectedRegionKey)` 篩，篩到的候選店永遠是 0 家
+    // （沒有任何店的 region 會等於一個不存在的 key），畫面看起來像「全部候選店消失」，使用者
+    // 完全看不出原因。套用前先比對 planData.todayRegions（這次回應實際算出來的分區清單，
+    // key 來源跟 planner-config.js 的 regionGroups 一致）存不存在這個 key，不存在就當作沒選過，
+    // 不要盲目相信 KV 裡存的值。
+    const validRegionKeys_ = new Set((plan.todayRegions || []).map(g => g.key));
+    if (plan.savedRegion && validRegionKeys_.has(plan.savedRegion)) {
+      selectedRegionKey = plan.savedRegion;
+    } else {
+      if (plan.savedRegion) {
+        console.warn('savedRegion 不是目前有效的分區 key，已忽略並重置成「全部」', plan.savedRegion, [...validRegionKeys_]);
+      }
+      selectedRegionKey = null;
+    }
     filterMode = selectedRegionKey ? 'region' : 'all';
 
     // 2026-11-27 使用者實測抓到：worker.js /api/plan 回的 anchors 已經正確排除「移除」標記的店，
