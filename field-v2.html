@@ -592,6 +592,14 @@ function fv2StoreMeta_(storeId) {
   const rec = FV2.planRecommended.find(r => r.id === storeId);
   return { ph, rec };
 }
+// 2026-11-19 外勤定位校正：導航優先用「記錄這家位置」存的實測座標（confirmedLat/Lng），沒有才
+// 退回地址文字——地址文字常常被導航導到同路上別家公司（例：熊羽 C127）。新店候選（不在客戶表）
+// 本來就沒有 Customer_ID，fv2StoreMeta_ 查不到 ph，自動退回地址文字，不用另外判斷。
+function fv2NavTarget_(r) {
+  const { ph } = fv2StoreMeta_(r.storeId || r.address);
+  if (ph && ph.confirmedLat != null && ph.confirmedLng != null) return `${ph.confirmedLat},${ph.confirmedLng}`;
+  return r.address || r.name;
+}
 function fv2Tags_(storeId) {
   const { ph, rec } = fv2StoreMeta_(storeId);
   const tags = [];
@@ -673,7 +681,7 @@ function fv2RenderHome() {
       <div class="tag-row">${tags}</div>
       <div class="store-meta" style="margin-top:var(--sr-space-3)">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
       <div class="btn-row" style="margin-top:var(--sr-space-5)">
-        <button class="btn" data-nav="${escapeHtml_(r.address || r.name)}">開始導航</button>
+        <button class="btn" data-nav="${escapeHtml_(fv2NavTarget_(r))}">開始導航</button>
         <button class="btn primary" data-arrive-id="${escapeHtml_(r.storeId || r.address)}">我到了</button>
       </div>`;
   }
@@ -700,6 +708,7 @@ function fv2RenderHome() {
 function fv2StopDetailHtml_(r) {
   const followups = FV2.allFollowups.filter(f => f.storeId === r.storeId);
   const key = r.storeId || r.address;
+  const { ph } = fv2StoreMeta_(key);
   return `
     <div class="store-meta">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
     <div class="store-meta" style="margin-top:4px">${escapeHtml_(r.address || '沒有地址')}</div>
@@ -707,10 +716,13 @@ function fv2StopDetailHtml_(r) {
       ? followups.map(f => `<div class="store-meta" style="margin-top:4px">⚠ 待追蹤：${escapeHtml_(f.item)}</div>`).join('')
       : '<div class="store-meta" style="margin-top:4px">沒有未結案的待追蹤</div>'}
     <div class="btn-row" style="margin-top:var(--sr-space-4)">
-      <button class="btn" data-nav="${escapeHtml_(r.address || r.name)}">開始導航</button>
+      <button class="btn" data-nav="${escapeHtml_(fv2NavTarget_(r))}">開始導航</button>
       <button class="btn" data-arrive-id="${escapeHtml_(key)}">我到了</button>
       <button class="btn primary" data-record-id="${escapeHtml_(key)}">記錄這家</button>
-    </div>`;
+    </div>
+    ${ph ? `<div class="btn-row" style="margin-top:var(--sr-space-2)">
+      <button class="btn" data-record-location="${escapeHtml_(key)}">📍 記錄這家位置</button>
+    </div>` : ''}`;
 }
 document.addEventListener('click', (e) => {
   const row = e.target.closest('[data-stop-toggle]');
@@ -740,6 +752,63 @@ document.addEventListener('click', (e) => {
   e.stopPropagation();
   fv2DoRecord_(btn.dataset.recordId);
 });
+// 2026-11-19 外勤定位校正：「📍 記錄這家位置」——到店頁跟全部站點展開區共用這個委派。按下就
+// 用 navigator.geolocation 量一次目前位置，直接覆蓋舊座標（使用者明確要求不用再問），之後導航
+// （fv2NavTarget_）優先用這個座標。誤差 > 50 公尺或定位失敗都不寫入、按鈕恢復可重按。
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-record-location]');
+  if (!btn) return;
+  e.stopPropagation();
+  fv2RecordStoreLocation_(btn.dataset.recordLocation, btn);
+});
+function fv2RecordStoreLocation_(key, btn) {
+  if (btn.disabled) return;
+  const originalText = btn.textContent;
+  const restore = () => { btn.disabled = false; btn.textContent = originalText; };
+  if (!navigator.geolocation) {
+    fv2Toast_('這個裝置/瀏覽器不支援定位', true);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '定位中…';
+  const requestId = genRequestId_();
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      if (accuracy > 50) {
+        fv2Toast_(`目前定位不準（誤差 ${Math.round(accuracy)} 公尺），請到店門口再試一次`, true);
+        restore();
+        return;
+      }
+      const { ph } = fv2StoreMeta_(key);
+      const storeName = ph ? ph.name : key;
+      const payload = { storeId: key, lat, lng, accuracy, requestId };
+      if (IS_TEST_MODE) {
+        fv2TestBlockedLog_('定位校正', payload);
+        fv2Toast_('測試模式未送出');
+        restore();
+        return;
+      }
+      try {
+        const resp = await fetch(`${WORKER}/api/store-location`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        }).then(r => r.json());
+        if (!resp.success) throw new Error(resp.error || '未知錯誤');
+        if (ph) { ph.confirmedLat = lat; ph.confirmedLng = lng; } // 本地快取同步更新，導航按鈕馬上吃到新座標
+        fv2Toast_(`已記錄${storeName}的位置（誤差約 ${Math.round(accuracy)} 公尺）`);
+        restore();
+      } catch (e) {
+        fv2Toast_('記錄位置失敗：' + e.message, true);
+        restore();
+      }
+    },
+    () => {
+      fv2Toast_('無法取得定位，請確認已允許網站使用位置', true);
+      restore();
+    },
+    { enableHighAccuracy: true, timeout: 15000 }
+  );
+}
 
 function escapeHtml_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -831,6 +900,7 @@ async function fv2RenderArrive(storeId) {
         <div class="tag-row">${tagRow}</div>
         <div class="store-meta" style="margin-top:var(--sr-space-3)">${t ? fv2VisitStatusText_(t) : (detail.excludeReason || '不列入分級')}</div>
         ${detail.phone ? `<button class="btn" style="margin-top:var(--sr-space-4)" onclick="location.href='tel:${escapeHtml_(detail.phone)}'">📞 打電話</button>` : ''}
+        ${fv2StoreMeta_(storeId).ph ? `<button class="btn" style="margin-top:var(--sr-space-2)" data-record-location="${escapeHtml_(storeId)}">📍 記錄這家位置</button>` : ''}
       </div>
       ${fv2FixedInfoCardHtml_(detail)}
       <div class="card">

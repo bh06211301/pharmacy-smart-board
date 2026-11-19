@@ -244,6 +244,11 @@ export default {
         return await handleUpdateTodayPlanRow(request, env);
       }
 
+      // ★ 外勤定位校正（2026-11-19）：站在店門口記一次實際座標，取代地址文字導航
+      if (path === '/api/store-location' && request.method === 'POST') {
+        return await handleUpdateStoreLocation(request, env);
+      }
+
       // ★ 2026-10-27 新增：客戶叫貨健康度分級（只讀分析，跟 /api/plan 完全獨立、不影響 SmartRoute 評分）
       // 只在 wrangler dev 本機測，還沒決定要不要留、要不要 commit
       if (path === '/api/customer-tiers' && request.method === 'GET') {
@@ -585,7 +590,7 @@ async function handleGetPharmacies(request, env, ctx, cacheMeta) {
 
   const pharmacies = rows.map(row => {
     const get = (label) => row.c[colMap[label]]?.v ?? '';
-    return {
+    const p = {
       id:          get('Customer_ID'),
       name:        get('店名'),
       address:     get('地址'),
@@ -604,6 +609,14 @@ async function handleGetPharmacies(request, env, ctx, cacheMeta) {
       owner:       get('負責人') || '', // '老爸' 或 '我'（含空白，視為我）
       status:      get('狀態') || '',   // C 欄，2026-10-27 補：'其他通路' 用來排除叫貨統計抓不到的客戶（見 SPEC 4.5）
     };
+    // 2026-11-19 外勤定位校正：跟原始「緯度/經度」(建檔時填的概算值)分開，field-v2 導航優先用這兩個，
+    // 沒有才退回地址文字。欄位可能還不存在（GAS 端沒人填過這家店），只有真的校正過才帶這兩個 key，
+    // 前端用 `in`/truthy 判斷就知道有沒有校正過，不用額外判斷空字串或 0。
+    const confirmedLat = parseFloat(get('確認緯度'));
+    const confirmedLng = parseFloat(get('確認經度'));
+    if (!isNaN(confirmedLat)) p.confirmedLat = confirmedLat;
+    if (!isNaN(confirmedLng)) p.confirmedLng = confirmedLng;
+    return p;
   }).filter(p => p.id && p.name);
 
   return json({ ok: true, count: pharmacies.length, pharmacies });
@@ -3255,6 +3268,56 @@ async function handleUpdateTodayPlanRow(request, env) {
   if (data.success && data.row) data.row = todayPlanObjFromGasRow_(data.row);
   // conflict 時沒有真的寫入，不用清快取（也避免跟成功寫入的情況混在一起判斷）
   if (data.success && !data.conflict) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  return json(data);
+}
+
+// 外勤定位校正（2026-11-19，field-v2）：導航目前用地址文字，沒有 Google 商家資料的店（例：熊羽
+// C127，地址「中央路１段１３６號」）常被導到同路上別家公司。讓外勤站在店門口按一次「記錄這家
+// 位置」，之後導航優先用這個座標。body: {storeId, lat, lng, accuracy, requestId}——只接受客戶表
+// 裡有的 storeId（跟 /pharmacies 同一份資料，新店候選暫存代號不在這裡），lat/lng 限制在台灣服務
+// 範圍內（跟 handleSaveGeo 的 GEO_CACHE_BOUNDS_ 同精神，但這裡故意用更寬的全台範圍，不是服務區
+// 範圍——使用者可能在外縣市先記一筆，範圍檢查只是防呆手機定位抓到離岸國外座標那種離譜錯誤）。
+// 寫入目標、token、轉發方式沿用 handleUpdateTodayPlanRow 同一套（action 字串帶 token，GAS 端
+// checkPlannerToken_ 驗證），不另開一套密鑰機制。
+const STORE_LOCATION_TAIWAN_BOUNDS_ = { minLat: 21, maxLat: 26, minLng: 119, maxLng: 123 };
+async function handleUpdateStoreLocation(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: '請求格式錯誤' }, 400);
+  }
+  const { storeId, lat, lng, accuracy, requestId } = body;
+  if (!storeId) return json({ error: '缺少 storeId' }, 400);
+  if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+    return json({ error: 'lat/lng 必須是數字' }, 400);
+  }
+  const b = STORE_LOCATION_TAIWAN_BOUNDS_;
+  if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) {
+    return json({ error: '座標超出台灣範圍，拒絕寫入（可能是定位錯誤）' }, 400);
+  }
+  if (accuracy != null && (typeof accuracy !== 'number' || isNaN(accuracy))) {
+    return json({ error: 'accuracy 必須是數字' }, 400);
+  }
+
+  // storeId 必須是客戶表裡確實存在的 Customer_ID，不接受新店候選暫存代號——跟「全部站點」展開區
+  // 「只有客戶表裡有的店顯示這顆按鈕」的前端限制對應，Worker 端再擋一次（defense-in-depth）。
+  const pharmaciesRes = await handleGetPharmacies(null, env);
+  const pharmaciesData = await pharmaciesRes.json();
+  const exists = (pharmaciesData.pharmacies || []).some(p => p.id === storeId);
+  if (!exists) return json({ error: '找不到這家店的 Customer_ID：' + storeId }, 400);
+
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'updateStoreLocation', storeId, lat, lng, accuracy: accuracy ?? null,
+      requestId, token: env.PLANNER_API_TOKEN,
+    }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_PHARMACY, '新客戶資料表_AppSheet');
   return json(data);
 }
 
