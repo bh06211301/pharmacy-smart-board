@@ -303,7 +303,10 @@ document.body.addEventListener('click', async (e) => {
     if (!content) { alert('拜訪內容不能空白'); return; }
     submitBtn.disabled = true; submitBtn.textContent = '送出中…';
     try {
-      await post('/add-visit', { visitId: 'backfill-' + Date.now(), pharmacyName: storeName || storeId, date, purpose, content });
+      // 2026-11-19「補記不消失」寫入端修正：原本 storeName || storeId 優先寫店名文字，跟老app／
+      // handleAllVisits 比對用的「店名欄＝店代號」慣例不一致，造成補記永遠比對不到、missing狀態
+      // 解不掉。改成 storeId 優先（這裡的店一定是從今日行程「標完成」撈出來的，storeId本來就有）。
+      await post('/add-visit', { visitId: 'backfill-' + Date.now(), pharmacyName: storeId || storeName, date, purpose, content });
       await loadDayPart();
     } catch (err) {
       alert('補記失敗：' + err.message);
