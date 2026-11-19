@@ -3182,7 +3182,13 @@ async function handleSavePlan(request, env) {
   const existing = (await env.TODOS_KV.get(`plan:${date}`, 'json')) || {};
   if (typeof departMin === 'number') existing.departMin = departMin;
   if (orderMode) existing.orderMode = orderMode;
-  if (region) existing.region = region;
+  // 2026-11-19 修正：原本 if (region) 在前端取消選區送 region:null 時會被當成「沒帶這個欄位」
+  // 整段跳過，已存的選區永遠清不掉。改成只要 body 有帶 region 這個 key（undefined 以外）就處理：
+  // null 或空字串代表使用者主動清空，刪掉 existing.region；其他值才寫入。
+  if (region !== undefined) {
+    if (region === null || region === '') delete existing.region;
+    else existing.region = region;
+  }
   delete existing.anchors; delete existing.route; // 清掉舊版殘留欄位，不要讓防呆 log 一直噴警告
   existing.savedAt = new Date().toISOString();
   await env.TODOS_KV.put(`plan:${date}`, JSON.stringify(existing));
