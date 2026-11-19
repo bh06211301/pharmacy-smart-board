@@ -88,7 +88,7 @@
   }
 
   /* ---------- 今天可以跑的區（2026-11-02，放在①上方） ---------- */
-  .region-overview { margin-bottom: var(--sr-space-7); }
+  .region-overview { margin-top: var(--sr-space-7); padding-top: var(--sr-space-6); border-top: 1px solid var(--sr-line-soft); }
   .region-overview-title { font-size: var(--sr-text-lg); font-weight: var(--sr-weight-bold); margin-bottom: var(--sr-space-4); }
   .region-card {
     border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); background: var(--sr-bg);
@@ -99,6 +99,7 @@
   .region-card-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
   .region-card-stats { font-size: var(--sr-text-xs); color: var(--sr-ink-2); margin-top: 2px; }
   .region-card-minutes { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .region-card-reason { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; font-style: italic; }
   .region-card-btn {
     height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md);
     font-size: var(--sr-text-2xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font);
@@ -130,6 +131,8 @@
   }
   .rec-row.selected { border-color: var(--sr-ink); background: var(--sr-bg-selected); }
   .rec-row.blocked { border: 1px dashed var(--sr-danger); opacity: 0.55; }
+  .rec-row.suggested { border: 1px dashed var(--sr-primary); }
+  .badge-suggest { background: var(--sr-primary-tint); color: var(--sr-primary); font-size: var(--sr-text-2xs); padding: 1px 7px; border-radius: var(--sr-radius-sm); font-weight: var(--sr-weight-bold); }
   .rec-check { width: 18px; height: 18px; margin-top: 2px; }
   .rec-name-line { display: flex; align-items: baseline; gap: var(--sr-space-3); flex-wrap: wrap; }
   .rec-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); color: var(--sr-ink); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-family: var(--sr-font); }
@@ -247,7 +250,7 @@
     border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); font-family: var(--sr-font);
     font-size: var(--sr-text-sm); padding: 1px 4px;
   }
-  .tl-depart-input { width: 88px; }
+  .tl-depart-input { width: 132px; }
   .tl-stay-input { width: 44px; text-align: right; }
   .tl-order-mode { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); }
   .tl-actions { display: flex; gap: var(--sr-space-3); margin-top: var(--sr-space-4); }
@@ -363,10 +366,6 @@
 <div class="columns" id="list-view">
   <div class="col col-1">
     <div class="col-body">
-      <div class="region-overview">
-        <div class="region-overview-title">今天可以跑的區</div>
-        <div id="region-overview-root"><div class="empty-hint">載入中…</div></div>
-      </div>
       <div class="step-title"><span class="step-num">①</span><span class="step-label">今天一定要去</span></div>
       <div id="mini-cal-root" class="mini-cal"></div>
       <div id="anchors-root"><div class="empty-hint">還沒有錨點，先輸入今天一定要去的店</div></div>
@@ -374,6 +373,11 @@
       <div class="manual-add-block">
         <input type="text" id="manual-add-input" class="manual-add-input" placeholder="搜尋店名加入今天（含老爸／新竹／不拜訪的店）" autocomplete="off">
         <div id="manual-add-results" class="manual-add-results"></div>
+      </div>
+      <!-- 2026-11-19 使用者要求：移到①下面，原本在①上面 -->
+      <div class="region-overview">
+        <div class="region-overview-title">今天可以跑的區</div>
+        <div id="region-overview-root"><div class="empty-hint">載入中…</div></div>
       </div>
     </div>
   </div>
@@ -394,9 +398,12 @@
       <div id="today-list-summary" class="tl-summary"><div class="empty-hint">還沒有任何店家</div></div>
       <div class="tl-actions">
         <button class="btn-calc-route" id="btn-calc-route" onclick="calcRouteClicked_()">計算路線</button>
-        <button class="btn-calc-route" id="btn-send-field" disabled title="階段三再接上外勤模式">送到外勤模式</button>
         <button class="btn-calc-route" id="btn-open-gmaps" onclick="openGoogleMaps()">開 Google Maps</button>
       </div>
+      <!-- 2026-11-19：拿掉「送到外勤模式」這顆永遠灰色的按鈕——field-v2 本來就直接讀寫這天的
+           「今日行程」表（跟這裡 scheduleTodayPlanSave_ 存檔同一張表），不需要額外的「送出」動作，
+           這顆按鈕從階段二之後就沒接過線。改顯示實際的同步狀態，文案由 renderTodaySaveStatus_ 統一更新。 -->
+      <div id="field-sync-status" class="tl-save-status" style="margin-top:4px"></div>
       <div id="today-list-warnings"></div>
       <div id="today-list-root" style="margin-top:10px"><div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div></div>
       <button class="btn-confirm-route" id="btn-confirm-route" style="display:none" onclick="confirmTodayPlan()">確定今天的行程</button>
@@ -659,11 +666,32 @@ document.body.addEventListener('drop', (e) => {
 let planData = null;       // /api/plan 的完整回應
 let anchors = [];          // 第①欄目前的錨點清單（系統自動＋手動加入的，含寄賣/對帳「加入今天」移過來的）
 let selectedCol2Ids = new Set(); // 第②欄目前勾選、要排進路線的店家 id
-// 2026-11-05「選這區」重做：一次只能選一區，選取時把這區的新店/前5家客戶自動勾進②（不再加進①）。
-// regionAutoCheckedIds 記錄「因為選這區而自動勾」的 id，取消選區只取消這些——使用者自己手動碰過
-// 的勾選（不管是勾或取消）一律從這個 Set 移除（見 toggleCol2），之後取消選區就不會動到它。
+// 2026-11-19 重做（修#3/#4 的共同根因）：「選這區」以前會把候選店直接寫進 selectedCol2Ids
+// （使用者確認清單），只用 regionAutoCheckedIds 這個內部旗標區分「系統勾的」跟「使用者勾的」，
+// 但畫面上兩者的 checkbox 長得一樣，使用者分不出來；切到別區時系統又會把還留著這個旗標的 id
+// 從 selectedCol2Ids 裡砍掉——使用者如果沒自己動過那顆（checkbox 已經是勾的，不用再點），切區
+// 就會讓它連同「今日清單」一起消失，使用者完全看不出原因（這正是「勾百合→切分區→百合消失」）。
+// 現在「選這區」只計算 regionSuggestedIds（純顯示用的建議清單，不寫入 selectedCol2Ids/anchors），
+// 畫面上用「建議」徽章＋未勾選的 checkbox 呈現；使用者要親自點一下 checkbox（toggleCol2）才會
+// 真正進入「使用者確認清單」。切分區、重新整理都只會換掉 regionSuggestedIds 的內容（純展示），
+// 不會動到已經確認的今日清單——兩份狀態從資料模型上就是分開的，不需要再額外「復原自動勾選」。
 let selectedRegionKey = null;
-let regionAutoCheckedIds = new Set();
+let regionSuggestedIds = new Set();
+// 選這區時算一次「建議」清單：新店全部、正式客戶依②排序（已經是倍數≥1優先）取前5家，排除已經
+// 在①（錨點）、已經在②（使用者確認清單）、或規則擋住的店——這些不需要再建議。純計算+存到
+// regionSuggestedIds，不碰 selectedCol2Ids，呼叫端自己決定何時重畫。
+function recomputeRegionSuggestions_() {
+  regionSuggestedIds = new Set();
+  if (!selectedRegionKey || !planData) return;
+  const anchorIdSet = anchorIds();
+  const items = (planData.recommended || []).filter(x => x.region === selectedRegionKey);
+  const notBlockedOrAnchored = item => !anchorIdSet.has(item.id) && item.ruleStatus?.status !== '擋住';
+  const newStoreCandidates = items.filter(x => x.type === 'new-store' && notBlockedOrAnchored(x));
+  const customerCandidates = items.filter(x => x.type === 'customer' && x.ratio >= 1 && notBlockedOrAnchored(x)).slice(0, 5);
+  [...newStoreCandidates, ...customerCandidates].forEach(item => {
+    if (!selectedCol2Ids.has(item.id)) regionSuggestedIds.add(item.id);
+  });
+}
 
 function anchorIds() { return new Set(anchors.map(a => a.id)); }
 
@@ -732,19 +760,22 @@ function withinAnchorRadius(itemId) {
 function recRowHtml(item) {
   const blocked = item.ruleStatus?.status === '擋住';
   const selected = selectedCol2Ids.has(item.id);
+  // 建議（regionSuggestedIds）只是「選這區」算出來的提示，不是使用者的決定——一旦使用者自己勾了
+  // （selected 變 true），就不再顯示建議徽章，改走正常的「已勾選」樣式，兩種狀態不會同時出現。
+  const suggested = !selected && regionSuggestedIds.has(item.id);
   // 新店開發（藥局每日異動追蹤篩選分頁，type==='new-store'）跟正式客戶（type==='customer'）
   // 是 handlePlannerPlan 裡兩條完全獨立的邏輯分支，欄位長得不一樣：新店沒有 tier/alert/isContracted
   // 這些分級欄位，只有 stage/interval。兩種要分開渲染，不能共用同一套徽章邏輯。
   const isNewStore = item.type === 'new-store';
-  const badgesHtml = isNewStore
+  const badgesHtml = (suggested ? '<span class="badge-suggest">建議</span>' : '') + (isNewStore
     ? `<span class="badge-tier">${escapeHtml(item.stage)}</span>`
-    : `${tierBadgeHtml(item.tier)}${alertBadgeHtml(item.alert)}${consignmentBadge(item).html}`;
+    : `${tierBadgeHtml(item.tier)}${alertBadgeHtml(item.alert)}${consignmentBadge(item).html}`);
   const ruleLine = (item.ruleStatus?.rules?.length)
     ? `<div class="rec-rule">規則：${escapeHtml(item.ruleStatus.rules.join('、'))}</div>` : '';
   // 新店開發才顯示地址（篩選分頁有完整地址欄；正式客戶這裡沒有，維持原本不顯示）
   const addressLine = (isNewStore && item.address)
     ? `<div class="rec-reason">${escapeHtml(item.address)}</div>` : '';
-  return `<div class="rec-row ${selected ? 'selected' : ''} ${blocked ? 'blocked' : ''}" data-id="${escapeHtml(item.id)}">
+  return `<div class="rec-row ${selected ? 'selected' : ''} ${blocked ? 'blocked' : ''} ${suggested ? 'suggested' : ''}" data-id="${escapeHtml(item.id)}">
     <input type="checkbox" class="rec-check" data-action="toggle-col2" data-id="${escapeHtml(item.id)}"
       ${selected ? 'checked' : ''} ${blocked ? 'disabled title="規則擋住，無法加入"' : ''}>
     <div>
@@ -822,12 +853,27 @@ function renderRecommend() {
 // 2026-11-05：一次只能選一區，按下變「已選」狀態，再按一次取消；選取時自動把這區的新店全部、
 // 正式客戶依②排序取倍數≥1的前5家勾進②（不再加進①），規則擋住的／已經在①的不算、不勾。
 // ══════════════════════════════
+// 排序理由（2026-11-19 新增，#6）：直接照 worker.js buildTodayRegions_() 的排序規則反推這張卡片
+// 為什麼排在這個位置，不是另外寫死文案——規則是「有新店的區全部排在沒新店的區前面；都有/都沒
+// 新店時比新店最高倍數，再比新店家數」（見 worker.js 註解 2026-11-02）。customerDueCount／
+// deliveryCount 完全不影響排序，只是顯示用的統計數字——沒新店的區即使客戶該去家數很多，也只能
+// 排在所有「有新店」的區後面，這裡誠實說明，不要暗示它們有影響排序。
+function regionSortReasonText_(g, index) {
+  const rank = `排第 ${index + 1}`;
+  if (g.newStoreCount > 0) {
+    return `${rank}：有新店（${g.newStoreCount} 家，最高倍數 ${g.maxRatio}）`;
+  }
+  const bits = [];
+  bits.push(g.deliveryCount ? `送貨 ${g.deliveryCount} 家` : '無送貨');
+  bits.push(g.customerDueCount ? `客戶該去 ${g.customerDueCount} 家` : '無客戶該去');
+  return `${rank}：無新店（${bits.join('、')}——這兩項不影響排序，僅供參考）`;
+}
 function renderRegionOverview() {
   const root = document.getElementById('region-overview-root');
   if (!planData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
   const groups = planData.todayRegions || [];
   if (!groups.length) { root.innerHTML = '<div class="empty-hint">沒有資料</div>'; return; }
-  root.innerHTML = groups.map(g => {
+  root.innerHTML = groups.map((g, index) => {
     const isEmpty = !g.newStoreCount && !g.customerDueCount && !g.deliveryCount;
     const isSelected = selectedRegionKey === g.key;
     const minutesText = g.estimateMinutes === null ? '' : `車程約 ${g.estimateMinutes} 分鐘（直線距離估算，僅供參考）`;
@@ -836,61 +882,39 @@ function renderRegionOverview() {
         <div class="region-card-label">${escapeHtml(g.label)}</div>
         <div class="region-card-stats">新店 ${g.newStoreCount} 家${g.maxRatio ? '（最高倍數 ' + g.maxRatio + '）' : ''}　送貨 ${g.deliveryCount} 家　客戶該去 ${g.customerDueCount} 家</div>
         <div class="region-card-minutes">${escapeHtml(minutesText)}</div>
+        <div class="region-card-reason">${escapeHtml(regionSortReasonText_(g, index))}</div>
       </div>
       <button class="region-card-btn ${isSelected ? 'selected' : ''}" data-action="pick-region" data-key="${escapeHtml(g.key)}">${isSelected ? '已選 ✓' : '選這區'}</button>
     </div>`;
   }).join('');
 }
 
-// 取消目前選區時，只取消「因為選這區而自動勾」的 id（regionAutoCheckedIds），使用者自己手動
-// 勾/取消過的（不管是不是同一批店）已經從這個 Set 移除（見 toggleCol2），不會被這裡動到。
-function undoRegionAutoCheck_() {
-  regionAutoCheckedIds.forEach(id => selectedCol2Ids.delete(id));
-  regionAutoCheckedIds.clear();
-}
-
-async function pickRegion(key) {
+// 選這區／取消選這區：只換「建議」清單（regionSuggestedIds，純顯示），完全不動 selectedCol2Ids/
+// anchors——使用者已經確認的今日清單（不管是不是這次選區建議出來的）不會因為切分區而被動到。
+function pickRegion(key) {
   if (selectedRegionKey === key) {
-    undoRegionAutoCheck_();
     selectedRegionKey = null;
+    regionSuggestedIds = new Set();
     if (filterMode === 'region') filterMode = 'all';
     renderRegionOverview();
     renderRecommend();
     if (viewMode === 'map') renderMap();
-    await syncTodayList_();
+    savePlanState();
     toast('已取消選區');
     return;
   }
-  if (selectedRegionKey) undoRegionAutoCheck_(); // 一次一區：切到別區前先復原前一區的自動勾選
-
   selectedRegionKey = key;
   filterMode = 'region';
-  const anchorIdSet = anchorIds();
-  const items = (planData.recommended || []).filter(x => x.region === key);
-  const notBlockedOrAnchored = item => !anchorIdSet.has(item.id) && item.ruleStatus?.status !== '擋住';
-
-  const newStoreCandidates = items.filter(x => x.type === 'new-store' && notBlockedOrAnchored(x));
-  // 「依②排序」＝ planData.recommended 原本的順序（後端已經依倍數≥1優先、組內 score 遞減排好），
-  // 這裡用 filter 不會打亂順序，直接取前5家即可，不用再自己排一次。
-  const customerCandidates = items.filter(x => x.type === 'customer' && x.ratio >= 1 && notBlockedOrAnchored(x)).slice(0, 5);
-
-  newStoreCandidates.forEach(item => {
-    if (!selectedCol2Ids.has(item.id)) { selectedCol2Ids.add(item.id); regionAutoCheckedIds.add(item.id); }
-  });
-  customerCandidates.forEach(item => {
-    if (!selectedCol2Ids.has(item.id)) { selectedCol2Ids.add(item.id); regionAutoCheckedIds.add(item.id); }
-  });
-
+  recomputeRegionSuggestions_();
   renderRegionOverview();
   renderRecommend();
   if (viewMode === 'map') renderMap();
-  await syncTodayList_();
-  toast(`已選 ${key}：勾了 ${customerCandidates.length} 家客戶、${newStoreCandidates.length} 家新店，可在②調整`);
+  savePlanState();
+  toast(`已選 ${key}：建議 ${regionSuggestedIds.size} 家，在②勾選要去的店才會真正加入今日清單`);
 }
 
 function toggleCol2(id) {
   if (selectedCol2Ids.has(id)) selectedCol2Ids.delete(id); else selectedCol2Ids.add(id);
-  regionAutoCheckedIds.delete(id); // 使用者自己動過這顆，之後取消選區不會再動它
   renderRecommend();
   if (viewMode === 'map') renderMap();
   syncTodayList_();
@@ -1085,7 +1109,11 @@ async function savePlanState() {
   if (savingPlan) { savePending = true; return; }
   savingPlan = true;
   try {
-    await post('/api/plan', { date: getPlanDate(), departMin, orderMode });
+    // region：worker.js 的 GET /api/plan 已經會讀 saved.region 回傳成 savedRegion（見 handlePlannerPlan），
+    // 但目前 POST /api/plan 的 handleSavePlan 還沒有寫入這個欄位（只讀 departMin/orderMode）——這裡先把
+    // 欄位送出去，是前瞻性相容；要讓「選區」真的能跨重新整理/切日期保留，還需要 worker.js 补一行
+    // `if (region) existing.region = region;`，屬於 worker.js 異動，照約定先回報不動手。
+    await post('/api/plan', { date: getPlanDate(), departMin, orderMode, region: selectedRegionKey });
   } catch (e) {
     console.error('存檔失敗', e);
     throw e;
@@ -1525,7 +1553,7 @@ function renderTodayListSummary_() {
   el.innerHTML = `
     <span><strong>${todayList.length} 家</strong>${countsText ? '｜' + escapeHtml(countsText) : ''}${lastRouteTotalKm != null ? `・${lastRouteTotalKm} km` : ''}</span>
     ${billingTotal ? `<span>預估對帳 $${billingTotal.toLocaleString()}</span>` : ''}
-    <span>出發 <input type="time" class="tl-depart-input" id="depart-time-input" value="${fmtMin(departMin)}"></span>
+    <span>出發 <input type="time" class="tl-depart-input" id="depart-time-input" data-action="depart-time-input" value="${fmtMin(departMin)}"></span>
     <span>預估收工 ${finishText}</span>
     <span class="tl-order-mode">（${orderLabel}）</span>`;
 }
@@ -1600,11 +1628,13 @@ function parseHHMM_(s) {
 }
 
 // 這一列在「今日行程」表要記成哪個「來源」（單一值，不是畫面上可複選的「類型」標籤）：
-// 在①（anchors）就用那個錨點自己的來源字串對應的類別；不然就看是不是「選這區」自動勾的。
+// 在①（anchors）就用那個錨點自己的來源字串對應的類別；不然就是②欄使用者自己勾的
+// （2026-11-19 修#3/#4 之後，「選這區」只給建議，不會自動勾進②，所以不會再是「選區」這個值——
+// 保留讀取舊資料時的相容性見 applyTodayPlanRows_，但這裡只負責存新資料，不用再分流）。
 function todayListRowSource_(id) {
   const anchor = anchors.find(a => a.id === id);
   if (anchor) return anchorSourceTag_(anchor.source);
-  return regionAutoCheckedIds.has(id) ? '選區' : '第②欄';
+  return '第②欄';
 }
 // 金額只有寄賣/合約對帳有（跟 todayListBillingTotal_／buildAutoTask_ 同一套算法）；送貨目前沒有
 // 單日訂單金額可用（見 buildAutoTask_ 註解），留空不是漏填。
@@ -1640,19 +1670,32 @@ function todayListRemovedRowPayload_(m) {
   };
 }
 
+// 2026-11-19：field-sync-status（原「送到外勤模式」按鈕的位置）跟 today-save-status 共用同一個
+// 存檔狀態機——這天的「今日行程」表存檔完成＝field-v2 讀得到最新資料，不是兩件事，不要另外維護
+// 一套獨立的「有沒有送到外勤模式」狀態，徒增兜不起來的風險。
 function renderTodaySaveStatus_(state) {
   const el = document.getElementById('today-save-status');
-  if (!el) return;
-  el.classList.toggle('error', state === 'error');
-  el.classList.toggle('dirty', state === 'dirty');
-  if (state === 'dirty') { el.textContent = '未存檔'; el.onclick = null; }
-  else if (state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
-  else if (state === 'saved') {
-    const now = new Date();
-    el.textContent = `已存檔 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    el.onclick = null;
-  } else if (state === 'conflict') { el.textContent = '外勤模式有更新，已載入最新版本'; el.onclick = null; }
-  else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => flushTodayPlanSave_(); }
+  const fieldEl = document.getElementById('field-sync-status');
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  if (el) {
+    el.classList.toggle('error', state === 'error');
+    el.classList.toggle('dirty', state === 'dirty');
+    if (state === 'dirty') { el.textContent = '未存檔'; el.onclick = null; }
+    else if (state === 'saving') { el.textContent = '存檔中…'; el.onclick = null; }
+    else if (state === 'saved') { el.textContent = `已存檔 ${hhmm}`; el.onclick = null; }
+    else if (state === 'conflict') { el.textContent = '外勤模式有更新，已載入最新版本'; el.onclick = null; }
+    else if (state === 'error') { el.textContent = '⚠ 存檔失敗，點此重試'; el.onclick = () => flushTodayPlanSave_(); }
+  }
+  if (fieldEl) {
+    fieldEl.classList.toggle('error', state === 'error');
+    fieldEl.classList.toggle('dirty', state === 'dirty');
+    if (state === 'dirty') { fieldEl.textContent = '尚未同步到外勤模式'; fieldEl.onclick = null; }
+    else if (state === 'saving') { fieldEl.textContent = '同步外勤模式中…'; fieldEl.onclick = null; }
+    else if (state === 'saved') { fieldEl.textContent = `已同步到外勤模式 ${hhmm}`; fieldEl.onclick = null; }
+    else if (state === 'conflict') { fieldEl.textContent = '外勤模式有更新，已載入最新版本'; fieldEl.onclick = null; }
+    else if (state === 'error') { fieldEl.textContent = '⚠ 同步外勤模式失敗，點此重試'; fieldEl.onclick = () => flushTodayPlanSave_(); }
+  }
 }
 
 function scheduleTodayPlanSave_() {
@@ -1754,7 +1797,7 @@ const TODAY_PLAN_ANCHOR_SOURCES_ = ['錨點', '送貨', '待追蹤', '本週排'
 
 // 把一組「今日行程」列（API 回來的英文鍵物件，不管是 /api/plan 的 todayPlanRows+
 // todayPlanRemovedIds、/api/today-plan 的 rows，還是存檔衝突回傳的 rows，三處欄名都一致）套回
-// 畫面狀態：selectedCol2Ids／regionAutoCheckedIds／todayList 每列的目的/備註/手動停留/到達時間/
+// 畫面狀態：selectedCol2Ids／todayList 每列的目的/備註/手動停留/到達時間/
 // 順序／removedAnchorMarkers_。跟 syncTodayList_() 不一樣的地方：這支是「用伺服器的資料蓋過
 // 畫面」（初次還原、衝突重新整理都是這個情境），不是「畫面變動後重新合成」。
 // allRows 可能混著狀態＝「移除」的列（衝突回傳就是整包都有）——這些不是活躍的今日清單項目，
@@ -1764,27 +1807,21 @@ async function applyTodayPlanRows_(allRows) {
   removedAnchorMarkers_ = allRows.filter(r => r.status === '移除')
     .map(r => ({ storeId: r.storeId, name: r.name, source: r.source }));
 
+  // 2026-11-19：'選區' 這個來源值是舊版「選這區自動勾選」留下的既有資料（修#3/#4 之前存進
+  // 「今日行程」表的列），不是前端的新邏輯會再產生——但既有資料裡這些列本來就是使用者確認過
+  // 要去的店（即使當初是系統幫忙勾的），還原時一樣要算進 selectedCol2Ids，不能把舊資料憑空丟掉。
   selectedCol2Ids = new Set();
-  regionAutoCheckedIds = new Set();
   rows.forEach(r => {
     if (!r.storeId) return;
-    if (r.source === '第②欄' || r.source === '選區') {
-      selectedCol2Ids.add(r.storeId);
-      if (r.source === '選區') regionAutoCheckedIds.add(r.storeId);
-    }
+    if (r.source === '第②欄' || r.source === '選區') selectedCol2Ids.add(r.storeId);
   });
   lastTodayPlanUpdatedAt_ = rows.reduce((max, r) => (r.updatedAt && (!max || r.updatedAt > max)) ? r.updatedAt : max, null);
   dayConfirmed = rows.some(r => r.confirmed);
 
-  // 選區膠囊/已選卡片狀態：用「來源＝選區」的第一筆店家，反查它屬於哪個 region key
-  // （同一次「選這區」動作加進去的理論上都是同一個 region，用第一筆代表就好）。
-  selectedRegionKey = null;
-  const regionRow = rows.find(r => r.source === '選區');
-  if (regionRow) {
-    const rec = (planData?.recommended || []).find(item => item.id === regionRow.storeId);
-    if (rec) { selectedRegionKey = rec.region; filterMode = 'region'; }
-  }
-  if (!selectedRegionKey && filterMode === 'region') filterMode = 'all';
+  // 「建議」清單只跟目前選區＋目前已確認清單有關，不是存檔欄位——selectedCol2Ids 剛還原完成，
+  // 現在才能正確排除掉已經確認的店，不會讓剛讀回來的確認項目又被標成「建議」。
+  recomputeRegionSuggestions_();
+  renderRegionOverview();
 
   pushSuppressAutoSave_();
   try {
@@ -1826,6 +1863,11 @@ async function restoreTodayPlanState_(plan) {
     lastRouteLegMinutes = null; lastRouteResolvedIds = null; lastRouteStopIds = null; lastRouteTotalKm = null;
     window._confirmedRoute = null;
     departMin = typeof plan.savedDepartMin === 'number' ? plan.savedDepartMin : START_MIN;
+    // savedRegion：worker.js 的 GET /api/plan 已經會回這個欄位，但 POST 還沒寫入（見 savePlanState()
+    // 註解）——補上那一行之前，這裡永遠讀到 null，等同重新整理後選區篩選重置成「全部」，
+    // 不影響已經確認的今日清單（selectedCol2Ids 存在「今日行程」表，不受這裡影響）。
+    selectedRegionKey = plan.savedRegion || null;
+    filterMode = selectedRegionKey ? 'region' : 'all';
 
     // 2026-11-27 使用者實測抓到：worker.js /api/plan 回的 anchors 已經正確排除「移除」標記的店，
     // 但 loadPlan() 在這之前呼叫的 mergeWeeklyAnchors() 會直接從 /api/followups 重新抓「今天到期
@@ -1909,7 +1951,6 @@ async function removeTodayListRow_(id) {
   const ai = anchors.findIndex(a => a.id === id);
   if (ai >= 0) anchors.splice(ai, 1);
   selectedCol2Ids.delete(id);
-  regionAutoCheckedIds.delete(id);
   todayList = todayList.filter(r => r.id !== id);
   renderAnchors(); renderRecommend(); renderSuggest();
   if (viewMode === 'map') renderMap();
