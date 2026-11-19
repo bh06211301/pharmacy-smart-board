@@ -247,6 +247,7 @@
       <div class="topbar-title" id="record-customer-title" style="margin-top:6px">記錄拜訪</div>
     </div>
     <div class="body-scroll">
+      <div id="record-customer-already-done-note" class="dad-note" hidden>這家今天已完成，這次會新增一筆</div>
       <div id="record-customer-contact"></div>
       <div class="section-label">拜訪類型</div>
       <div id="record-customer-type-chips" class="chip-group" data-single="true">
@@ -286,7 +287,10 @@
 
       <div id="record-customer-dad-note" class="dad-note" hidden></div>
     </div>
-    <div class="bottombar"><button class="btn primary lg" id="record-customer-save">儲存並回首頁</button></div>
+    <div class="bottombar">
+      <button class="btn primary lg" id="record-customer-save">儲存並回首頁</button>
+      <button class="btn lg" id="record-customer-retry-mark" hidden style="margin-top:var(--sr-space-2)">重試標記完成</button>
+    </div>
   </section>
 
   <!-- ============ 3b. 記錄拜訪（新店，B） ============ -->
@@ -297,6 +301,7 @@
       <div class="topbar-sub" id="record-newstore-stage">目前階段：—</div>
     </div>
     <div class="body-scroll">
+      <div id="record-newstore-already-done-note" class="dad-note" hidden>這家今天已完成，這次會新增一筆</div>
       <div class="section-label">這次結果</div>
       <div id="record-newstore-result-choices" class="choice-group"></div>
 
@@ -328,7 +333,10 @@
       <input type="text" id="record-newstore-nextaction" placeholder="例如：帶報價單">
       <div class="stop-sub">文字會附在拜訪內容後面一起存檔</div>
     </div>
-    <div class="bottombar"><button class="btn primary lg" id="record-newstore-save">儲存並回首頁</button></div>
+    <div class="bottombar">
+      <button class="btn primary lg" id="record-newstore-save">儲存並回首頁</button>
+      <button class="btn lg" id="record-newstore-retry-mark" hidden style="margin-top:var(--sr-space-2)">重試標記完成</button>
+    </div>
   </section>
 
   <!-- ============ 4. 跳過這站 ============ -->
@@ -390,9 +398,14 @@
         <div id="finish-todo-list" class="store-meta" style="margin-top:4px"></div>
       </div>
 
+      <div class="card" id="finish-pending-card" hidden>
+        <div class="section-label">還沒處理的站</div>
+        <div id="finish-pending-list" style="display:flex;flex-direction:column;gap:var(--sr-space-3);margin-top:4px"></div>
+      </div>
+
       <div id="finish-dad-notes"></div>
     </div>
-    <div class="bottombar"><button class="btn primary lg">確認收工</button></div>
+    <div class="bottombar"><button class="btn primary lg" id="finish-confirm-btn">確認收工</button></div>
   </section>
 
 </div>
@@ -642,8 +655,11 @@ function fv2RenderHome() {
   })() : null;
   document.getElementById('home-finish-estimate').textContent = finishMin !== null ? `預估收工 ${minutesToHHMM_(finishMin)}` : '預估收工 —（還沒算路線）';
 
-  // 下一站：第一個狀態是「待去」的列
-  const nextIdx = rows.findIndex(r => r.status === '待去');
+  // 2026-11-18 下一站規則改版（使用者核准）：
+  // 1. 有狀態是「已到」的店（正在拜訪中），優先顯示那一家
+  // 2. 否則顯示 seq 最小、狀態不是完成/跳過/未完成的那一家（原本只認「待去」，現在排除法更寬）
+  let nextIdx = rows.findIndex(r => r.status === '已到');
+  if (nextIdx < 0) nextIdx = rows.findIndex(r => ['完成', '跳過', '未完成'].indexOf(r.status) < 0);
   const nextEl = document.getElementById('home-nextstop');
   if (nextIdx < 0) {
     nextEl.innerHTML = '<div class="center-note">今天的站都處理完了 🎉</div>';
@@ -657,7 +673,7 @@ function fv2RenderHome() {
       <div class="tag-row">${tags}</div>
       <div class="store-meta" style="margin-top:var(--sr-space-3)">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
       <div class="btn-row" style="margin-top:var(--sr-space-5)">
-        <button class="btn" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address || r.name)}','_blank')">開始導航</button>
+        <button class="btn" data-nav="${escapeHtml_(r.address || r.name)}">開始導航</button>
         <button class="btn primary" data-arrive-id="${escapeHtml_(r.storeId || r.address)}">我到了</button>
       </div>`;
   }
@@ -678,15 +694,23 @@ function fv2RenderHome() {
   }).join('') || '<div class="center-note">今天還沒有排任何站點</div>';
 }
 // 展開單一站點明細（點第一次才算，之後只是切換顯示/隱藏，不用重複算）
+// 2026-11-18：全部站點可以直接操作任何一家——展開區最下面補「開始導航／我到了／記錄這家」
+// 三顆按鈕。「開始導航」用跟下一站卡片同一個 data-nav 委派；「我到了」用跟下一站卡片同一個
+// data-arrive-id 委派（同一套流程：標記已到、進到店頁）；「記錄這家」是新的 data-record-id。
 function fv2StopDetailHtml_(r) {
   const followups = FV2.allFollowups.filter(f => f.storeId === r.storeId);
+  const key = r.storeId || r.address;
   return `
     <div class="store-meta">拜訪目的：${escapeHtml_((r.purposes || []).join('、') || '—')}${r.purposeNote ? '　備註：' + escapeHtml_(r.purposeNote) : ''}</div>
     <div class="store-meta" style="margin-top:4px">${escapeHtml_(r.address || '沒有地址')}</div>
     ${followups.length
       ? followups.map(f => `<div class="store-meta" style="margin-top:4px">⚠ 待追蹤：${escapeHtml_(f.item)}</div>`).join('')
       : '<div class="store-meta" style="margin-top:4px">沒有未結案的待追蹤</div>'}
-    <button class="btn" style="margin-top:var(--sr-space-4);width:100%" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address || r.name)}','_blank');event.stopPropagation()">開始導航</button>`;
+    <div class="btn-row" style="margin-top:var(--sr-space-4)">
+      <button class="btn" data-nav="${escapeHtml_(r.address || r.name)}">開始導航</button>
+      <button class="btn" data-arrive-id="${escapeHtml_(key)}">我到了</button>
+      <button class="btn primary" data-record-id="${escapeHtml_(key)}">記錄這家</button>
+    </div>`;
 }
 document.addEventListener('click', (e) => {
   const row = e.target.closest('[data-stop-toggle]');
@@ -701,6 +725,20 @@ document.addEventListener('click', (e) => {
     if (r) detail.innerHTML = fv2StopDetailHtml_(r);
     detail.dataset.rendered = '1';
   }
+});
+// 導航：跟下一站卡片、全部站點展開區共用同一個委派（避免 onclick 字串插值在店名/地址含特殊字元時出錯）
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-nav]');
+  if (!btn) return;
+  e.stopPropagation();
+  window.open('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(btn.dataset.nav), '_blank');
+});
+// 記錄這家：跟「完成並記錄」按鈕走同一套畫面判斷（新店→3b，其他→3），見 fv2DoRecord_
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-record-id]');
+  if (!btn) return;
+  e.stopPropagation();
+  fv2DoRecord_(btn.dataset.recordId);
 });
 
 function escapeHtml_(s) {
@@ -739,10 +777,8 @@ function fv2VisitStatusText_(t) {
 // 「我到了」：記住 storeId，去抓真實的店家詳情，同時標記今日行程這一站「已到」。
 // 使用者明確要求：只有按這顆按鈕才寫「已到」，GPS 接近之類的提示（如果之後做）純畫面提示，
 // 不能自動觸發寫入。狀態已經是「已到」或更後面（完成/跳過）就不重送（避免白跑一次寫入）。
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-arrive-id]');
-  if (!btn) return;
-  const key = btn.dataset.arriveId;
+// 2026-11-18：抽成函式，讓「全部站點」展開區的「我到了」按鈕能走同一套流程（不是另外複製一份）。
+function fv2DoArrive_(key) {
   FV2.currentStoreId = key;
   showScreen('2-arrive');
   fv2RenderArrive(key);
@@ -751,7 +787,26 @@ document.addEventListener('click', (e) => {
     const { storeId, address } = fv2StoreOrAddr_(key);
     fv2MarkTodayStatus_(storeId, address, { 狀態: '已到' }, '標記已到', genRequestId_());
   }
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-arrive-id]');
+  if (!btn) return;
+  fv2DoArrive_(btn.dataset.arriveId);
 });
+// 「記錄這家」：跟「完成並記錄」按鈕同一套畫面判斷（新店→3b，其他→3），讓「全部站點」展開區
+// 可以直接進記錄畫面，不用先經過「到店」頁。已完成/已跳過的店一樣可以進來，存檔時另外新增
+// 一筆，不會修改舊紀錄（見 fv2RenderRecordCustomer_/fv2RenderRecordNewstore 的已完成提示）。
+function fv2DoRecord_(key) {
+  FV2.currentStoreId = key;
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === key);
+  if (row && row.types && row.types.indexOf('新店') >= 0) {
+    fv2RenderRecordNewstore(key);
+    showScreen('3b-record-newstore');
+  } else {
+    fv2RenderRecordCustomer(key);
+    showScreen('3-record-customer');
+  }
+}
 
 // ---- 2. 到店 ----
 async function fv2RenderArrive(storeId) {
@@ -796,18 +851,36 @@ async function fv2RenderArrive(storeId) {
     body.innerHTML = `<div class="center-note">讀取失敗：${escapeHtml_(e.message)}</div>`;
   }
 }
-document.getElementById('arrive-record-btn').addEventListener('click', () => {
-  const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
-  if (row && row.types && row.types.indexOf('新店') >= 0) {
-    fv2RenderRecordNewstore(FV2.currentStoreId);
-    showScreen('3b-record-newstore');
-  } else {
-    fv2RenderRecordCustomer(FV2.currentStoreId);
-    showScreen('3-record-customer');
-  }
-});
+document.getElementById('arrive-record-btn').addEventListener('click', () => fv2DoRecord_(FV2.currentStoreId));
 
 // ---- 3. 記錄拜訪（正式客戶） ----
+// 2026-11-18：「重試標記完成」共用狀態——正式客戶/新案開發兩個記錄畫面同一時間只會有一個在前景，
+// 共用一份就好，不用各開一份。
+let fv2PendingCompleteRetry_ = null; // {posStoreId, posAddress}
+async function fv2RetryMarkComplete_(btnId) {
+  if (!fv2PendingCompleteRetry_) return;
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  btn.textContent = '重試中…';
+  const { posStoreId, posAddress } = fv2PendingCompleteRetry_;
+  let markResult;
+  try {
+    markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
+  } catch (e) {
+    markResult = { ok: false, error: e.message };
+  }
+  btn.disabled = false;
+  btn.textContent = '重試標記完成';
+  if (markResult.ok) {
+    fv2PendingCompleteRetry_ = null;
+    btn.hidden = true;
+    fv2Toast_('已標記完成');
+    try { await fv2LoadAll(); } catch (e) { fv2Toast_('清單更新失敗，請手動重新整理', true); }
+    showScreen('1-home');
+  } else {
+    fv2Toast_('標記完成仍然失敗：' + markResult.error, true);
+  }
+}
 let fv2LastRecordCustomerStoreId_ = null; // 2026-11-16：同一家店重進畫面保留草稿，換店才清空
 let fv2CurrentVisitId_ = null; // 2026-11-17：連按防呆，固定到存檔成功或換店才換新（見下方reset函式）
 function fv2ResetRecordCustomerFields_() {
@@ -823,12 +896,16 @@ function fv2RenderRecordCustomer(storeId) {
   const saveBtnReset = document.getElementById('record-customer-save');
   saveBtnReset.disabled = false;
   saveBtnReset.textContent = '儲存並回首頁';
+  document.getElementById('record-customer-retry-mark').hidden = true;
   if (storeId !== fv2LastRecordCustomerStoreId_) {
     fv2ResetRecordCustomerFields_();
     fv2LastRecordCustomerStoreId_ = storeId;
   }
   const { ph } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  // 2026-11-18：全部站點可以直接進已完成/已跳過的店記錄拜訪，存檔會新增一筆、不改舊紀錄，
+  // 進畫面時先提醒一下，避免誤會成要改今天已經記過的那一筆。
+  document.getElementById('record-customer-already-done-note').hidden = !(row && (row.status === '完成' || row.status === '跳過'));
   document.getElementById('record-customer-title').textContent = `記錄拜訪 · ${ph ? ph.name : (row ? row.name : storeId)}`;
   const contactEl = document.getElementById('record-customer-contact');
   const detail = FV2.currentDetail && FV2.currentDetail.id === storeId ? FV2.currentDetail : null;
@@ -985,58 +1062,82 @@ document.getElementById('record-customer-save').addEventListener('click', async 
   const dadTasks = ph ? fv2DadReminderTasks_(visitType, content, storeId, ph.name, ph.owner === '老爸', visitId, dateStr) : [];
 
   console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks });
-  const skipped = [];
+
+  // 2026-11-18 存檔流程不能中途中斷：/add-visit 本身失敗才真正算「沒存成功」，統一一句話、
+  // 按鈕恢復、留在這個畫面、不清空已填的內容（使用者要重試時打字不會白費）。
   let visitResp;
   try {
-    visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
+    try {
+      visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
+    } catch (e) {
+      throw new Error(e.message);
+    }
+    if (!visitResp.success) throw new Error(visitResp.error || '未知錯誤');
   } catch (e) {
-    fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
+    fv2Toast_('紀錄沒有存成功，請重試：' + e.message, true);
     saveBtn.disabled = false;
     saveBtn.textContent = '儲存並回首頁';
     return;
   }
-  // 使用者明確要求：拜訪紀錄沒寫成功就不要標這站「完成」——紀錄寫失敗卻顯示行程完成，
-  // 回頭查會以為那天真的去過了。沒成功就在這裡停下，不繼續送待追蹤/老爸提醒/今日行程狀態。
-  if (!visitResp.success) {
-    fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
-    saveBtn.disabled = false;
-    saveBtn.textContent = '儲存並回首頁';
-    return;
-  }
+
+  // /add-visit 已經成功——拜訪紀錄已經存進表裡了，接下來每一步都各自包 try/catch，
+  // 任何一步失敗只累積警告文字，絕對不能讓整段流程中斷，否則會像今天熊羽藥局那樣：
+  // 紀錄存了，但完全沒跑到「標記完成」那一步，首頁狀態永遠卡住。
+  const warnings = [];
   if (followupPayload) {
-    if (IS_TEST_MODE) { fv2TestBlockedLog_('待追蹤', followupPayload); skipped.push('待追蹤'); }
-    else await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
+    try {
+      if (IS_TEST_MODE) { fv2TestBlockedLog_('待追蹤', followupPayload); warnings.push('待追蹤：測試模式未送出'); }
+      else await fetch(`${WORKER}/api/followups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(followupPayload) });
+    } catch (e) { warnings.push('待追蹤建立失敗'); }
   }
   for (const t of dadTasks) {
-    if (IS_TEST_MODE) { fv2TestBlockedLog_('老爸提醒', t); if (skipped.indexOf('老爸提醒') < 0) skipped.push('老爸提醒'); }
-    else await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
+    try {
+      if (IS_TEST_MODE) { fv2TestBlockedLog_('老爸提醒', t); if (warnings.indexOf('老爸提醒：測試模式未送出') < 0) warnings.push('老爸提醒：測試模式未送出'); }
+      else await fetch(`${WORKER}/todos-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) });
+    } catch (e) { if (warnings.indexOf('老爸提醒失敗') < 0) warnings.push('老爸提醒失敗'); }
   }
   // 階段2 項目2：這家店既有待追蹤的逐筆結果（完成/部分完成/改期/取消；「沒處理到」不送出）
-  const { sentCount, skippedForTest } = await fv2SubmitFollowupActions_(visitId);
-  if (skippedForTest && skipped.indexOf('待追蹤異動') < 0) skipped.push('待追蹤異動');
+  try {
+    const { skippedForTest } = await fv2SubmitFollowupActions_(visitId);
+    if (skippedForTest) warnings.push('待追蹤異動：測試模式未送出');
+  } catch (e) { warnings.push('待追蹤異動處理失敗'); }
+
+  // 不管上面有沒有失敗，一定要呼叫 fv2MarkTodayStatus_ 標記「完成」。
   const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
-  // 2026-11-17 送出提示修正：silent:true 讓 fv2MarkTodayStatus_ 不要自己先跳一次紅字，
-  // 這裡統一看結果組一句話，跟「已儲存」合併，不會讓人誤會成拜訪紀錄沒存成功。
-  const markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
+  let markResult;
+  try {
+    markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
+  } catch (e) {
+    markResult = { ok: false, error: e.message };
+  }
   // 存檔成功才清（失敗就留著，避免白白弄丟使用者打的內容）。進畫面時的清空只在換店才做，
   // 這裡存檔成功後要清乾淨，不管下一步是同一家店重進還是換店，都不該留著剛存過的草稿。
   fv2ResetRecordCustomerFields_();
   saveBtn.textContent = '已儲存';
-  const baseMsg = skipped.length ? `已儲存；測試模式：未送出（${skipped.join('、')}）` : '已儲存';
+
   if (markResult.ok) {
-    fv2Toast_(baseMsg);
+    saveBtn.disabled = false;
+    document.getElementById('record-customer-retry-mark').hidden = true;
+    const msg = warnings.length ? `已儲存（${warnings.join('、')}）` : '已儲存';
+    fv2Toast_(msg, warnings.length > 0);
+    // 2026-11-18：存檔成功後重抓今日清單，回首頁才會看到正確的下一站（不是還停在剛完成的那站）。
+    // 重抓失敗不該讓畫面看起來像存檔失敗——拜訪紀錄已經存成功了，照樣回首頁，只是另外提示一句。
+    try {
+      await fv2LoadAll();
+    } catch (e) {
+      fv2Toast_('已儲存，清單更新失敗，請手動重新整理', true);
+    }
+    showScreen('1-home');
   } else {
-    fv2Toast_(`拜訪紀錄已存，站點狀態未更新：${markResult.error}`, true);
+    // 2026-11-19 使用者要求：標記完成失敗時 saveBtn 保持 disabled（文字留著「已儲存」），
+    // 只留「重試標記完成」可按——避免使用者再按一次儲存，用空內容＋新visitId多寫出一筆
+    // 空白紀錄。不 silent，不自動回首頁——留在這個畫面，讓「重試標記完成」按鈕看得到、按得到。
+    fv2PendingCompleteRetry_ = { posStoreId, posAddress, afterLoadAll: true };
+    document.getElementById('record-customer-retry-mark').hidden = false;
+    fv2Toast_('紀錄已存，但標記完成失敗：' + markResult.error, true);
   }
-  // 2026-11-18：存檔成功後重抓今日清單，回首頁才會看到正確的下一站（不是還停在剛完成的那站）。
-  // 重抓失敗不該讓畫面看起來像存檔失敗——拜訪紀錄已經存成功了，照樣回首頁，只是另外提示一句。
-  try {
-    await fv2LoadAll();
-  } catch (e) {
-    fv2Toast_('已儲存，清單更新失敗，請手動重新整理', true);
-  }
-  showScreen('1-home');
 });
+document.getElementById('record-customer-retry-mark').addEventListener('click', () => fv2RetryMarkComplete_('record-customer-retry-mark'));
 
 // 正式代號自動建議（2026-11-11 新需求）：用新店店名/地址去配客戶清單，列出最可能的候選
 // （最多3個），使用者點選才自動填入，避免手動輸入打錯代號。地址完全相同優先權最高，其次是
@@ -1137,12 +1238,15 @@ function fv2RenderRecordNewstore(storeId) {
   const saveBtnReset = document.getElementById('record-newstore-save');
   saveBtnReset.disabled = false;
   saveBtnReset.textContent = '儲存並回首頁';
+  document.getElementById('record-newstore-retry-mark').hidden = true;
   if (storeId !== fv2LastRecordNewstoreStoreId_) {
     fv2ResetRecordNewstoreFields_();
     fv2LastRecordNewstoreStoreId_ = storeId;
   }
   const { rec } = fv2StoreMeta_(storeId);
   const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  // 2026-11-18：已完成/已跳過的店一樣可以進來記錄，存檔會新增一筆、不改舊紀錄，先提醒一下。
+  document.getElementById('record-newstore-already-done-note').hidden = !(row && (row.status === '完成' || row.status === '跳過'));
   document.getElementById('record-newstore-title').textContent = `記錄拜訪 · ${rec ? rec.name : (row ? row.name : storeId)}`;
   const stage = rec ? rec.stage : '—';
   document.getElementById('record-newstore-stage').textContent = `目前階段：${stage}${rec && rec.daysSince !== null ? ' · 第 ' + rec.daysSince + ' 天' : ''}`;
@@ -1184,7 +1288,7 @@ document.getElementById('confirm-customer-id-input')?.addEventListener('input', 
   el.textContent = hit ? `✓ 核對到：${hit.name}` : '找不到這個代號，請確認有沒有打錯字';
   el.style.color = hit ? 'var(--sr-primary)' : 'var(--sr-danger)';
 });
-document.getElementById('record-newstore-save').addEventListener('click', () => {
+document.getElementById('record-newstore-save').addEventListener('click', async () => {
   const saveBtn = document.getElementById('record-newstore-save');
   if (saveBtn.disabled) return; // 連按防呆：已經在送出中，不要再觸發一次
   saveBtn.disabled = true;
@@ -1221,38 +1325,48 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
   const funnelPayload = { storeId, action, customerId: action === 'confirmed' ? customerId : undefined, requestId: genRequestId_() };
 
   console.log('[field-v2] 記錄拜訪（新店）準備送出的payload：', { visitPayload, funnelPayload });
-  (async () => {
-    let visitResp;
+
+  // 2026-11-18 存檔流程不能中途中斷：/add-visit 本身失敗才真正算「沒存成功」，統一一句話、
+  // 按鈕恢復、留在這個畫面、不清空已填的內容。
+  let visitResp;
+  try {
     try {
       visitResp = await fetch(`${WORKER}/add-visit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(visitPayload) }).then(r => r.json());
     } catch (e) {
-      fv2Toast_('拜訪紀錄存檔失敗（網路錯誤）：' + e.message, true);
-      saveBtn.disabled = false;
-      saveBtn.textContent = '儲存並回首頁';
-      return;
+      throw new Error(e.message);
     }
-    if (!visitResp.success) {
-      fv2Toast_('拜訪紀錄存檔失敗：' + (visitResp.error || '未知錯誤'), true);
-      saveBtn.disabled = false;
-      saveBtn.textContent = '儲存並回首頁';
-      return;
-    }
-    let skippedFunnel = false;
-    if (IS_TEST_MODE) { fv2TestBlockedLog_('階段推進', funnelPayload); skippedFunnel = true; }
+    if (!visitResp.success) throw new Error(visitResp.error || '未知錯誤');
+  } catch (e) {
+    fv2Toast_('紀錄沒有存成功，請重試：' + e.message, true);
+    saveBtn.disabled = false;
+    saveBtn.textContent = '儲存並回首頁';
+    return;
+  }
+
+  // /add-visit 已經成功——後面每一步各自包 try/catch，失敗只累積警告，不中斷流程。
+  const warnings = [];
+  try {
+    if (IS_TEST_MODE) { fv2TestBlockedLog_('階段推進', funnelPayload); warnings.push('階段推進：測試模式未送出'); }
     else await fetch(`${WORKER}/api/funnel/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(funnelPayload) });
-    const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
-    // 2026-11-18 送出提示修正：silent:true 比照正式客戶流程，不要讓「標記完成失敗」自己先跳
-    // 一次紅字，這裡統一組一句合併訊息。
-    const markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
-    // 存檔成功才清（失敗就留著）。進畫面時的清空只在換店才做，這裡存檔成功後要清乾淨。
-    fv2ResetRecordNewstoreFields_();
-    saveBtn.textContent = '已儲存';
-    const baseMsg = skippedFunnel ? '已儲存；測試模式：未送出（階段推進）' : '已儲存';
-    if (markResult.ok) {
-      fv2Toast_(baseMsg);
-    } else {
-      fv2Toast_(`拜訪紀錄已存，站點狀態未更新：${markResult.error}`, true);
-    }
+  } catch (e) { warnings.push('階段推進失敗'); }
+
+  // 不管上面有沒有失敗，一定要呼叫 fv2MarkTodayStatus_ 標記「完成」。
+  const { storeId: posStoreId, address: posAddress } = fv2StoreOrAddr_(storeId);
+  let markResult;
+  try {
+    markResult = await fv2MarkTodayStatus_(posStoreId, posAddress, { 狀態: '完成' }, '標記完成', genRequestId_(), { silent: true });
+  } catch (e) {
+    markResult = { ok: false, error: e.message };
+  }
+  // 存檔成功才清（失敗就留著）。進畫面時的清空只在換店才做，這裡存檔成功後要清乾淨。
+  fv2ResetRecordNewstoreFields_();
+  saveBtn.textContent = '已儲存';
+
+  if (markResult.ok) {
+    saveBtn.disabled = false;
+    document.getElementById('record-newstore-retry-mark').hidden = true;
+    const msg = warnings.length ? `已儲存（${warnings.join('、')}）` : '已儲存';
+    fv2Toast_(msg, warnings.length > 0);
     // 2026-11-18：存檔成功後重抓今日清單，回首頁才會看到正確的下一站。重抓失敗不該讓畫面看起來
     // 像存檔失敗——拜訪紀錄已經存成功了，照樣回首頁，只是另外提示一句。
     try {
@@ -1261,18 +1375,44 @@ document.getElementById('record-newstore-save').addEventListener('click', () => 
       fv2Toast_('已儲存，清單更新失敗，請手動重新整理', true);
     }
     showScreen('1-home');
-  })();
+  } else {
+    // 2026-11-19 使用者要求：標記完成失敗時 saveBtn 保持 disabled（文字留著「已儲存」），
+    // 只留「重試標記完成」可按——避免使用者再按一次儲存，用空內容＋新visitId多寫出一筆
+    // 空白紀錄。不 silent，不自動回首頁——留在這個畫面，讓「重試標記完成」按鈕看得到、按得到。
+    fv2PendingCompleteRetry_ = { posStoreId, posAddress };
+    document.getElementById('record-newstore-retry-mark').hidden = false;
+    fv2Toast_('紀錄已存，但標記完成失敗：' + markResult.error, true);
+  }
 });
+document.getElementById('record-newstore-retry-mark').addEventListener('click', () => fv2RetryMarkComplete_('record-newstore-retry-mark'));
 
 // ---- 4. 跳過這站 ----
+// 2026-11-18：連按防呆用——同一次進畫面固定一個requestId，不管按幾次送出都是同一個，GAS的
+// requestId去重才真的擋得住連點（之前這裡完全沒防呆，每次都genRequestId_()，形同沒去重）。
+// 2026-11-19：抽成函式，讓收工頁的「跳過」按鈕也能走同一套進畫面邏輯（不用再複製一份）。
+let fv2SkipRequestId_ = null;
+function fv2EnterSkipScreen_(key) {
+  FV2.currentStoreId = key;
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === key);
+  document.getElementById('skip-title').textContent = row ? `跳過 · ${row.name}` : '跳過';
+  // 每次重新進這畫面都重置回預設（先不排），避免殘留上一家店選的日期
+  document.getElementById('skip-resched-date').hidden = true;
+  document.getElementById('skip-resched-date').value = '';
+  fv2SkipRequestId_ = genRequestId_();
+  const skipBtn = document.getElementById('skip-submit');
+  skipBtn.disabled = false;
+  skipBtn.textContent = '確定';
+  showScreen('4-skip');
+}
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-go="4-skip"]')) {
-    const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
-    document.getElementById('skip-title').textContent = row ? `跳過 · ${row.name}` : '跳過';
-    // 每次重新進這畫面都重置回預設（先不排），避免殘留上一家店選的日期
-    document.getElementById('skip-resched-date').hidden = true;
-    document.getElementById('skip-resched-date').value = '';
+    fv2EnterSkipScreen_(FV2.currentStoreId);
   }
+});
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-finish-skip]');
+  if (!btn) return;
+  fv2EnterSkipScreen_(btn.dataset.finishSkip);
 });
 document.addEventListener('change', (e) => {
   if (e.target.name === 'reschedule') {
@@ -1282,19 +1422,50 @@ document.addEventListener('change', (e) => {
 // 跳過＋原因／改哪天：使用者明確要求只記備註文字（例如「原因：藥師不在｜改期：11/18」），
 // 不要自動把這家店插進改期那天的今日行程——插入今日行程是另一件事，由使用者自己之後在
 // planner.html 排，這裡只是留一句備註給自己參考，避免「跳過」順手造出一筆沒經過確認的排程。
+// 2026-11-18：補按鈕防呆、成功後改回首頁（不是4a-nearby，那是另一條「順路補一家」的路，
+// 跟「跳過後下一站要換掉」是兩件事）、失敗紅字留在原頁可重試。
 document.getElementById('skip-submit').addEventListener('click', async () => {
-  const reason = document.querySelector('input[name="skip"]:checked')?.closest('.choice')?.querySelector('div')?.textContent || '其他';
-  const reschedChoice = document.querySelector('input[name="reschedule"]:checked')?.value || 'none';
-  const reschedDate = document.getElementById('skip-resched-date').value;
-  if (reschedChoice === 'pick' && !reschedDate) { fv2Toast_('選了「選日期」但還沒選日期', true); return; }
-  let note = `原因：${reason}`;
-  if (reschedChoice === 'pick' && reschedDate) {
-    const d = new Date(reschedDate + 'T00:00:00');
-    note += `｜改期：${d.getMonth() + 1}/${d.getDate()}`;
+  const skipBtn = document.getElementById('skip-submit');
+  if (skipBtn.disabled) return;
+  skipBtn.disabled = true;
+  skipBtn.textContent = '送出中…';
+  try {
+    const reason = document.querySelector('input[name="skip"]:checked')?.closest('.choice')?.querySelector('div')?.textContent || '其他';
+    const reschedChoice = document.querySelector('input[name="reschedule"]:checked')?.value || 'none';
+    const reschedDate = document.getElementById('skip-resched-date').value;
+    if (reschedChoice === 'pick' && !reschedDate) {
+      fv2Toast_('選了「選日期」但還沒選日期', true);
+      skipBtn.disabled = false;
+      skipBtn.textContent = '確定';
+      return;
+    }
+    let note = `原因：${reason}`;
+    if (reschedChoice === 'pick' && reschedDate) {
+      const d = new Date(reschedDate + 'T00:00:00');
+      note += `｜改期：${d.getMonth() + 1}/${d.getDate()}`;
+    }
+    const row = FV2.todayRows.find(r => (r.storeId || r.address) === FV2.currentStoreId);
+    const storeName = row ? row.name : FV2.currentStoreId;
+    const { storeId, address } = fv2StoreOrAddr_(FV2.currentStoreId);
+    const result = await fv2MarkTodayStatus_(storeId, address, { 狀態: '跳過', 備註: note }, '標記跳過', fv2SkipRequestId_, { silent: true });
+    if (result.ok) {
+      fv2Toast_(`已跳過 ${storeName}`);
+      try {
+        await fv2LoadAll();
+      } catch (e) {
+        fv2Toast_('已跳過，清單更新失敗，請手動重新整理', true);
+      }
+      showScreen('1-home');
+    } else {
+      fv2Toast_('標記跳過失敗：' + result.error, true);
+      skipBtn.disabled = false;
+      skipBtn.textContent = '確定';
+    }
+  } catch (e) {
+    fv2Toast_('標記跳過失敗（網路錯誤）：' + e.message, true);
+    skipBtn.disabled = false;
+    skipBtn.textContent = '確定';
   }
-  const { storeId, address } = fv2StoreOrAddr_(FV2.currentStoreId);
-  const result = await fv2MarkTodayStatus_(storeId, address, { 狀態: '跳過', 備註: note }, '標記跳過', genRequestId_());
-  if (result.ok) { fv2Toast_('已標記跳過'); showScreen('4a-nearby'); fv2RenderNearby_(); }
 });
 
 // ---- 1a／4a：插入位置 Routes API 試算（瀏覽器端直連 Google，不經過 Worker）----
@@ -1467,8 +1638,46 @@ function fv2RenderFinish() {
   dadEl.innerHTML = FV2.dadTodos.length
     ? `<div class="dad-note">老爸的事：${FV2.dadTodos.map(t => escapeHtml_(t.task)).join('、')}</div>`
     : '';
+
+  // 2026-11-19 收工規格改版（使用者核准）：列出今天狀態是「待去」或「已到」的站，可以直接
+  // 「記錄這家」（data-record-id，走 fv2DoRecord_ 同一套）或「跳過」（data-finish-skip，走
+  // fv2EnterSkipScreen_ 同一套），不另外發明一套寫入邏輯。「已到」用醒目顏色標示，提醒可能是
+  // 存檔中途中斷（見熊羽藥局那次事故）。清單空了才讓「確認收工」可按，按下只是回首頁、不寫
+  // 任何資料——「收工」本身不是一個會改資料的動作，清單空代表該做的事都已經透過上面兩顆按鈕
+  // 做完了。
+  const pending = rows.filter(r => r.status === '待去' || r.status === '已到');
+  const pendingCard = document.getElementById('finish-pending-card');
+  const confirmBtn = document.getElementById('finish-confirm-btn');
+  if (pending.length) {
+    pendingCard.hidden = false;
+    document.getElementById('finish-pending-list').innerHTML = pending.map(r => {
+      const key = r.storeId || r.address;
+      const isArrived = r.status === '已到';
+      return `
+        <div class="card" style="${isArrived ? 'outline:1.5px solid var(--sr-danger);background:var(--sr-danger-tint);' : ''}">
+          <div class="store-name">${escapeHtml_(r.name)} <span class="tag${isArrived ? ' warn' : ''}">${escapeHtml_(r.status)}</span></div>
+          ${isArrived ? '<div class="conflict-text">已到但沒有完成，可能是存檔失敗</div>' : ''}
+          <div class="btn-row" style="margin-top:var(--sr-space-3)">
+            <button class="btn primary" data-record-id="${escapeHtml_(key)}">記錄這家</button>
+            <button class="btn danger-outline" data-finish-skip="${escapeHtml_(key)}">跳過</button>
+          </div>
+        </div>`;
+    }).join('');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = `還有 ${pending.length} 家沒處理`;
+  } else {
+    pendingCard.hidden = true;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '今天已收工';
+  }
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-go="5-finish"]')) fv2RenderFinish(); });
+document.getElementById('finish-confirm-btn').addEventListener('click', () => {
+  const btn = document.getElementById('finish-confirm-btn');
+  if (btn.disabled) return; // 清單不是空的時候已經被render邏輯disable，這裡保險一下
+  fv2Toast_('今天已收工');
+  showScreen('1-home');
+});
 
 // 拜訪目的選項（跟 docs/今日清單_規格.md VISIT_PURPOSES 同一組值，之後要集中到 planner-config.js
 // 時這裡要一起改，暫時先照抄一份，跟 planner.html 既有「不共用、各自複製」的慣例一致）
