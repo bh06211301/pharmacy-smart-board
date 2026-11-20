@@ -366,6 +366,11 @@ export default {
         return await handleSaveGeo(request, env);
       }
 
+      // ★ 2026-11-20：field-v2「標籤（可複選）」AI 建議（只讀，不寫任何正式資料，見 handleTagSuggest）
+      if (path === '/api/tag-suggest') {
+        return await handleTagSuggest(request, env, ctx);
+      }
+
       return json({ error: '找不到這個 endpoint' }, 404);
 
     } catch (err) {
@@ -5313,6 +5318,302 @@ async function handleFunnelOverview(request, env, ctx) {
 
 function formatDateIso_(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ============================================================
+// POST /api/tag-suggest — AI 標籤建議（field-v2「標籤（可複選）」第一版關鍵字建議之後，
+// 預留要接的 AI 來源，見 field-v2.html 的 fv2RequestAiTagHints_ 空殼函式）。
+// 2026-11-20 新增。只讀 SHEET_PLANNER 的「標籤定義」分頁（可選覆蓋），不寫入任何正式資料；
+// 唯一的 KV 寫入是 tagsuggest:count:YYYY-MM-DD 這把每日呼叫次數計數器。
+// ============================================================
+
+// 沿用專案裡其餘 4 處 Gemini 呼叫已經在用、且確認可用的同一顆模型（見檔案開頭 GEMINI_MODEL
+// 常數）。查證：gemini-3.5-flash-lite 是目前 Google 官方的 GA Flash-Lite 機型（2026-07-21
+// 發布），gemini-3.1-flash-lite 是更早一代、非目前建議版本——原本設計草稿寫的常數名稱
+// TAG_SUGGEST_MODEL_ 保留，但預設值改採專案現有常數同一顆模型，不要再猜新名稱。
+const TAG_SUGGEST_MODEL_ = GEMINI_MODEL;
+const TAG_SUGGEST_DAILY_LIMIT_ = 100;
+const TAG_SUGGEST_COUNT_TTL_SEC_ = 172800; // 2 天
+
+// 標籤清單與判斷準則（內建預設，SHEET_PLANNER 的「標籤定義」分頁可選覆蓋，見 fetchTagDefs_）。
+// 「其他」刻意沒有 AI 應該主動建議的情境說明——這顆標籤永遠只能手動選，見 handleTagSuggest_
+// 組 enabledDefs 時把它濾掉，不會出現在送給 AI 的標籤清單裡。
+const DEFAULT_TAG_DEFS_ = [
+  {
+    tag: '缺貨',
+    definition: '店家說某個產品沒貨、斷貨、快賣完、上次叫的貨還沒到，或要求補貨。',
+    examples: ['這個賣完了，什麼時候會有貨', '上次訂的還沒到', '庫存快沒了要補一點'],
+    enabled: true,
+  },
+  {
+    tag: '客訴',
+    definition: '店家抱怨、不滿、要求退換貨，或對產品/服務品質有意見。',
+    examples: ['這批品質跟以前不一樣', '客人反應吃了不舒服要退貨', '送貨太慢不滿意'],
+    enabled: true,
+  },
+  {
+    tag: '競品',
+    definition: '店家提到別家廠牌或產品、有人在推銷別的牌子，或拿別家產品來比較。',
+    examples: ['別的業務也有來推銷', '隔壁牌子價格比較低', '客人問有沒有像別牌那種的'],
+    enabled: true,
+  },
+  {
+    tag: '價格',
+    definition: '店家覺得價格偏貴、想議價、詢問折扣，或在比較價格。',
+    examples: ['這個價格可以再談嗎', '有沒有優惠或折扣', '別家賣得比較便宜'],
+    enabled: true,
+  },
+  {
+    tag: '滿意',
+    definition: '店家表示產品賣得好、顧客反應好，或願意繼續回購。',
+    examples: ['這個賣得不錯，客人都說好', '下次還要再訂', '效果好想再多訂一些'],
+    enabled: true,
+  },
+  {
+    tag: '其他',
+    definition: '不屬於以上任何一種狀況。AI 不應主動建議這個標籤，只供手動選。',
+    examples: [],
+    enabled: true,
+  },
+];
+
+// 地址片段（第一版，見已知限制）：縣/市/區/鄉/鎮 + 路/街（必要）+ 可選 段/巷/弄/號/樓。
+// 沒有路名、只用「OO區OO號」這種寫法的地址抓不到，見回報裡的已知限制說明。
+// 路/街前面那段「路名」原本直接吃任意 1~10 個中文字/數字，結果在沒有標點分隔的句子裡（例如
+// 「店家在文化路100號」）會往前一路吃到不相干的字（吃成「店家在文化路」）——用一個常見語助詞
+// /動詞黑名單擋掉這些字不能出現在路名裡，縮小誤判範圍（仍是啟發式規則，不保證完全不誤判）。
+const TAG_SUGGEST_ADDR_BLACKLIST_ = '在說是的了要問跟我你他她就都還也去來想看聽打買賣叫到給讓請謝好嗎呢啊喔這那批件貨缺補家店老闆藥師先生小姐';
+const TAG_SUGGEST_ADDRESS_RE_ = new RegExp(
+  '(?:[\\u4e00-\\u9fa5]{1,6}(?:縣|市))?' +
+  '(?:[\\u4e00-\\u9fa5]{1,6}(?:區|鄉|鎮))?' +
+  `(?:(?![${TAG_SUGGEST_ADDR_BLACKLIST_}])[\\u4e00-\\u9fa50-9]){1,6}(?:路|街)` +
+  '(?:[0-9一二三四五六七八九十]{1,3}段)?' +
+  '(?:[0-9]{1,4}巷)?' +
+  '(?:[0-9]{1,4}弄)?' +
+  '(?:[0-9]{1,4}號)?' +
+  '(?:[0-9]{1,3}樓)?',
+  'g'
+);
+// 稱謂：姓氏（1~2字）+ 稱謂 → 只留稱謂。順序刻意把「老闆娘」排在「老闆」前面，避免規則命中
+// 「老闆」就提早結束、留下「娘」字沒處理掉。
+const TAG_SUGGEST_NAME_RE_ = /[一-龥]{1,2}(老闆娘|老闆|藥師|小姐|先生|店長|經理)/g;
+
+// 送給 AI 之前的遮蔽（獨立函式，見下方 harness 單元測試）。storeName 有值時整段文字裡的店名
+// 字面都換成「店家」；地址／電話／金額／連續長數字／稱謂姓氏，各自換成對應的佔位字串。
+// 已知限制（第一版，未覆蓋的情況）：
+//  1. 只用「OO區OO號」這種沒有路名的地址寫不到（TAG_SUGGEST_ADDRESS_RE_ 要求必須有路/街）。
+//  2. 店名用簡稱/暱稱（不是完整 storeName 字面）時遮不到，例如 storeName="幸福藥局" 但文字裡
+//     寫「幸福」兩個字。
+//  3. 沒有「藥師/老闆/...」稱謂、直接寫人名的句子（例如「跟陳小明聊到」）完全遮不到，規則只
+//     抓「姓氏+稱謂」這個固定樣式。
+//  4. 4 個字以上的姓名前綴（罕見但存在）只會被規則留下稱謂、名字前綴超過 2 字的部分仍會露出
+//     （例如「歐陽大文藥師」只會變成「陽大文」+ 被規則誤判，詳見「姓氏最多抓 2 字」的限制）。
+//  5. 地址路名前綴用黑名單字元擋掉常見語助詞/動詞（見 TAG_SUGGEST_ADDR_BLACKLIST_），防止
+//     沒有標點分隔時路名往前誤吃到無關文字；但如果路名本身剛好包含黑名單裡的字（實務上少見），
+//     該路名會被錯誤截斷，只保留黑名單字之後的部分。
+// storeName 先換成哨兵字元（\x00STORE\x00，不是合法中文字，後面任何規則都不會命中它），最後
+// 一步才換成「店家」顯示字樣——2026-11-20 審查抓到：如果一開始就直接換成「店家」，「家」字會
+// 被後面的稱謂規則（TAG_SUGGEST_NAME_RE_ 的「姓氏1~2字+老闆娘/藥師/...」樣式）當成姓氏吃掉，
+// 例如 storeName="幸福店"、文字「幸福店老闆娘說缺貨」會被誤判成「店家」+「老闆娘」是同一組
+// 姓氏+稱謂，整串被規則吃掉只剩「老闆娘」。用哨兵字元隔開，稱謂規則跑的時候看到的是不會匹配
+// 中文字元類別的哨兵字串，不會被誤認成姓氏。
+const TAG_SUGGEST_STORE_SENTINEL_ = '\x00STORE\x00';
+function maskForAi_(text, storeName) {
+  let t = String(text || '');
+  if (storeName) {
+    const esc = String(storeName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (esc) t = t.replace(new RegExp(esc, 'g'), TAG_SUGGEST_STORE_SENTINEL_);
+  }
+  t = t.replace(TAG_SUGGEST_ADDRESS_RE_, '[地址]');
+  t = t.replace(/09\d{8}/g, '[數字]');
+  t = t.replace(/0\d{1,2}-?\d{6,8}/g, '[數字]');
+  t = t.replace(/\$\s?\d+/g, '[數字]');
+  t = t.replace(/NT\$?\s?\d+/gi, '[數字]');
+  t = t.replace(/\d+\s?元/g, '[數字]');
+  t = t.replace(/\d{6,}/g, '[數字]');
+  t = t.replace(TAG_SUGGEST_NAME_RE_, '$1');
+  t = t.split(TAG_SUGGEST_STORE_SENTINEL_).join('店家');
+  return t;
+}
+
+function tagSuggestDefEnabled_(raw) {
+  if (raw === false) return false;
+  if (raw === true || raw === '' || raw === null || raw === undefined) return true;
+  const s = String(raw).trim().toLowerCase();
+  return ['false', '否', '0', 'n', 'no'].indexOf(s) < 0;
+}
+
+// 讀 SHEET_PLANNER 的「標籤定義」分頁（欄位：標籤名稱／定義說明／範例情境／是否啟用），走既有
+// fetchGvizSheet 的 SWR 快取，跟 handleListPlannerRules 等既有端點同一套。分頁不存在、讀取失敗、
+// 或讀出來是空的，都直接回預設定義，不報錯——這支函式不應該讓整個 /api/tag-suggest 掛掉。
+async function fetchTagDefs_(env, ctx) {
+  if (!env.SHEET_PLANNER) return DEFAULT_TAG_DEFS_;
+  try {
+    const { rows, colMap } = await fetchGvizSheet(env.SHEET_PLANNER, '標籤定義', env, ctx);
+    if (!rows || !rows.length) return DEFAULT_TAG_DEFS_;
+    const defs = rows.map(row => {
+      const tag = String(gvizGet(row, colMap, '標籤名稱') || '').trim();
+      const definition = String(gvizGet(row, colMap, '定義說明') || '').trim();
+      const exampleRaw = String(gvizGet(row, colMap, '範例情境') || '').trim();
+      const examples = exampleRaw ? exampleRaw.split(/[、,，;；]/).map(s => s.trim()).filter(Boolean) : [];
+      return { tag, definition, examples, enabled: tagSuggestDefEnabled_(gvizGet(row, colMap, '是否啟用')) };
+    }).filter(d => d.tag);
+    return defs.length ? defs : DEFAULT_TAG_DEFS_;
+  } catch (e) {
+    console.error('[tag-suggest] 讀取「標籤定義」分頁失敗，改用預設定義:', e.message);
+    return DEFAULT_TAG_DEFS_;
+  }
+}
+
+function buildTagSuggestPrompt_(defs, fields) {
+  const defsBlock = defs.map(d => {
+    const ex = d.examples && d.examples.length ? `（常見說法例如：${d.examples.join('、')}）` : '';
+    return `- ${d.tag}：${d.definition}${ex}`;
+  }).join('\n');
+  const fieldsBlock = [
+    fields.purpose ? `拜訪目的：${fields.purpose}` : '',
+    fields.content ? `拜訪內容：${fields.content}` : '',
+    fields.nextAction ? `下次要記得：${fields.nextAction}` : '',
+    fields.urgent ? `緊急問題：${fields.urgent}` : '',
+  ].filter(Boolean).join('\n');
+  return `你是藥局業務拜訪紀錄的標籤分類助手。以下是可選的標籤定義：
+${defsBlock}
+
+規則：
+1. 只回傳有明確文字證據支持的標籤，最多 3 個。
+2. 每個標籤附一句不超過 20 字的中文理由，引用或改寫文字中的證據。
+3. 證據不足或看不出符合任何標籤時，回傳空陣列，不要猜測。
+4. 只能從上面列出的標籤名稱中選，不要自創新標籤名稱。
+
+拜訪紀錄內容（部分敏感資訊已用方括號遮蔽）：
+${fieldsBlock}`;
+}
+
+// 台北時區的 YYYY-MM-DD（每日上限計數用，不依賴 Worker 執行所在地的系統時區）。
+function taipeiDateStr_() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+}
+
+// 呼叫 Gemini，逾時 6 秒、不重試、不做備援鏈。金鑰放 header（x-goog-api-key）不放 URL
+// query，避免進到 Cloudflare/瀏覽器的請求日誌。responseMimeType+responseSchema 強制 JSON
+// 輸出、temperature 0、maxOutputTokens 200（控制成本與延遲）。
+// 2026-11-20 審查修正：gemini-3.5-flash-lite 屬於 Gemini 3.x 系列，官方文件（見下方查證來源）
+// 說明 3.x 系列的思考設定改用字串列舉 thinkingConfig.thinkingLevel（minimal/low/medium/high），
+// 舊版數值參數 thinkingBudget 屬於 2.x 世代的設計，兩者同時出現在同一次請求會直接被 API 擋下來
+// 回 400 Bad Request（"thinking_level and thinking_budget cannot both be set"）。這裡改用
+// thinkingLevel:'minimal'（該模型最低的思考程度，對應原本想要的「關閉或壓到最低」）。
+// 查證來源：
+//   https://ai.google.dev/gemini-api/docs/thinking（Gemini 3.5 Flash-Lite 預設即 MINIMAL，
+//     支援 minimal/low/medium/high；「thinking_budget 在 Gemini 3.x 已不建議使用，改用
+//     thinking_level 字串列舉」）
+//   https://ai.google.dev/api/generate-content（ThinkingConfig 欄位：thinkingLevel 為列舉，
+//     REST JSON 範例為 "thinkingConfig": { "thinkingLevel": "low" }）
+async function callGeminiForTagSuggest_(env, promptText) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${TAG_SUGGEST_MODEL_}:generateContent`;
+  const payload = {
+    contents: [{ parts: [{ text: promptText }] }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 200,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          suggestions: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: { tag: { type: 'STRING' }, reason: { type: 'STRING' } },
+              required: ['tag', 'reason'],
+            },
+          },
+        },
+        required: ['suggestions'],
+      },
+      thinkingConfig: { thinkingLevel: 'minimal' },
+    },
+  };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    let data;
+    try { data = await res.json(); } catch (e) { return { ok: false, error: 'bad_json' }; }
+    if (!res.ok) return { ok: false, error: `gemini_http_${res.status}` };
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return { ok: false, error: 'empty_response' };
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { return { ok: false, error: 'bad_json' }; }
+    if (!parsed || !Array.isArray(parsed.suggestions)) return { ok: false, error: 'bad_shape' };
+    return { ok: true, suggestions: parsed.suggestions };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? 'timeout' : 'network_error' };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function handleTagSuggest(request, env, ctx) {
+  if (request.method !== 'POST') return json({ error: '不支援此 method' }, 405);
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'bad_request' }, 400); }
+
+  const content = String(body?.content || '');
+  const nextAction = String(body?.nextAction || '');
+  const urgent = String(body?.urgent || '');
+  const purpose = String(body?.purpose || '');
+  const storeName = String(body?.storeName || '');
+
+  const combined = [content, nextAction, urgent].filter(Boolean).join('\n');
+  const trimmedLen = combined.trim().length;
+
+  // 太短／空字串：不呼叫 AI，直接回空建議（不算失敗）。太長：直接拒絕，不送到 AI。
+  if (trimmedLen < 4) return json({ ok: true, suggestions: [] });
+  if (combined.length > 600) return json({ ok: false, error: 'input_too_long' }, 400);
+
+  if (!env.GEMINI_API_KEY) return json({ ok: false, error: 'not_configured' }, 503);
+
+  // 每日全域上限（台北時區），只有確定要呼叫 AI 前才讀/寫這把 KV，避免白白浪費寫入量。
+  const countKey = `tagsuggest:count:${taipeiDateStr_()}`;
+  if (env.TODOS_KV) {
+    const currentCount = parseInt((await env.TODOS_KV.get(countKey)) || '0', 10) || 0;
+    if (currentCount >= TAG_SUGGEST_DAILY_LIMIT_) return json({ ok: false, error: 'daily_limit' }, 429);
+    await env.TODOS_KV.put(countKey, String(currentCount + 1), { expirationTtl: TAG_SUGGEST_COUNT_TTL_SEC_ });
+  }
+
+  const allDefs = await fetchTagDefs_(env, ctx);
+  const enabledDefs = allDefs.filter(d => d.enabled && d.tag !== '其他');
+  const enabledNames = new Set(enabledDefs.map(d => d.tag));
+
+  const maskedFields = {
+    content: maskForAi_(content, storeName),
+    nextAction: maskForAi_(nextAction, storeName),
+    urgent: maskForAi_(urgent, storeName),
+    purpose,
+  };
+  const promptText = buildTagSuggestPrompt_(enabledDefs, maskedFields);
+
+  const t0 = Date.now();
+  const result = await callGeminiForTagSuggest_(env, promptText);
+  const latencyMs = Date.now() - t0;
+  // 只記次數與耗時，不印拜訪內容或 AI 回應原文。
+  console.log(`[tag-suggest] ok=${result.ok} latencyMs=${latencyMs}${result.ok ? '' : ' error=' + result.error}`);
+
+  if (!result.ok) return json({ ok: false, error: result.error }, 500);
+
+  // 防幻覺：AI 回傳的標籤必須是「啟用中且非其他」清單的子集，其餘一律丟掉。
+  const suggestions = (result.suggestions || [])
+    .filter(s => s && typeof s.tag === 'string' && enabledNames.has(s.tag))
+    .slice(0, 3)
+    .map(s => ({ tag: s.tag, reason: String(s.reason || '').slice(0, 60) }));
+
+  return json({ ok: true, suggestions, model: TAG_SUGGEST_MODEL_, latencyMs });
 }
 
 // ============================================================
