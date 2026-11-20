@@ -1153,15 +1153,17 @@ async function fv2SubmitFollowupActions_(visitId) {
   }
   return { sentCount, skippedForTest };
 }
-// 老爸提醒關鍵字判斷，照抄 field.html submitVisitRecord 既有邏輯（使用者核准：沿用，不改字眼）
+// 老爸提醒關鍵字判斷，照抄 field.html submitVisitRecord 既有邏輯（使用者核准：沿用，不改字眼）。
+// 2026-11-19 紅單流程重整：移除「把紅單放回抽屜」待辦——這件事改由 yesterday.html B 區塊
+// 「待放抽屜／可郵寄」自動判斷+手動按鈕處理（見 worker.js handleRedSlips／handleRedSlipAction），
+// 不再需要手動提醒待辦；isDelivery/isPayment 兩個判斷式繼續保留給「還帳單／交資料袋給爸爸」用，
+// 且只有 isDad 的店才產生待辦——我的店完全不產生待辦（使用者明確要求）。
 function fv2DadReminderTasks_(purpose, content, phId, phName, isDad, visitId, dateStr) {
   const isDelivery = purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content);
   const isPayment = purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content);
-  const isRedSlip = isDelivery || isPayment || /紅單|交貨/.test(content);
   const tasks = [];
   if (isDad && isDelivery) tasks.push({ task: `【${phName}】還帳單給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
   if (isDad && isPayment) tasks.push({ task: `【${phName}】交資料袋給爸爸`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
-  if (isRedSlip) tasks.push({ task: `【${phName}】把紅單放回抽屜（等整理日整理）`, quadrant: 'dad', pharmacyId: phId, pharmacyName: phName, sourceVisitId: visitId, sourceVisitDate: dateStr, type: 'return_receipt' });
   return tasks;
 }
 document.getElementById('record-customer-save').addEventListener('click', async () => {

@@ -41,9 +41,14 @@
   .sync-status { font-weight: var(--sr-weight-normal); }
   .sync-status.stale { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
 
+  .redslip-section { display: flex; flex-direction: column; gap: var(--sr-space-2); }
+  .redslip-section-title { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
+  .redslip-store { margin-bottom: var(--sr-space-3); }
+  .redslip-store-name { font-weight: var(--sr-weight-bold); font-size: var(--sr-text-sm); }
   .redslip-row { display: flex; justify-content: space-between; align-items: center; gap: var(--sr-space-4); padding: var(--sr-space-3) 0; border-bottom: 1px solid var(--sr-line-row); flex-wrap: wrap; }
   .redslip-row:last-child { border-bottom: none; }
   .redslip-row.overdue { color: var(--sr-danger); font-weight: var(--sr-weight-bold); }
+  .mail-date-input { height: var(--sr-btn-h-sm); border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md); font-family: var(--sr-font); font-size: var(--sr-text-xs); padding: 0 var(--sr-space-3); }
   .btn-sm { height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md); font-size: var(--sr-text-xs); font-weight: var(--sr-weight-bold); cursor: pointer; font-family: var(--sr-font); background: var(--sr-primary); border: none; color: var(--sr-on-dark); }
   .btn-sm:hover { background: var(--sr-primary-hover); }
   .btn-sm:disabled { background: var(--sr-ink-3); cursor: default; }
@@ -268,17 +273,48 @@ async function loadSyncStatus() {
   }
 }
 
-// ---- B：紅單放進抽屜 ----
+// ---- B：紅單放進抽屜（2026-11-19 重整：依「有沒有對應送貨拜訪」分兩格）----
+// (a) 待放抽屜（已送貨）：按店列出，一筆一個勾勾，按下呼叫 /api/red-slip-action action=toDrawer
+//     （借出日期＝送貨拜訪日、歸還日期＝今天，Worker 伺服端重算，不信任前端）。
+// (b) 可郵寄（還沒送貨）：一筆一個「已郵寄」按鈕＋可改日期（預設今天），不標逾期。
 async function loadRedSlips() {
   const root = document.getElementById('redslip-root');
   try {
     const d = await get('/api/red-slips');
-    root.innerHTML = d.items.length
-      ? d.items.map(it => `<div class="redslip-row${it.overdue ? ' overdue' : ''}">
-          <span>${escapeHtml(it.storeName)}　訂單 ${escapeHtml(it.orderDate)}${it.overdue ? '（已超過3個工作日）' : ''}</span>
-          <button type="button" class="btn-sm" data-action="mark-returned" data-order-no="${escapeHtml(it.orderNo)}">紅單已歸位</button>
-        </div>`).join('') + `<div class="checklist-sub" style="margin-top:var(--sr-space-2)">只列 ${escapeHtml(d.cutoverDate)} 之後的訂單</div>`
-      : '<div class="empty-hint">目前沒有還沒歸位的紅單</div>';
+    const byStore = {};
+    (d.toDrawer || []).forEach(it => {
+      (byStore[it.storeId] = byStore[it.storeId] || { storeName: it.storeName, items: [] }).items.push(it);
+    });
+    const drawerHtml = Object.keys(byStore).length
+      ? Object.values(byStore).map(g => `
+          <div class="redslip-store">
+            <div class="redslip-store-name">${escapeHtml(g.storeName)}</div>
+            ${g.items.map(it => `<div class="redslip-row${it.overdue ? ' overdue' : ''}">
+              <span>訂單 ${escapeHtml(it.orderDate)}（送貨拜訪 ${escapeHtml(it.deliveryVisitDate)}）${it.overdue ? `（已超過3個工作日，依${escapeHtml(it.referenceSource)}）` : ''}</span>
+              <button type="button" class="btn-sm" data-action="red-slip-to-drawer" data-order-no="${escapeHtml(it.orderNo)}">放進抽屜</button>
+            </div>`).join('')}
+          </div>`).join('')
+      : '<div class="empty-hint">目前沒有待放抽屜的紅單</div>';
+
+    const todayIso = isoOf_(new Date());
+    const mailHtml = (d.canMail || []).length
+      ? d.canMail.map(it => `<div class="redslip-row">
+          <span>${escapeHtml(it.storeName)}　訂單 ${escapeHtml(it.orderDate)}</span>
+          <input type="date" class="mail-date-input" value="${todayIso}" max="${todayIso}">
+          <button type="button" class="btn-sm" data-action="red-slip-mailed" data-order-no="${escapeHtml(it.orderNo)}">已郵寄</button>
+        </div>`).join('')
+      : '<div class="empty-hint">目前沒有可郵寄的紅單</div>';
+
+    root.innerHTML = `
+      <div class="redslip-section">
+        <div class="redslip-section-title">待放抽屜（已送貨）</div>
+        ${drawerHtml}
+      </div>
+      <div class="redslip-section">
+        <div class="redslip-section-title">可郵寄（還沒送貨）</div>
+        ${mailHtml}
+      </div>
+      <div class="checklist-sub" style="margin-top:var(--sr-space-2)">只列 ${escapeHtml(d.cutoverDate)} 之後的訂單</div>`;
   } catch (e) {
     root.innerHTML = `<div class="empty-hint">載入失敗：${escapeHtml(e.message)}</div>`;
   }
@@ -314,17 +350,33 @@ document.body.addEventListener('click', async (e) => {
     }
     return;
   }
-  const markReturnedBtn = e.target.closest('[data-action="mark-returned"]');
-  if (markReturnedBtn) {
-    markReturnedBtn.disabled = true; markReturnedBtn.textContent = '處理中…';
+  const toDrawerBtn = e.target.closest('[data-action="red-slip-to-drawer"]');
+  if (toDrawerBtn) {
+    toDrawerBtn.disabled = true; toDrawerBtn.textContent = '處理中…';
     try {
-      const resp = await post('/api/red-slips/mark-returned', { orderNo: markReturnedBtn.dataset.orderNo });
+      const resp = await post('/api/red-slip-action', { orderNo: toDrawerBtn.dataset.orderNo, action: 'toDrawer' });
       if (!resp.ok) throw new Error(resp.error || '失敗');
-      markReturnedBtn.closest('.redslip-row').style.opacity = '0.4';
-      markReturnedBtn.textContent = '已歸位';
+      toDrawerBtn.closest('.redslip-row').style.opacity = '0.4';
+      toDrawerBtn.textContent = '已放進抽屜';
     } catch (err) {
       alert('標記失敗：' + err.message);
-      markReturnedBtn.disabled = false; markReturnedBtn.textContent = '紅單已歸位';
+      toDrawerBtn.disabled = false; toDrawerBtn.textContent = '放進抽屜';
+    }
+    return;
+  }
+  const mailedBtn = e.target.closest('[data-action="red-slip-mailed"]');
+  if (mailedBtn) {
+    const dateInput = mailedBtn.closest('.redslip-row').querySelector('.mail-date-input');
+    mailedBtn.disabled = true; mailedBtn.textContent = '處理中…';
+    try {
+      const resp = await post('/api/red-slip-action', { orderNo: mailedBtn.dataset.orderNo, action: 'mailed', date: dateInput.value });
+      if (!resp.ok) throw new Error(resp.error || '失敗');
+      mailedBtn.closest('.redslip-row').style.opacity = '0.4';
+      mailedBtn.textContent = '已郵寄完成';
+      dateInput.disabled = true;
+    } catch (err) {
+      alert('標記失敗：' + err.message);
+      mailedBtn.disabled = false; mailedBtn.textContent = '已郵寄';
     }
   }
 });
