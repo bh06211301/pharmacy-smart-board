@@ -137,6 +137,13 @@
     border: 1px solid var(--sr-line); cursor: pointer; background: var(--sr-bg);
   }
   .chip.selected { background: var(--sr-primary); color: #fff; border-color: var(--sr-primary); }
+  .chip.suggested { border-style: dashed; border-color: var(--sr-primary); }
+  /* 標籤區：每個標籤自己一格，底下各掛一行說明＋一行動態建議，手機版 2 欄排，說明文字不佔到
+     chip 本身的點擊區（chip 跟文字分別是獨立區塊，點擊判定只看 .chip）。 */
+  .tag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sr-space-3) var(--sr-space-4); }
+  .tag-item { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .tag-desc { font-size: var(--sr-text-2xs); color: var(--sr-ink-2); line-height: 1.3; }
+  .tag-hint { font-size: var(--sr-text-2xs); color: var(--sr-primary); line-height: 1.3; }
   .mic-row { display: flex; gap: var(--sr-space-3); align-items: center; margin-top: var(--sr-space-2); }
   .mic-btn {
     width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--sr-line);
@@ -309,14 +316,7 @@
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
       <div class="section-label">標籤（可複選）</div>
-      <div id="record-customer-tags" class="chip-group">
-        <span class="chip">競品</span>
-        <span class="chip">缺貨</span>
-        <span class="chip">客訴</span>
-        <span class="chip">價格</span>
-        <span class="chip">滿意</span>
-        <span class="chip">其他</span>
-      </div>
+      <div id="record-customer-tags" class="tag-grid"></div>
 
       <div class="section-label">緊急問題</div>
       <input type="text" id="record-customer-urgent" placeholder="有的話才填">
@@ -325,7 +325,7 @@
       <input type="text" id="record-customer-nextaction" placeholder="例如：帶新品試用包">
       <div class="stop-sub">文字會附在拜訪內容後面一起存檔；勾下面的選項才會另外建一筆待追蹤</div>
 
-      <label class="choice"><input type="checkbox" id="record-customer-followup-checkbox" checked><div>同時建立待追蹤（下次經過）</div></label>
+      <label class="choice"><input type="checkbox" id="record-customer-followup-checkbox"><div>同時建立待追蹤（下次經過）</div></label>
 
       <div id="record-customer-dad-note" class="dad-note" hidden></div>
     </div>
@@ -360,14 +360,7 @@
       <div class="mic-row"><button class="mic-btn">🎙</button><span class="stop-sub">按住說話，自動轉文字</span></div>
 
       <div class="section-label">標籤（可複選）</div>
-      <div id="record-newstore-tags" class="chip-group">
-        <span class="chip">競品</span>
-        <span class="chip">缺貨</span>
-        <span class="chip">客訴</span>
-        <span class="chip">價格</span>
-        <span class="chip">滿意</span>
-        <span class="chip">其他</span>
-      </div>
+      <div id="record-newstore-tags" class="tag-grid"></div>
 
       <div class="section-label">緊急問題</div>
       <input type="text" id="record-newstore-urgent" placeholder="有的話才填">
@@ -496,6 +489,23 @@ document.addEventListener('click', (e) => {
     const group = chip.closest('[data-single]');
     if (group) group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
     chip.classList.toggle('selected', group ? true : !chip.classList.contains('selected'));
+    // 標籤區塊（record-customer-tags／record-newstore-tags）點了之後：已選取的標籤不該再顯示
+    // 建議樣式（即使文字還命中關鍵字），所以重新套一次目前的建議狀態；「記錄拜訪-正式客戶」
+    // 額外要重新評估一次「同時建立待追蹤」自動勾選（因為勾不勾的規則之一就是有沒有選缺貨/客訴）。
+    const tagsContainer = chip.closest('#record-customer-tags, #record-newstore-tags');
+    if (tagsContainer) {
+      // 直接重算一次目前文字的規則命中結果（不是只清掉剛點的那個），確保「選取不顯示建議」
+      // 這條規則在整組標籤都一致套用。
+      const text = tagsContainer.id === 'record-customer-tags'
+        ? [document.getElementById('record-customer-content').value,
+            document.getElementById('record-customer-nextaction').value,
+            document.getElementById('record-customer-urgent').value].join('\n')
+        : [document.getElementById('record-newstore-content').value,
+            document.getElementById('record-newstore-nextaction').value,
+            document.getElementById('record-newstore-urgent').value].join('\n');
+      fv2RenderTagHints_(tagsContainer.id, fv2MergeTagHints_(fv2RuleTagHints_(text), []));
+      if (tagsContainer.id === 'record-customer-tags') fv2UpdateFollowupAutoCheck_();
+    }
     return;
   }
   const choice = e.target.closest('.choice');
@@ -572,6 +582,156 @@ function minutesToHHMM_(totalMin) {
   const h = Math.floor(totalMin / 60) % 24, m = Math.round(totalMin % 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
+// ============================================================
+// 2026-11-20 標籤說明／自動建議／自動建待追蹤——使用者核准的方向（見聊天紀錄）：
+// 「標籤（可複選）」區塊從單純一排 chip 改成每個標籤各自一格，底下固定掛一行說明文字，
+// 輸入拜訪內容/下次要記得/緊急問題時再動態多掛一行「建議」（虛線外框＋小字），純關鍵字比對，
+// 不改變 selected 狀態、不自動幫使用者選標籤，使用者自己點一下才算正式選取。
+// ============================================================
+const FV2_TAG_ORDER_ = ['競品', '缺貨', '客訴', '價格', '滿意', '其他'];
+const FV2_TAG_DESCRIPTIONS_ = {
+  '缺貨': '店家說某產品沒貨或快沒貨。會自動建待追蹤。',
+  '客訴': '店家抱怨、要退換貨。會自動建待追蹤。',
+  '競品': '店家提到別家產品或廠商。只記錄，不建提醒。',
+  '價格': '店家覺得貴或想議價。只記錄，不建提醒。',
+  '滿意': '店家反應好、願意回購。只記錄，不建提醒。',
+  '其他': '以上都不是。只記錄。',
+};
+function fv2TagGridHtml_() {
+  return FV2_TAG_ORDER_.map(tag => `
+    <div class="tag-item" data-tag="${tag}">
+      <span class="chip">${tag}</span>
+      <div class="tag-desc">${FV2_TAG_DESCRIPTIONS_[tag]}</div>
+      <div class="tag-hint" hidden></div>
+    </div>`).join('');
+}
+document.getElementById('record-customer-tags').innerHTML = fv2TagGridHtml_();
+document.getElementById('record-newstore-tags').innerHTML = fv2TagGridHtml_();
+
+// 關鍵字規則建議（第一版，只建議不自動選）。「其他」沒有關鍵字，永遠不會被規則命中——使用者
+// 要標「其他」一律要自己手動點。FV2_TAG_HINTS_ 刻意集中放一個常數物件，之後要調整關鍵字只用改
+// 這裡，不用動比對邏輯。
+const FV2_TAG_HINTS_ = {
+  '缺貨': /缺貨|沒貨|斷貨|沒庫存|快賣完|補貨/i,
+  '客訴': /客訴|投訴|抱怨|退貨|退換|不滿|不好用/i,
+  '價格': /太貴|很貴|價格|價錢|議價|殺價|折扣|便宜/i,
+  '競品': /競品|別家|別牌|其他廠牌|別的牌子|他牌/i,
+  '滿意': /滿意|很好|不錯|喜歡|回購|好評/i,
+};
+// 純關鍵字規則來源：輸入文字裡命中哪些標籤的關鍵字，回傳 [{tag, source:'rule', evidence}]。
+function fv2RuleTagHints_(text) {
+  const t = String(text || '');
+  if (!t) return [];
+  const hints = [];
+  for (const tag of Object.keys(FV2_TAG_HINTS_)) {
+    const m = t.match(FV2_TAG_HINTS_[tag]);
+    if (m) hints.push({ tag, source: 'rule', evidence: m[0] });
+  }
+  return hints;
+}
+// 合併多來源建議（目前只有 rule，AI 接上後直接把 fv2RequestAiTagHints_ 的結果傳進來就能用，
+// 不用改這支函式）。同一個 tag 兩個來源都命中時，aiHints 後蓋 ruleHints（AI 判斷優先顯示）。
+function fv2MergeTagHints_(ruleHints, aiHints) {
+  const map = {};
+  (ruleHints || []).forEach(h => { map[h.tag] = h; });
+  (aiHints || []).forEach(h => { map[h.tag] = h; });
+  return Object.values(map);
+}
+// 預留 AI 建議來源：目前只回傳空陣列，之後會改成呼叫 Worker 的 /api/tag-suggest 讓 AI 判斷
+// 拜訪內容該標哪些標籤。這支函式先寫好、簽章固定，之後接上真的 AI 判斷時只要改這支的內容，
+// fv2RenderTagHints_／fv2MergeTagHints_ 這些畫面邏輯都不用動。目前不做任何網路呼叫。
+async function fv2RequestAiTagHints_(text) {
+  return [];
+}
+// 把算好的建議套到畫面：已經是 selected 的標籤不顯示建議（即使還是命中關鍵字），沒被選取
+// 且有命中的才加 .suggested 虛線外框＋底下那行「建議：...」小字。
+function fv2RenderTagHints_(containerId, hints) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.querySelectorAll('.tag-item').forEach(item => {
+    const tag = item.dataset.tag;
+    const chip = item.querySelector('.chip');
+    const hintEl = item.querySelector('.tag-hint');
+    const hint = hints.find(h => h.tag === tag);
+    const show = !!hint && !chip.classList.contains('selected');
+    chip.classList.toggle('suggested', show);
+    hintEl.hidden = !show;
+    hintEl.textContent = show
+      ? (hint.source === 'ai' ? `建議：AI 判斷（${hint.evidence}）` : `建議：偵測到『${hint.evidence}』`)
+      : '';
+  });
+}
+function fv2Debounce_(fn, ms) {
+  let timer = null;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+// 記錄拜訪（正式客戶）三個欄位合併文字後跑規則比對；AI 來源先用空陣列佔位，之後接上
+// fv2RequestAiTagHints_ 的真實結果即可。
+const fv2UpdateRecordCustomerTagHints_ = fv2Debounce_(() => {
+  const text = [
+    document.getElementById('record-customer-content').value,
+    document.getElementById('record-customer-nextaction').value,
+    document.getElementById('record-customer-urgent').value,
+  ].join('\n');
+  fv2RenderTagHints_('record-customer-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), []));
+}, 400);
+const fv2UpdateRecordNewstoreTagHints_ = fv2Debounce_(() => {
+  const text = [
+    document.getElementById('record-newstore-content').value,
+    document.getElementById('record-newstore-nextaction').value,
+    document.getElementById('record-newstore-urgent').value,
+  ].join('\n');
+  fv2RenderTagHints_('record-newstore-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), []));
+}, 400);
+['record-customer-content', 'record-customer-nextaction', 'record-customer-urgent'].forEach(id => {
+  document.getElementById(id).addEventListener('input', fv2UpdateRecordCustomerTagHints_);
+});
+['record-newstore-content', 'record-newstore-nextaction', 'record-newstore-urgent'].forEach(id => {
+  document.getElementById(id).addEventListener('input', fv2UpdateRecordNewstoreTagHints_);
+});
+
+// ---- 「同時建立待追蹤」自動勾選規則（只有記錄拜訪-正式客戶這個畫面有這個 checkbox，
+// 記錄拜訪-新店沒有對應選項，不適用）----
+// 使用者手動取消過（checkbox change 事件讓它變成未勾），之後自動規則就不再幫忙勾回，直到
+// 使用者自己重新進這個畫面（換店／fv2ResetRecordCustomerFields_ 會重置這個旗標）或自己手動
+// 勾回去（視為恢復自動模式，重新讓規則接手）。
+let fv2FollowupManualOverride_ = false;
+function fv2ShouldAutoCheckFollowup_(nextAction, urgent, selectedTags) {
+  if (String(nextAction || '').trim()) return true;
+  if (String(urgent || '').trim()) return true;
+  if (selectedTags.indexOf('缺貨') >= 0) return true;
+  if (selectedTags.indexOf('客訴') >= 0) return true;
+  return false;
+}
+// 待追蹤 item 內容優先序：下次要記得 > 緊急問題 > 命中的標籤名稱（缺貨優先於客訴，跟上面
+// 自動勾選規則列的順序一致）> 都沒有就回傳空字串（呼叫端看到空字串要整個不建這筆待追蹤）。
+function fv2FollowupItemText_(nextAction, urgent, selectedTags) {
+  const na = String(nextAction || '').trim();
+  if (na) return na;
+  const ur = String(urgent || '').trim();
+  if (ur) return ur;
+  if (selectedTags.indexOf('缺貨') >= 0) return '缺貨';
+  if (selectedTags.indexOf('客訴') >= 0) return '客訴';
+  return '';
+}
+function fv2RecordCustomerSelectedTags_() {
+  return Array.from(document.querySelectorAll('#record-customer-tags .chip.selected')).map(c => c.textContent.trim());
+}
+function fv2UpdateFollowupAutoCheck_() {
+  if (fv2FollowupManualOverride_) return; // 使用者已手動取消，規則不再幫忙勾回
+  const checkbox = document.getElementById('record-customer-followup-checkbox');
+  const nextAction = document.getElementById('record-customer-nextaction').value;
+  const urgent = document.getElementById('record-customer-urgent').value;
+  checkbox.checked = fv2ShouldAutoCheckFollowup_(nextAction, urgent, fv2RecordCustomerSelectedTags_());
+}
+document.getElementById('record-customer-followup-checkbox').addEventListener('change', (e) => {
+  // 這裡只會在使用者真的用手指/滑鼠點了 checkbox 才觸發（JS 直接設 .checked 不會發 change 事件），
+  // 所以可以放心拿它當「使用者手動操作」的判斷依據。
+  fv2FollowupManualOverride_ = !e.target.checked;
+});
+document.getElementById('record-customer-nextaction').addEventListener('input', fv2UpdateFollowupAutoCheck_);
+document.getElementById('record-customer-urgent').addEventListener('input', fv2UpdateFollowupAutoCheck_);
 
 const FV2 = {
   date: null,
@@ -1021,7 +1181,11 @@ function fv2ResetRecordCustomerFields_() {
   document.getElementById('record-customer-nextaction').value = '';
   document.getElementById('record-customer-urgent').value = '';
   document.querySelectorAll('#record-customer-tags .chip').forEach(c => c.classList.remove('selected'));
-  document.getElementById('record-customer-followup-checkbox').checked = true; // 還原HTML原始預設值（285行 checked）
+  // 2026-11-20 改版：預設不勾（原本預設勾），改成有內容才自動勾（見 fv2ShouldAutoCheckFollowup_），
+  // 同時重置「使用者已手動取消」的旗標，換店/重進畫面都要恢復成自動規則接手的狀態。
+  document.getElementById('record-customer-followup-checkbox').checked = false;
+  fv2FollowupManualOverride_ = false;
+  fv2RenderTagHints_('record-customer-tags', []); // 換店/重進畫面清掉上一家店殘留的建議樣式
   fv2CurrentVisitId_ = genRequestId_();
 }
 function fv2RenderRecordCustomer(storeId) {
@@ -1196,7 +1360,11 @@ document.getElementById('record-customer-save').addEventListener('click', async 
     tags, painPoints,
     sheetName: fv2SheetNameFor_(undefined, '拜訪紀錄_TEST'),
   };
-  const followupPayload = wantFollowup ? { action: 'addFollowup', storeId, item: nextAction || '拜訪後續', who: '我', deadlineType: '下次經過' } : null;
+  // 2026-11-20 改版：item 內容優先序見 fv2FollowupItemText_；都沒有內容就回傳空字串，即使
+  // checkbox 有勾（例如使用者手動勾回但沒填任何東西）也不建這筆待追蹤，不再用通用「拜訪後續」。
+  const followupItemText = fv2FollowupItemText_(nextAction, painPoints, tags ? tags.split(',') : []);
+  const followupPayload = (wantFollowup && followupItemText)
+    ? { action: 'addFollowup', storeId, item: followupItemText, who: '我', deadlineType: '下次經過' } : null;
   const dadTasks = ph ? fv2DadReminderTasks_(visitType, content, storeId, ph.name, ph.owner === '老爸', visitId, dateStr) : [];
 
   console.log('[field-v2] 記錄拜訪（正式客戶）準備送出的payload：', { visitPayload, followupPayload, dadTasks });
@@ -1375,6 +1543,7 @@ function fv2ResetRecordNewstoreFields_() {
   document.getElementById('record-newstore-nextaction').value = '';
   document.getElementById('record-newstore-urgent').value = '';
   document.querySelectorAll('#record-newstore-tags .chip').forEach(c => c.classList.remove('selected'));
+  fv2RenderTagHints_('record-newstore-tags', []); // 換店/重進畫面清掉上一家店殘留的建議樣式
   fv2CurrentNewstoreVisitId_ = genRequestId_();
 }
 function fv2RenderRecordNewstore(storeId) {
