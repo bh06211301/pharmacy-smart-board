@@ -341,6 +341,10 @@ export default {
       if (path === '/api/red-slips/mark-returned' && request.method === 'POST') {
         return await handleMarkOrderReturned(request, env, ctx);
       }
+      // ★ 2026-11-19 紅單流程重整：「待放抽屜」／「已郵寄」兩個專用動作，token保護，只允許 _TEST 分頁覆寫
+      if (path === '/api/red-slip-action' && request.method === 'POST') {
+        return await handleRedSlipAction(request, env, ctx);
+      }
 
       // ★ 階段3 昨日頁 A(a)：收款單「待繳回」清單（收款單試算表ID還沒設定前回 501）
       if (path === '/api/collections/pending' && request.method === 'GET') {
@@ -1278,6 +1282,14 @@ async function handleAddVisit(request, env) {
     redirect: 'follow',
   });
   const data = await res.json();
+  // 2026-11-20 使用者要求：寫入成功後清掉拜訪紀錄 gviz 快取，否則 SWR 在 4 分鐘門檻內會
+  // 繼續回舊資料給 handleRedSlips／handleRedSlipAction，即使它們的呼叫端傳了 fresh=true
+  // 也沒用（那只決定要不要繞過快取讀，不會讓「已經寫入快取裡的舊資料」消失）。
+  // body.sheetName 沒給時，fetchRedSlipDeliveryVisitsByStore_ 實際用的預設分頁名是
+  // '拜訪紀錄表'（不是空字串），這裡要跟它一致，否則清的 key 跟讀的 key 對不上。
+  if (data.success) {
+    await invalidateGvizCache_(env, env.SHEET_VISIT, body.sheetName || '拜訪紀錄表');
+  }
   return json(data);
 }
 
@@ -4110,43 +4122,122 @@ const ORDER_MASTER_FORMAL_SHEET_NAME_ = '訂單主檔';
 // 只列這天之後的訂單，避免把歷史上大量沒填歸還日期的舊單全部翻出來——2026-11-14 是這個功能
 // 寫程式的日期，部署上線後才會真的開始累積，這天之前的舊單一律不算。
 const RED_SLIP_CUTOVER_DATE_ = '2026-11-14'; // 寫這支功能的日期；部署前請確認/改成實際上線那天
+// 2026-11-19 紅單流程重整：拜訪紀錄表的測試分頁，跟 ADD_VISIT_SHEET_WHITELIST 共用同一個名字，
+// 讓「待放抽屜」判斷用的送貨／請款拜訪也能在 ?test=1 下查到 /add-visit 寫進 _TEST 的測試列。
+const VISIT_TEST_SHEET_NAME_ = '拜訪紀錄_TEST';
 
+// 2026-11-14 踩到的坑：daysBetween()／new Date(字串) 這條路徑，只要月、日剛好都是兩位數
+// （像 11/14），不補零的「Y/M/D」字串跟補零的 ISO 字串長得一模一樣，一樣會被當成嚴格 ISO 8601
+// 觸發 UTC 午夜解析，跟本地時間的 today 差 8 小時整天算錯（親自測到：當天建的測試訂單
+// daysSince 算成 -1 不是 0）——這不是「補零 vs 不補零」能解的問題，兩位數的月/日本來就沒差。
+// 改成完全不經過字串解析，直接用年/月/日數字組本地午夜 Date 物件相減，徹底避開這個模糊地帶。
+function localMidnightFromIso_(iso) {
+  const parts = iso.split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+function isoOfMidnight_(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// 2026-11-16 使用者要求：紅單超時天數改算「工作日」（扣掉週六、週日），逾期門檻改成「超過3個
+// 工作日」。從 fromMidnight 隔天數到 toMidnight（含 toMidnight 當天），只算週一～週五；
+// 同一天回傳0。走純 Date 物件加減，不經字串解析，延續上面 localMidnightFromIso_ 的做法。
+function workdaysBetween_(fromMidnight, toMidnight) {
+  let count = 0;
+  const cur = new Date(fromMidnight);
+  while (cur < toMidnight) {
+    cur.setDate(cur.getDate() + 1);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+// Cloudflare Workers 執行環境固定是 UTC，不依賴 runtime 時區，自己算台北（UTC+8）今天日期字串，
+// 給「已郵寄」日期防呆（不得晚於今天）跟寫入用，避免用 new Date().toISOString() 這種跟著 UTC
+// 算出來、半夜時段會早一天的寫法。
+function todayIsoTaipei_() {
+  const taipei = new Date(Date.now() + 8 * 3600000);
+  return `${taipei.getUTCFullYear()}-${String(taipei.getUTCMonth() + 1).padStart(2, '0')}-${String(taipei.getUTCDate()).padStart(2, '0')}`;
+}
+
+// 2026-11-19 紅單流程重整：抓「送貨／請款類」拜訪，依店代號分組存日期清單，供 handleRedSlips／
+// handleRedSlipAction 共用，判斷一張訂單是否已經有對應的送貨拜訪（決定要分到「待放抽屜」還是
+// 「可郵寄」）。isDelivery/isPayment 判斷式照抄 field-v2.html fv2DadReminderTasks_ 既有邏輯
+// （使用者核准：沿用同一套關鍵字，不要自己發明新的分類規則）。storeId 比對沿用 handleAllVisits
+// 已經在用的「店名欄可能存代號也可能存店名文字，兩邊都查一次」反查邏輯（2026-11-19 補記不消失
+// 那次修的根因），不是另外發明一套。
+function isDeliveryVisitText_(purpose, content) {
+  return purpose === '送貨' || /送貨|出貨|帳單|交貨/.test(content || '');
+}
+function isPaymentVisitText_(purpose, content) {
+  return purpose === '請款' || /請款|資料袋|收款單|請款單/.test(content || '');
+}
+async function fetchRedSlipDeliveryVisitsByStore_(env, ctx, visitSheetNameParam, pharmacies, fresh) {
+  const sheetName = visitSheetNameParam || '拜訪紀錄表';
+  const { rows, colMap } = fresh
+    ? await fetchGvizSheetRaw_(env.SHEET_VISIT, sheetName)
+    : await fetchGvizSheet(env.SHEET_VISIT, sheetName, env, ctx);
+  const idSet = new Set(pharmacies.map(p => p.id));
+  const idByName = {};
+  pharmacies.forEach(p => { if (p.name && !(p.name in idByName)) idByName[p.name] = p.id; });
+  function resolvePharmacyId_(raw) {
+    if (!raw) return raw;
+    if (idSet.has(raw)) return raw;
+    if (idByName[raw]) return idByName[raw];
+    return raw;
+  }
+  const byStore = {};
+  rows.forEach(row => {
+    const rawStore = String(gvizGet(row, colMap, '店名') || '').trim();
+    if (!rawStore) return;
+    const purpose = String(gvizGet(row, colMap, '拜訪目的') || '');
+    const content = String(gvizGet(row, colMap, '拜訪內容') || '');
+    if (!isDeliveryVisitText_(purpose, content) && !isPaymentVisitText_(purpose, content)) return;
+    const dateIso = rawDateToIso_(gvizGet(row, colMap, '拜訪日期'));
+    if (!dateIso) return;
+    const storeId = resolvePharmacyId_(rawStore);
+    (byStore[storeId] = byStore[storeId] || []).push(localMidnightFromIso_(dateIso));
+  });
+  Object.keys(byStore).forEach(k => byStore[k].sort((a, b) => a - b));
+  return byStore;
+}
+// 這家店在 orderMidnight 當天或之後最早一筆送貨／請款拜訪（找不到回 null）。
+function findDeliveryVisitOnOrAfter_(deliveryVisitsByStore, storeId, orderMidnight) {
+  const list = deliveryVisitsByStore[storeId] || [];
+  for (const d of list) if (d >= orderMidnight) return d;
+  return null;
+}
+
+// 2026-11-19 使用者要求重整：原本的「單一清單＋逾期標示」改成依「有沒有對應送貨拜訪」分兩類
+// （toDrawer／canMail），且只列「我負責的店」（owner==='老爸' 的排除；查不到對應藥局資料的
+// store 視為「我的」，跟其他地方 pharmacy?pharmacy.owner==='老爸':false 的預設一致，不是另外
+// 發明規則）。只讀，沒有任何寫入。
 async function handleRedSlips(request, env, ctx) {
   const url = new URL(request.url);
   const sheetNameParam = url.searchParams.get('sheetName');
   if (sheetNameParam && sheetNameParam !== RED_SLIP_TEST_SHEET_NAME_) {
     return json({ error: '不合法的 sheetName' }, 400);
   }
+  const visitSheetNameParam = url.searchParams.get('visitSheetName');
+  if (visitSheetNameParam && visitSheetNameParam !== VISIT_TEST_SHEET_NAME_) {
+    return json({ error: '不合法的 visitSheetName' }, 400);
+  }
   // 2026-11-15 Tasks 同步的完整比對帶 ?fresh=1：跳過 SWR 快取直接抓 gviz，而且「不寫回 KV」
   // （使用者要求同步功能的 KV 寫入增加量為 0）。跟 /pharmacies 的 fresh=1 不一樣，那邊會寫回。
   const fresh = url.searchParams.get('fresh') === '1';
-  const { rows, colMap } = fresh
-    ? await fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetNameParam || null)
-    : await fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx);
-  // 2026-11-14 踩到的坑：daysBetween()／new Date(字串) 這條路徑，只要月、日剛好都是兩位數
-  // （像 11/14），不補零的「Y/M/D」字串跟補零的 ISO 字串長得一模一樣，一樣會被當成嚴格 ISO 8601
-  // 觸發 UTC 午夜解析，跟本地時間的 today 差 8 小時整天算錯（親自測到：當天建的測試訂單
-  // daysSince 算成 -1 不是 0）——這不是「補零 vs 不補零」能解的問題，兩位數的月/日本來就沒差。
-  // 改成完全不經過字串解析，直接用年/月/日數字組本地午夜 Date 物件相減，徹底避開這個模糊地帶。
+  const [{ rows, colMap }, pharmaciesRes] = await Promise.all([
+    fresh
+      ? fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetNameParam || null)
+      : fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()).catch(() => ({ pharmacies: [] })),
+  ]);
+  const pharmacies = pharmaciesRes.pharmacies || [];
+  const ownerById = {};
+  pharmacies.forEach(p => { ownerById[p.id] = p.owner; });
+  const deliveryVisitsByStore = await fetchRedSlipDeliveryVisitsByStore_(env, ctx, visitSheetNameParam, pharmacies, fresh);
+
   const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
-  function localMidnightFromIso_(iso) {
-    const parts = iso.split('-').map(Number);
-    return new Date(parts[0], parts[1] - 1, parts[2]);
-  }
-  // 2026-11-16 使用者要求：紅單超時天數改算「工作日」（扣掉週六、週日），逾期門檻改成「超過3個
-  // 工作日」。從 fromMidnight 隔天數到 toMidnight（含 toMidnight 當天），只算週一～週五；
-  // 同一天回傳0。走純 Date 物件加減，不經字串解析，延續上面 localMidnightFromIso_ 的做法。
-  function workdaysBetween_(fromMidnight, toMidnight) {
-    let count = 0;
-    const cur = new Date(fromMidnight);
-    while (cur < toMidnight) {
-      cur.setDate(cur.getDate() + 1);
-      const dow = cur.getDay();
-      if (dow !== 0 && dow !== 6) count++;
-    }
-    return count;
-  }
-  const items = [];
+  const toDrawer = [];
+  const canMail = [];
   rows.forEach(row => {
     const orderNo = String(gvizGet(row, colMap, '訂單編號') || '').trim();
     if (!orderNo) return;
@@ -4155,18 +4246,46 @@ async function handleRedSlips(request, env, ctx) {
     const returnDateRaw = gvizGet(row, colMap, '歸還日期');
     if (returnDateRaw) return; // 已經歸位了
     const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
+    if (ownerById[storeId] === '老爸') return; // 只列我負責的店
     const storeName = String(gvizGet(row, colMap, '店名_中文') || storeId);
-    const daysSince = workdaysBetween_(localMidnightFromIso_(orderDateIso), todayMidnight);
-    items.push({ orderNo, storeId, storeName, orderDate: orderDateIso, daysSince, overdue: daysSince !== null && daysSince > 3 });
+    const orderMidnight = localMidnightFromIso_(orderDateIso);
+    const deliveryMidnight = findDeliveryVisitOnOrAfter_(deliveryVisitsByStore, storeId, orderMidnight);
+    if (deliveryMidnight) {
+      const borrowDateIso = rawDateToIso_(gvizGet(row, colMap, '借出日期'));
+      const referenceMidnight = borrowDateIso ? localMidnightFromIso_(borrowDateIso) : deliveryMidnight;
+      const daysSince = workdaysBetween_(referenceMidnight, todayMidnight);
+      toDrawer.push({
+        orderNo, storeId, storeName, orderDate: orderDateIso,
+        deliveryVisitDate: isoOfMidnight_(deliveryMidnight),
+        referenceDate: borrowDateIso || isoOfMidnight_(deliveryMidnight),
+        referenceSource: borrowDateIso ? '借出日期' : '送貨拜訪日',
+        daysSince, overdue: daysSince > 3,
+      });
+    } else {
+      canMail.push({
+        orderNo, storeId, storeName, orderDate: orderDateIso,
+        deliveryVisitDate: null, referenceDate: null, referenceSource: null,
+        daysSince: workdaysBetween_(orderMidnight, todayMidnight), overdue: false,
+      });
+    }
   });
-  items.sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
-  return json({ ok: true, items, cutoverDate: RED_SLIP_CUTOVER_DATE_ });
+  toDrawer.sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
+  canMail.sort((a, b) => a.orderDate.localeCompare(b.orderDate));
+  // 2026-11-19 使用者審查發現：smartroute-tasks-sync 的 WorkerClient.js 讀的是舊版欄位
+  // data.items（/api/red-slips?fresh=1），沒有 items 會被讀成空清單，可能誤清掉 Google Tasks
+  // 裡的紅單任務——向下相容，items 合併 toDrawer/canMail，每筆欄位含舊版的
+  // orderNo/storeId/storeName/orderDate/daysSince/overdue（外加新版多出來的欄位，不影響舊讀法），
+  // 排序沿用舊版「daysSince 由大到小」。不要動 smartroute-tasks-sync 本身。
+  const items = [...toDrawer, ...canMail].sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
+  return json({ ok: true, items, toDrawer, canMail, cutoverDate: RED_SLIP_CUTOVER_DATE_ });
 }
 
 // POST { orderNo, sheetName? }——sheetName 只允許 _TEST 測試分頁，不指定就一律代填正式分頁
 // 真實名稱（ORDER_MASTER_FORMAL_SHEET_NAME_），不再靠 GAS 端「沒給 sheetName 就用第一個分頁」
 // 這種位置性預設——2026-11-14 使用者要求 GAS 那邊改成只接受精確分頁名稱，Worker 這邊對應
 // 一定要明確傳 sheetName，不能再省略給 GAS 自己猜。
+// 2026-11-19：這支維持原樣（通用「標記歸還」），新增的 handleRedSlipAction 是另一組專用動作，
+// 不是取代關係，兩支並存。
 async function handleMarkOrderReturned(request, env, ctx) {
   const body = await request.json();
   const { orderNo, sheetName: sheetNameParam } = body;
@@ -4177,6 +4296,68 @@ async function handleMarkOrderReturned(request, env, ctx) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'markOrderReturned', orderNo, sheetName, token: env.PLANNER_API_TOKEN }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success) {
+    await invalidateGvizCache_(env, env.SHEET_ORDER_MASTER, sheetNameParam || '');
+    notifyTasksSync_(env, ctx, `SR:order:${orderNo}`);
+  }
+  return json({ ok: !!data.success, ...data });
+}
+
+// 2026-11-19 紅單流程重整：POST { orderNo, action: 'toDrawer'|'mailed', date?, sheetName?,
+// visitSheetName? }。兩個動作完全照抄 AppSheet 訂單主檔既有 Action 的欄位寫法（使用者核准，見
+// 回報裡的 AppSheet 規則讀取結果）：
+//   toDrawer（照抄「標記借出」+「標記歸還」，不碰紅單實體狀態）：借出日期=送貨拜訪日（伺服端
+//     重新算，不信任前端傳的日期）、歸還日期=今天。
+//   mailed（照抄「寄郵局」）：貨運公司="郵局寄送"、借出日期=歸還日期=date（預設今天，不得晚於
+//     今天，格式要是 YYYY-MM-DD）。
+// 寫入前一定重新查一次這張訂單的「歸還日期」是否已有值（已有就拒絕，擋重複點擊）跟負責人是否是
+// 老爸（是就拒絕），不信任前端傳來的任何判斷結果。
+async function handleRedSlipAction(request, env, ctx) {
+  const body = await request.json();
+  const { orderNo, action, date: dateParam, sheetName: sheetNameParam, visitSheetName: visitSheetNameParam } = body;
+  if (!orderNo) return json({ error: '缺少訂單編號' }, 400);
+  if (action !== 'toDrawer' && action !== 'mailed') return json({ error: '不合法的 action' }, 400);
+  if (sheetNameParam && sheetNameParam !== RED_SLIP_TEST_SHEET_NAME_) return json({ error: '不合法的 sheetName' }, 400);
+  if (visitSheetNameParam && visitSheetNameParam !== VISIT_TEST_SHEET_NAME_) return json({ error: '不合法的 visitSheetName' }, 400);
+  const sheetName = sheetNameParam || ORDER_MASTER_FORMAL_SHEET_NAME_;
+
+  const { rows, colMap } = await fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetName);
+  const row = rows.find(r => String(gvizGet(r, colMap, '訂單編號') || '').trim() === String(orderNo).trim());
+  if (!row) return json({ error: '找不到訂單：' + orderNo }, 404);
+  if (gvizGet(row, colMap, '歸還日期')) return json({ error: '這張訂單已經有歸還日期，不能重複標記' }, 409);
+  const storeId = String(gvizGet(row, colMap, '店名') || '').trim();
+  const orderDateIso = rawDateToIso_(gvizGet(row, colMap, '訂單日期'));
+  if (!orderDateIso) return json({ error: '這張訂單沒有訂單日期，無法判斷' }, 400);
+
+  const pharmaciesRes = await handleGetPharmacies(null, env, ctx).then(r => r.json()).catch(() => ({ pharmacies: [] }));
+  const pharmacies = pharmaciesRes.pharmacies || [];
+  const pharmacy = pharmacies.find(p => p.id === storeId);
+  if (pharmacy && pharmacy.owner === '老爸') return json({ error: '這是老爸負責的店，不開放這裡標記' }, 403);
+
+  const today = todayIsoTaipei_();
+  let gasAction, gasPayload;
+  if (action === 'toDrawer') {
+    const deliveryVisitsByStore = await fetchRedSlipDeliveryVisitsByStore_(env, ctx, visitSheetNameParam, pharmacies, true);
+    const orderMidnight = localMidnightFromIso_(orderDateIso);
+    const deliveryMidnight = findDeliveryVisitOnOrAfter_(deliveryVisitsByStore, storeId, orderMidnight);
+    if (!deliveryMidnight) return json({ error: '找不到這家店在訂單日期之後的送貨／請款拜訪，無法標記待整理(抽屜)' }, 400);
+    gasAction = 'redSlipToDrawer';
+    gasPayload = { orderNo, sheetName, borrowDate: isoOfMidnight_(deliveryMidnight), returnDate: today };
+  } else {
+    const dateStr = dateParam || today;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return json({ error: '日期格式錯誤，要是 YYYY-MM-DD' }, 400);
+    if (dateStr > today) return json({ error: '不能選未來日期' }, 400);
+    gasAction = 'redSlipMailed';
+    gasPayload = { orderNo, sheetName, date: dateStr };
+  }
+
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: gasAction, ...gasPayload, token: env.PLANNER_API_TOKEN }),
     redirect: 'follow',
   });
   const data = await res.json();
