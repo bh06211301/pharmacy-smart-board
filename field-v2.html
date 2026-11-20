@@ -496,14 +496,8 @@ document.addEventListener('click', (e) => {
     if (tagsContainer) {
       // 直接重算一次目前文字的規則命中結果（不是只清掉剛點的那個），確保「選取不顯示建議」
       // 這條規則在整組標籤都一致套用。
-      const text = tagsContainer.id === 'record-customer-tags'
-        ? [document.getElementById('record-customer-content').value,
-            document.getElementById('record-customer-nextaction').value,
-            document.getElementById('record-customer-urgent').value].join('\n')
-        : [document.getElementById('record-newstore-content').value,
-            document.getElementById('record-newstore-nextaction').value,
-            document.getElementById('record-newstore-urgent').value].join('\n');
-      fv2RenderTagHints_(tagsContainer.id, fv2MergeTagHints_(fv2RuleTagHints_(text), []));
+      const text = tagsContainer.id === 'record-customer-tags' ? fv2RecordCustomerText_() : fv2RecordNewstoreText_();
+      fv2RenderTagHints_(tagsContainer.id, fv2MergeTagHints_(fv2RuleTagHints_(text), fv2AiHintsCache_[tagsContainer.id]));
       if (tagsContainer.id === 'record-customer-tags') fv2UpdateFollowupAutoCheck_();
     }
     return;
@@ -638,11 +632,112 @@ function fv2MergeTagHints_(ruleHints, aiHints) {
   (aiHints || []).forEach(h => { map[h.tag] = h; });
   return Object.values(map);
 }
-// 預留 AI 建議來源：目前只回傳空陣列，之後會改成呼叫 Worker 的 /api/tag-suggest 讓 AI 判斷
-// 拜訪內容該標哪些標籤。這支函式先寫好、簽章固定，之後接上真的 AI 判斷時只要改這支的內容，
-// fv2RenderTagHints_／fv2MergeTagHints_ 這些畫面邏輯都不用動。目前不做任何網路呼叫。
-async function fv2RequestAiTagHints_(text) {
-  return [];
+// ============================================================
+// 2026-11-20 AI 標籤建議（接上 Worker 的 POST /api/tag-suggest，見 worker.js handleTagSuggest）。
+// 規則比對（上面 fv2RuleTagHints_）維持同步、不等 AI；AI 建議是額外補強，失敗/逾時/超過每日上限
+// 都靜默忽略，絕對不能擋住使用者填表/送出，也不能讓規則提示消失——呼叫端看到 fv2RequestAiTagHints_
+// resolve(null) 就代表「這次沒有 AI 建議」，維持原本規則提示即可，不要清空畫面。
+// ============================================================
+const FV2_AI_TAG_MIN_LEN_ = 6;        // 文字 trim 後至少 6 字才送
+const FV2_AI_TAG_DEBOUNCE_MS_ = 1500; // 停止輸入 1500ms 後才送
+const FV2_AI_TAG_TIMEOUT_MS_ = 15000; // 前端逾時（後端最壞約 8s×2次重試=16s，前端稍微保守一點提早放棄）
+const FV2_AI_TAG_MAX_CALLS_ = 3;      // 同一次畫面（同一家店一次填寫）最多送幾次
+
+// 以下狀態整個 app 共用一份（record-customer／record-newstore 畫面不會同時顯示，同一時間只會有
+// 一邊在打字），換店或重設畫面要呼叫 fv2ResetAiTagHints_() 清空，見
+// fv2ResetRecordCustomerFields_／fv2ResetRecordNewstoreFields_。
+let fv2AiTagLastSent_ = '';
+let fv2AiTagCallCount_ = 0;
+let fv2AiTagDebounceTimer_ = null;
+let fv2AiTagController_ = null;
+let fv2AiTagRequestSeq_ = 0; // 每次「真的送出網路請求」遞增一次，回應回來時比對是否還是最新那次
+
+function fv2ResetAiTagHints_() {
+  if (fv2AiTagDebounceTimer_) { clearTimeout(fv2AiTagDebounceTimer_); fv2AiTagDebounceTimer_ = null; }
+  if (fv2AiTagController_) { fv2AiTagController_.abort(); fv2AiTagController_ = null; }
+  fv2AiTagLastSent_ = '';
+  fv2AiTagCallCount_ = 0;
+}
+
+// 目前畫面對應的店名：記錄拜訪-正式客戶用 ph.name、新案開發用 rec.name，都查不到就退回
+// todayRows 裡的 name，再不行退回 storeId 本身——跟 record-customer-save／record-newstore-save
+// 算 storeName 的既有寫法一致（見下方存檔流程）。
+function fv2CurrentStoreName_() {
+  const storeId = FV2.currentStoreId;
+  if (!storeId) return '';
+  const { ph, rec } = fv2StoreMeta_(storeId);
+  const row = FV2.todayRows.find(r => (r.storeId || r.address) === storeId);
+  return ph?.name || rec?.name || row?.name || storeId;
+}
+
+// 防幻覺：AI 回傳的標籤只能是畫面上現有的標籤之一，其餘丟掉。reason 這裡只做字串化，真正的
+// HTML escape 留到顯示那一刻（fv2TagHintLineHtml_），這支函式只負責資料整形。
+function fv2SanitizeAiSuggestions_(suggestions) {
+  return (suggestions || [])
+    .filter(s => s && typeof s.tag === 'string' && FV2_TAG_ORDER_.indexOf(s.tag) >= 0)
+    .map(s => ({ tag: s.tag, source: 'ai', evidence: String(s.reason || '') }));
+}
+
+// 真正打 /api/tag-suggest 的內部函式（不做 debounce／次數限制，呼叫前提是外層已經通過那些判斷）。
+// 送出的 body 只有 content／storeName 兩個欄位——拜訪目的／下次要記得／緊急問題都已經併進 text
+// 裡（見 fv2UpdateRecordCustomerTagHints_／fv2UpdateRecordNewstoreTagHints_），不另外送
+// nextAction/urgent/purpose。任何失敗（逾時、網路錯誤、非 2xx、JSON 格式不符）都回傳 null，
+// 呼叫端看到 null 就當作「這次沒有 AI 建議」，不拋錯、不影響既有規則提示。
+async function fv2CallTagSuggestApi_(text, storeName) {
+  const controller = new AbortController();
+  fv2AiTagController_ = controller;
+  const timeoutId = setTimeout(() => controller.abort(), FV2_AI_TAG_TIMEOUT_MS_);
+  try {
+    const res = await fetch(`${WORKER}/api/tag-suggest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text, storeName }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    let data;
+    try { data = await res.json(); } catch (e) { return null; }
+    if (!data || data.ok !== true || !Array.isArray(data.suggestions)) return null;
+    return data.suggestions;
+  } catch (e) {
+    return null; // AbortError（逾時或被取消）／網路錯誤都靜默吞掉
+  } finally {
+    clearTimeout(timeoutId);
+    if (fv2AiTagController_ === controller) fv2AiTagController_ = null;
+  }
+}
+
+// 對外唯一入口：呼叫條件判斷＋debounce 都包在這裡，呼叫端每次輸入事件都可以直接呼叫，不用自己
+// 管 debounce。回傳 Promise<hints|null>：null 代表「這次不送／被略過／失敗／過期」，呼叫端看到
+// null 要維持原本畫面上的規則提示，不能清空。
+// 過期回應判斷：用 fv2AiTagRequestSeq_ 幫每次「真的送出的請求」編號，回應回來時如果編號已經不是
+// 目前最新一次（代表文字後來又變了、已經送出更新的請求），直接丟棄，不覆蓋畫面。
+function fv2RequestAiTagHints_(text) {
+  return new Promise((resolve) => {
+    if (fv2AiTagDebounceTimer_) clearTimeout(fv2AiTagDebounceTimer_);
+    fv2AiTagDebounceTimer_ = setTimeout(async () => {
+      fv2AiTagDebounceTimer_ = null;
+      const trimmed = String(text || '').trim();
+      if (trimmed.length < FV2_AI_TAG_MIN_LEN_) return resolve(null);
+      if (trimmed === fv2AiTagLastSent_) return resolve(null);
+      if (fv2AiTagCallCount_ >= FV2_AI_TAG_MAX_CALLS_) return resolve(null);
+      fv2AiTagCallCount_++;
+      fv2AiTagLastSent_ = trimmed;
+      const mySeq = ++fv2AiTagRequestSeq_;
+      const storeName = fv2CurrentStoreName_();
+      const suggestions = await fv2CallTagSuggestApi_(text, storeName);
+      if (mySeq !== fv2AiTagRequestSeq_) return resolve(null); // 過期回應：後面又送出更新的請求
+      if (suggestions === null) return resolve(null);
+      resolve(fv2SanitizeAiSuggestions_(suggestions));
+    }, FV2_AI_TAG_DEBOUNCE_MS_);
+  });
+}
+
+// 「建議：...」那行的 HTML——reason 是外來文字（AI 回應），一律用 escapeHtml_ 跳脫過才能進
+// innerHTML，不可以直接塞字串。
+function fv2TagHintLineHtml_(hint) {
+  const evidence = escapeHtml_(hint.evidence);
+  return hint.source === 'ai' ? `建議：AI 判斷（${evidence}）` : `建議：偵測到『${evidence}』`;
 }
 // 把算好的建議套到畫面：已經是 selected 的標籤不顯示建議（即使還是命中關鍵字），沒被選取
 // 且有命中的才加 .suggested 虛線外框＋底下那行「建議：...」小字。
@@ -657,32 +752,53 @@ function fv2RenderTagHints_(containerId, hints) {
     const show = !!hint && !chip.classList.contains('selected');
     chip.classList.toggle('suggested', show);
     hintEl.hidden = !show;
-    hintEl.textContent = show
-      ? (hint.source === 'ai' ? `建議：AI 判斷（${hint.evidence}）` : `建議：偵測到『${hint.evidence}』`)
-      : '';
+    hintEl.innerHTML = show ? fv2TagHintLineHtml_(hint) : '';
   });
 }
 function fv2Debounce_(fn, ms) {
   let timer = null;
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
-// 記錄拜訪（正式客戶）三個欄位合併文字後跑規則比對；AI 來源先用空陣列佔位，之後接上
-// fv2RequestAiTagHints_ 的真實結果即可。
-const fv2UpdateRecordCustomerTagHints_ = fv2Debounce_(() => {
-  const text = [
+// 每個標籤區塊自己最後一次成功拿到的 AI 建議（換店/重設畫面時連同 fv2ResetAiTagHints_ 一起清掉，
+// 見 fv2ResetRecordCustomerFields_／fv2ResetRecordNewstoreFields_）——點 chip 選取/取消時
+// （見上面的全域 click 代理）也要重畫一次建議樣式，順便把這份快取併進去，不能只看規則比對。
+const fv2AiHintsCache_ = { 'record-customer-tags': [], 'record-newstore-tags': [] };
+function fv2RecordCustomerText_() {
+  return [
     document.getElementById('record-customer-content').value,
     document.getElementById('record-customer-nextaction').value,
     document.getElementById('record-customer-urgent').value,
   ].join('\n');
-  fv2RenderTagHints_('record-customer-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), []));
-}, 400);
-const fv2UpdateRecordNewstoreTagHints_ = fv2Debounce_(() => {
-  const text = [
+}
+function fv2RecordNewstoreText_() {
+  return [
     document.getElementById('record-newstore-content').value,
     document.getElementById('record-newstore-nextaction').value,
     document.getElementById('record-newstore-urgent').value,
   ].join('\n');
-  fv2RenderTagHints_('record-newstore-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), []));
+}
+// 記錄拜訪（正式客戶）三個欄位合併文字後：規則比對同步立即顯示，AI 建議另外用
+// fv2RequestAiTagHints_（內建 1500ms debounce／次數上限）非同步補上；回應回來時要重讀一次目前
+// 文字，跟送出當下的 text 不一樣就代表使用者後來又改了，直接丟棄這次結果（過期回應）。
+const fv2UpdateRecordCustomerTagHints_ = fv2Debounce_(() => {
+  const text = fv2RecordCustomerText_();
+  fv2RenderTagHints_('record-customer-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), fv2AiHintsCache_['record-customer-tags']));
+  fv2RequestAiTagHints_(text).then(aiHints => {
+    if (!aiHints) return; // null：不送/被略過/失敗/過期，維持原本規則提示
+    if (fv2RecordCustomerText_() !== text) return; // 保險：resolve 當下文字又變了，一樣丟棄
+    fv2AiHintsCache_['record-customer-tags'] = aiHints;
+    fv2RenderTagHints_('record-customer-tags', fv2MergeTagHints_(fv2RuleTagHints_(fv2RecordCustomerText_()), aiHints));
+  });
+}, 400);
+const fv2UpdateRecordNewstoreTagHints_ = fv2Debounce_(() => {
+  const text = fv2RecordNewstoreText_();
+  fv2RenderTagHints_('record-newstore-tags', fv2MergeTagHints_(fv2RuleTagHints_(text), fv2AiHintsCache_['record-newstore-tags']));
+  fv2RequestAiTagHints_(text).then(aiHints => {
+    if (!aiHints) return;
+    if (fv2RecordNewstoreText_() !== text) return;
+    fv2AiHintsCache_['record-newstore-tags'] = aiHints;
+    fv2RenderTagHints_('record-newstore-tags', fv2MergeTagHints_(fv2RuleTagHints_(fv2RecordNewstoreText_()), aiHints));
+  });
 }, 400);
 ['record-customer-content', 'record-customer-nextaction', 'record-customer-urgent'].forEach(id => {
   document.getElementById(id).addEventListener('input', fv2UpdateRecordCustomerTagHints_);
@@ -1185,6 +1301,8 @@ function fv2ResetRecordCustomerFields_() {
   // 同時重置「使用者已手動取消」的旗標，換店/重進畫面都要恢復成自動規則接手的狀態。
   document.getElementById('record-customer-followup-checkbox').checked = false;
   fv2FollowupManualOverride_ = false;
+  fv2AiHintsCache_['record-customer-tags'] = [];
+  fv2ResetAiTagHints_(); // 換店/重設畫面：取消進行中的 AI 請求、歸零次數計數
   fv2RenderTagHints_('record-customer-tags', []); // 換店/重進畫面清掉上一家店殘留的建議樣式
   fv2CurrentVisitId_ = genRequestId_();
 }
@@ -1543,6 +1661,8 @@ function fv2ResetRecordNewstoreFields_() {
   document.getElementById('record-newstore-nextaction').value = '';
   document.getElementById('record-newstore-urgent').value = '';
   document.querySelectorAll('#record-newstore-tags .chip').forEach(c => c.classList.remove('selected'));
+  fv2AiHintsCache_['record-newstore-tags'] = [];
+  fv2ResetAiTagHints_(); // 換店/重設畫面：取消進行中的 AI 請求、歸零次數計數
   fv2RenderTagHints_('record-newstore-tags', []); // 換店/重進畫面清掉上一家店殘留的建議樣式
   fv2CurrentNewstoreVisitId_ = genRequestId_();
 }
