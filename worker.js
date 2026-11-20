@@ -376,7 +376,7 @@ export default {
 
   // Plan C 預熱：wrangler.toml 的 cron trigger 排程呼叫這支（平日台灣時間 07:00）。
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(warmPlannerCaches_(env));
+    ctx.waitUntil(warmPlannerCaches_(env, ctx));
   },
 };
 
@@ -399,9 +399,9 @@ async function warmCacheKey_(env, cacheKey, fetchFn) {
   }
 }
 
-async function warmPlannerCaches_(env) {
+async function warmPlannerCaches_(env, ctx) {
   const tasks = [
-    warmCacheKey_(env, 'visits:summary', () => fetchVisitsSummaryRaw_(env)),
+    warmCacheKey_(env, 'visits:summary', () => fetchVisitsSummaryRaw_(env, ctx)),
     warmCacheKey_(env, `gviz:${env.SHEET_PHARMACY}:新客戶資料表_AppSheet`, () => fetchGvizSheetRaw_(env.SHEET_PHARMACY, '新客戶資料表_AppSheet')),
   ];
   if (env.SCREENING_API_TOKEN) {
@@ -700,6 +700,25 @@ async function handleGetVisits(pharmacyId, env) {
 // 修法：這欄不管存的是代號還是店名文字，都在這裡統一解析回真正的 Customer_ID——先查是不是已經
 // 是一個真代號，不是的話反查店名對應的代號，兩邊都查不到才維持原文字（暫存代號／手動輸入的店，
 // 本來就沒有真代號可以比對，呼叫端比對不到就是「沒有storeId」，跟現在的行為一致，不會更糟）。
+// 2026-11-20 方向①：「原始店名欄位值 → Customer_ID」反查邏輯統一抽出來，handleAllVisits／
+// fetchRedSlipDeliveryVisitsByStore_／fetchVisitsSummaryRaw_ 三處共用，不要各自重寫一份（原本
+// 前兩處幾乎一模一樣地各寫了一次，這次修 fetchVisitsSummaryRaw_ 的「幾倍不會因拜訪而下降」問題時
+// 一併收斂）。查詢前一律 trim，避免店名欄位頭尾空白造成查無資料（例如 Google Sheets 複製貼上
+// 常見的尾端空白）。只負責「代號集合＋店名→代號」兩層；「暫存代號→正式ID」是另一張表
+// （未建檔店家），呼叫端自己疊加在外層，順序是先轉換暫存代號、再丟進這支做代號/店名判斷。
+function buildPharmacyNameResolver_(pharmacies) {
+  const idSet = new Set(pharmacies.map(p => p.id));
+  const idByName = {};
+  pharmacies.forEach(p => { if (p.name && !(p.name in idByName)) idByName[p.name] = p.id; });
+  return function resolvePharmacyId_(raw) {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return trimmed;
+    if (idSet.has(trimmed)) return trimmed; // 已經是真代號
+    if (idByName[trimmed]) return idByName[trimmed]; // 存的是店名文字，反查回代號
+    return trimmed; // 暫存代號／手動輸入的店名，兩邊都查不到，原樣保留（trim後）
+  };
+}
+
 async function handleAllVisits(env) {
   const sheetId = env.SHEET_VISIT;
   const sheetName = '拜訪紀錄表';
@@ -719,15 +738,7 @@ async function handleAllVisits(env) {
   cols.forEach((c, i) => { colMap[c.label] = i; });
 
   const pharmacies = pharmaciesRes.pharmacies || [];
-  const idSet = new Set(pharmacies.map(p => p.id));
-  const idByName = {};
-  pharmacies.forEach(p => { if (p.name && !(p.name in idByName)) idByName[p.name] = p.id; });
-  function resolvePharmacyId_(raw) {
-    if (!raw) return raw;
-    if (idSet.has(raw)) return raw; // 已經是真代號
-    if (idByName[raw]) return idByName[raw]; // 存的是店名文字，反查回代號
-    return raw; // 暫存代號／手動輸入的店名，兩邊都查不到，原樣保留
-  }
+  const resolvePharmacyId_ = buildPharmacyNameResolver_(pharmacies);
 
   function parseGvizDate(val) {
     if (!val) return '';
@@ -869,14 +880,24 @@ async function fetchTempPharmacyConversionMap_(env) {
 // 欄位的大表，被 /api/plan、/api/week、/api/followups、/api/overview、/api/store 各自讀一次。
 // 改用 swrFetch_()。這張表是由另一套系統（pharmacy-visit-app 的 GAS webhook）寫入，這支 worker
 // 自己沒有對應的寫入端點可以主動清快取，純靠 SWR 的 4 分鐘門檻＋排程預熱控制新鮮度。
-async function fetchVisitsSummaryRaw_(env) {
+// 2026-11-20 方向①：「店名」欄混用代號（舊流程）跟店名文字（外勤模式 field-v2.html 2026-11-10
+// 起故意改寫文字，見 handleAddVisit 上方註解），這支原本只做「暫存代號→正式ID」一層轉換，店名
+// 文字那些列永遠併不進對應店的 summary，導致「幾倍」只會往上爬、不會因為最近的外勤拜訪下降
+// （完整排查過程見這次對話的背景調查）。改成跟 handleAllVisits／fetchRedSlipDeliveryVisitsByStore_
+// 共用 buildPharmacyNameResolver_，額外用 Promise.all 把 pharmacies 一起撈（不新開一支
+// SHEET_PHARMACY fetch——handleGetPharmacies 本身就是走 swrFetch_ 快取，跟既有呼叫端共用快取，
+// 不會多打 Google）。轉換順序：先看是不是現有代號 → 再看暫存代號轉換 → 再看店名文字轉代號
+// （conversionMap 的 key 是雜湊暫存代號、resolvePharmacyId_ 的 idSet 是正式 C 開頭代號，兩者網域
+// 不重疊，所以「先轉暫存代號、再丟進 resolvePharmacyId_」自然就等於這個順序，不會互相搶）。
+async function fetchVisitsSummaryRaw_(env, ctx) {
   const sheetId = env.SHEET_VISIT;
   const sheetName = '拜訪紀錄表';
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
 
-  const [res, conversionMap] = await Promise.all([
+  const [res, conversionMap, pharmaciesRes] = await Promise.all([
     fetch(url),
     fetchTempPharmacyConversionMap_(env),
+    handleGetPharmacies(null, env, ctx).then(r => r.json()).catch(() => ({ pharmacies: [] })),
   ]);
   const text = await res.text();
   const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
@@ -887,6 +908,8 @@ async function fetchVisitsSummaryRaw_(env) {
   const colMap = {};
   cols.forEach((c, i) => { colMap[c.label] = i; });
 
+  const resolvePharmacyId_ = buildPharmacyNameResolver_(pharmaciesRes.pharmacies || []);
+
   function parseGvizDate(val) {
     if (!val) return '';
     const m = String(val).match(/Date\((\d+),(\d+),(\d+)\)/);
@@ -896,12 +919,13 @@ async function fetchVisitsSummaryRaw_(env) {
 
   const summary = {};
   rows.forEach(row => {
-    let id      = row.c[colMap['店名']]?.v || '';
+    let id = String(row.c[colMap['店名']]?.v || '').trim();
     const date = parseGvizDate(row.c[colMap['拜訪日期']]?.v || '');
     const tags = row.c[colMap['Tags']]?.v || '';
     const actionItems = row.c[colMap['Action Items']]?.v || '';
     if (!id) return;
     if (conversionMap[id]) id = conversionMap[id]; // 暫存代號已轉正：合併進正式 Customer_ID
+    id = resolvePharmacyId_(id); // 現有代號維持原樣；查無則嘗試店名文字→代號；都查不到就保留原值
 
     if (!summary[id]) {
       summary[id] = { lastDate: '', lastDateMs: -Infinity, visitCount: 0, hasPending: false };
@@ -938,7 +962,7 @@ async function fetchVisitsSummaryRaw_(env) {
 }
 
 async function handleVisitsSummary(env, ctx, cacheMeta) {
-  const entry = await swrFetch_(env, ctx, 'visits:summary', () => fetchVisitsSummaryRaw_(env));
+  const entry = await swrFetch_(env, ctx, 'visits:summary', () => fetchVisitsSummaryRaw_(env, ctx));
   noteCacheTime_(cacheMeta, entry.cachedAt);
   return json(entry.data);
 }
@@ -1288,7 +1312,16 @@ async function handleAddVisit(request, env) {
   // body.sheetName 沒給時，fetchRedSlipDeliveryVisitsByStore_ 實際用的預設分頁名是
   // '拜訪紀錄表'（不是空字串），這裡要跟它一致，否則清的 key 跟讀的 key 對不上。
   if (data.success) {
-    await invalidateGvizCache_(env, env.SHEET_VISIT, body.sheetName || '拜訪紀錄表');
+    const writtenSheetName = body.sheetName || '拜訪紀錄表';
+    await invalidateGvizCache_(env, env.SHEET_VISIT, writtenSheetName);
+    // 2026-11-20 方向①：/api/plan、/api/week、/api/followups、/api/overview、/api/store
+    // 全部共用同一把 'visits:summary' KV 快取 key（見 fetchVisitsSummaryRaw_／handleVisitsSummary），
+    // 而且這把快取固定只讀正式「拜訪紀錄表」，寫進 _TEST 分頁不影響它，所以只在寫入目標是正式
+    // 分頁時才清，不是每次寫入都清。這是跟上面 invalidateGvizCache_ 同一次事件觸發、同樣只在
+    // GAS 回 success 時才清的寫法，只是 key 格式不同（這把不是 gviz:，是獨立的 plain KV key）。
+    if (writtenSheetName === '拜訪紀錄表' && env.TODOS_KV) {
+      await env.TODOS_KV.delete('visits:summary').catch(() => {});
+    }
   }
   return json(data);
 }
@@ -4176,15 +4209,7 @@ async function fetchRedSlipDeliveryVisitsByStore_(env, ctx, visitSheetNameParam,
   const { rows, colMap } = fresh
     ? await fetchGvizSheetRaw_(env.SHEET_VISIT, sheetName)
     : await fetchGvizSheet(env.SHEET_VISIT, sheetName, env, ctx);
-  const idSet = new Set(pharmacies.map(p => p.id));
-  const idByName = {};
-  pharmacies.forEach(p => { if (p.name && !(p.name in idByName)) idByName[p.name] = p.id; });
-  function resolvePharmacyId_(raw) {
-    if (!raw) return raw;
-    if (idSet.has(raw)) return raw;
-    if (idByName[raw]) return idByName[raw];
-    return raw;
-  }
+  const resolvePharmacyId_ = buildPharmacyNameResolver_(pharmacies);
   const byStore = {};
   rows.forEach(row => {
     const rawStore = String(gvizGet(row, colMap, '店名') || '').trim();
