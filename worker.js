@@ -5516,7 +5516,12 @@ function taipeiDateStr_() {
 // 的暫時性錯誤才重試；4xx（通常是我方 payload 或金鑰設定有問題，重試也不會變好）、
 // bad_json／empty_response／bad_shape（模型真的回了格式不對的內容，換下一次請求不代表會變好，
 // 且這裡重試的目的是處理「暫時連不上/太慢」，不是處理模型輸出品質）都不重試。
-const TAG_SUGGEST_TIMEOUT_MS_ = 3500;
+// 2026-11-20 第三輪審查調整：3.5秒單次逾時+重試在實測 8 次真實呼叫裡有 2 次連重試都失敗——
+// 成功案例的 latencyMs 本身就常態落在 2~3.4 秒，太貼近 3.5 秒門檻，不是單純偶發意外，代表這顆
+// 模型正常情況下的回應時間本來就會逼近/偶爾超過 3.5 秒。改成 8 秒，給正常回應留足夠餘裕，重試
+// 規則維持不變（只對 timeout/network_error/HTTP 5xx 重試一次，4xx/bad_json/empty_response/
+// bad_shape 不重試）。
+const TAG_SUGGEST_TIMEOUT_MS_ = 8000;
 const TAG_SUGGEST_MAX_ATTEMPTS_ = 2;
 
 function tagSuggestShouldRetry_(error) {
