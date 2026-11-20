@@ -5494,9 +5494,9 @@ function taipeiDateStr_() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 }
 
-// 呼叫 Gemini，逾時 6 秒、不重試、不做備援鏈。金鑰放 header（x-goog-api-key）不放 URL
-// query，避免進到 Cloudflare/瀏覽器的請求日誌。responseMimeType+responseSchema 強制 JSON
-// 輸出、temperature 0、maxOutputTokens 200（控制成本與延遲）。
+// 呼叫 Gemini。金鑰放 header（x-goog-api-key）不放 URL query，避免進到 Cloudflare/瀏覽器的
+// 請求日誌。responseMimeType+responseSchema 強制 JSON 輸出、temperature 0、maxOutputTokens
+// 200（控制成本與延遲）。
 // 2026-11-20 審查修正：gemini-3.5-flash-lite 屬於 Gemini 3.x 系列，官方文件（見下方查證來源）
 // 說明 3.x 系列的思考設定改用字串列舉 thinkingConfig.thinkingLevel（minimal/low/medium/high），
 // 舊版數值參數 thinkingBudget 屬於 2.x 世代的設計，兩者同時出現在同一次請求會直接被 API 擋下來
@@ -5508,6 +5508,50 @@ function taipeiDateStr_() {
 //     thinking_level 字串列舉」）
 //   https://ai.google.dev/api/generate-content（ThinkingConfig 欄位：thinkingLevel 為列舉，
 //     REST JSON 範例為 "thinkingConfig": { "thinkingLevel": "low" }）
+//
+// 2026-11-20 第二輪審查修正（實測 3 次真實呼叫裡有 1 次卡到 6 秒逾時，但另外 2 次都是
+// 1~1.2 秒就回應，判斷是 Gemini 本身偶發延遲，不是遮蔽/程式邏輯問題）：單次逾時從 6 秒縮短成
+// 3.5 秒、換成「逾時或暫時性錯誤就重試 1 次（最多嘗試 2 次）」，用重試去覆蓋偶發的慢回應，
+// 不需要把單次逾時拉得很長去死等。只有 timeout／network_error／HTTP 5xx 這些「值得再試一次」
+// 的暫時性錯誤才重試；4xx（通常是我方 payload 或金鑰設定有問題，重試也不會變好）、
+// bad_json／empty_response／bad_shape（模型真的回了格式不對的內容，換下一次請求不代表會變好，
+// 且這裡重試的目的是處理「暫時連不上/太慢」，不是處理模型輸出品質）都不重試。
+const TAG_SUGGEST_TIMEOUT_MS_ = 3500;
+const TAG_SUGGEST_MAX_ATTEMPTS_ = 2;
+
+function tagSuggestShouldRetry_(error) {
+  if (error === 'timeout' || error === 'network_error') return true;
+  return /^gemini_http_5\d\d$/.test(String(error || ''));
+}
+
+// 單次嘗試——每次呼叫都自己建一個 AbortController／setTimeout，彼此不共用，一次嘗試逾時/結束
+// 不會影響到下一次嘗試的計時器狀態。
+async function callGeminiAttemptOnce_(env, url, payload) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TAG_SUGGEST_TIMEOUT_MS_);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    let data;
+    try { data = await res.json(); } catch (e) { return { ok: false, error: 'bad_json' }; }
+    if (!res.ok) return { ok: false, error: `gemini_http_${res.status}` };
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return { ok: false, error: 'empty_response' };
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { return { ok: false, error: 'bad_json' }; }
+    if (!parsed || !Array.isArray(parsed.suggestions)) return { ok: false, error: 'bad_shape' };
+    return { ok: true, suggestions: parsed.suggestions };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? 'timeout' : 'network_error' };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function callGeminiForTagSuggest_(env, promptText) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${TAG_SUGGEST_MODEL_}:generateContent`;
   const payload = {
@@ -5533,29 +5577,15 @@ async function callGeminiForTagSuggest_(env, promptText) {
       thinkingConfig: { thinkingLevel: 'minimal' },
     },
   };
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    let data;
-    try { data = await res.json(); } catch (e) { return { ok: false, error: 'bad_json' }; }
-    if (!res.ok) return { ok: false, error: `gemini_http_${res.status}` };
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return { ok: false, error: 'empty_response' };
-    let parsed;
-    try { parsed = JSON.parse(text); } catch (e) { return { ok: false, error: 'bad_json' }; }
-    if (!parsed || !Array.isArray(parsed.suggestions)) return { ok: false, error: 'bad_shape' };
-    return { ok: true, suggestions: parsed.suggestions };
-  } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? 'timeout' : 'network_error' };
-  } finally {
-    clearTimeout(timeoutId);
+
+  let attempts = 0;
+  let result;
+  for (let i = 0; i < TAG_SUGGEST_MAX_ATTEMPTS_; i++) {
+    attempts++;
+    result = await callGeminiAttemptOnce_(env, url, payload);
+    if (result.ok || !tagSuggestShouldRetry_(result.error)) break;
   }
+  return { ...result, attempts };
 }
 
 async function handleTagSuggest(request, env, ctx) {
@@ -5602,8 +5632,9 @@ async function handleTagSuggest(request, env, ctx) {
   const t0 = Date.now();
   const result = await callGeminiForTagSuggest_(env, promptText);
   const latencyMs = Date.now() - t0;
-  // 只記次數與耗時，不印拜訪內容或 AI 回應原文。
-  console.log(`[tag-suggest] ok=${result.ok} latencyMs=${latencyMs}${result.ok ? '' : ' error=' + result.error}`);
+  // 只記 ok／耗時／嘗試次數／錯誤代碼，不印拜訪內容或 AI 回應原文。latencyMs 是整個請求的
+  // 總耗時（含重試），不是單次嘗試的耗時。
+  console.log(`[tag-suggest] ok=${result.ok} latencyMs=${latencyMs} attempts=${result.attempts}${result.ok ? '' : ' error=' + result.error}`);
 
   if (!result.ok) return json({ ok: false, error: result.error }, 500);
 
