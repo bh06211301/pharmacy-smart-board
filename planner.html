@@ -1370,6 +1370,19 @@ function visibleRecommendList() {
   return part(newStoreList, 'newStore').concat(part(customerList, 'customer'));
 }
 
+// 2026-11-24：地圖專用的候選店清單——跟 visibleRecommendList() 共用「排除錨點」「filterMode
+// ===radius 時篩錨點半徑內」這兩段，但不套用 groupExpanded 收合（清單預設把倍數<1 的店收在
+// 「還不急」裡，使用者沒展開就不會出現在 planData.recommended 的篩選結果——但地圖不是清單，
+// 收合狀態只是清單畫面的 UI 狀態，不該連帶讓倍數<1 的店從地圖上消失）。清單本身的收合行為
+// 完全不受影響，這支只給 renderMap() 用。
+function mapCandidateList_() {
+  if (!planData) return [];
+  const excludeIds = anchorIds();
+  let list = (planData.recommended || []).filter(item => !excludeIds.has(item.id));
+  if (filterMode === 'radius') list = list.filter(item => withinAnchorRadius(item.id));
+  return list;
+}
+
 function loadGoogleMapsSdk() {
   return new Promise(resolve => {
     if (window.google?.maps) { resolve(); return; }
@@ -2584,12 +2597,15 @@ async function renderMap() {
 
   // ①②③ 要畫的店統一先定位一次（跟 calcRoute 共用 resolveStoreLocation_，新店/只有地址的店
   // 這裡也畫得出來；查過的存在 geocodeCache_，同一家店不會重複打 API，2026-11-04 使用者要求）。
-  const visible = visibleRecommendList();
+  // 2026-11-24：地圖候選店改用 mapCandidateList_()，不是清單用的 visibleRecommendList()——
+  // 清單預設收合倍數<1 的店（「還不急」），但地圖不該因為清單沒展開就漏畫這些店（使用者回報
+  // 的原始問題）。清單本身的收合行為完全不動，只有這裡（地圖）改。
+  const mapCandidates_ = mapCandidateList_();
   const nameById_ = {};
   anchors.forEach(a => { nameById_[a.id] = a.name; });
-  visible.forEach(item => { nameById_[item.id] = item.name; });
+  mapCandidates_.forEach(item => { nameById_[item.id] = item.name; });
   (planData?.recommended || []).forEach(item => { if (!nameById_[item.id]) nameById_[item.id] = item.name; });
-  const neededIds_ = new Set([...anchors.map(a => a.id), ...selectedCol2Ids, ...visible.map(item => item.id)]);
+  const neededIds_ = new Set([...anchors.map(a => a.id), ...selectedCol2Ids, ...mapCandidates_.map(item => item.id)]);
   const locById = {};
   await Promise.all([...neededIds_].map(async id => { locById[id] = await resolveStoreLocation_(id, nameById_[id] || id); }));
 
@@ -2620,11 +2636,11 @@ async function renderMap() {
   });
 
   // ② 補的站：已勾選加入路線、但不是錨點的店，28px primary 色圓
-  const visibleById = {}; visible.forEach(x => { visibleById[x.id] = x; });
+  const mapCandidateById_ = {}; mapCandidates_.forEach(x => { mapCandidateById_[x.id] = x; });
   selectedCol2Ids.forEach(id => {
     const loc = locById[id];
     if (!loc?.lat || !loc?.lng) return;
-    const item = visibleById[id] || (planData?.recommended || []).find(x => x.id === id);
+    const item = mapCandidateById_[id] || (planData?.recommended || []).find(x => x.id === id);
     const marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: item?.name || id, zIndex: 15,
       icon: { ...markerIconPathAndScale_(id, 14, FOLLOWUP_STAR_SCALE_UP_BIG_), fillColor: cssVar('--sr-primary'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
@@ -2635,8 +2651,8 @@ async function renderMap() {
     extend(loc.lat, loc.lng);
   });
 
-  // ③ 候選店（清單目前顯示、尚未勾選）：14px 小圓，正式客戶依 4.4 倍數分級上色，開發中空心圓
-  visible.forEach(item => {
+  // ③ 候選店（不受清單收合影響，一律全部畫出）：14px 小圓，正式客戶依 4.4 倍數分級上色，開發中空心圓
+  mapCandidates_.forEach(item => {
     if (selectedCol2Ids.has(item.id)) return; // ②已經畫過
     const loc = locById[item.id];
     if (!loc?.lat || !loc?.lng) return;
