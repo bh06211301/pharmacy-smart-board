@@ -2900,6 +2900,23 @@ function buildTodayRegions_(list, anchors, allPharmacies) {
     const g = regionGroupOf_(city, district);
     return g ? byGroupKey[g.key] : fallback;
   }
+  // 2026-11-24：每區「有未完成待追蹤的店與事項」——來源(a) list 裡 type==='customer' 且
+  // followupItems（未到期）非空的店；(b) anchors 裡 source==='待追蹤'（已到期，被挪出 list
+  // 變成錨點）的項目。同一家店兩個來源要合併成一筆、事項去重，用 Map<bucket物件, Map<storeId,…>>
+  // 讓同一個分區物件（byGroupKey[key] 或 fallback）能一直累加到同一份店家清單。
+  const followupMaps = new Map();
+  function followupMapOf(bucket) {
+    if (!followupMaps.has(bucket)) followupMaps.set(bucket, new Map());
+    return followupMaps.get(bucket);
+  }
+  function addFollowup(bucket, id, name, items) {
+    if (!items || !items.length) return;
+    const map = followupMapOf(bucket);
+    const entry = map.get(id) || { id, name, items: new Set() };
+    if (!entry.name) entry.name = name;
+    items.forEach(it => { if (it) entry.items.add(it); });
+    map.set(id, entry);
+  }
   list.forEach(item => {
     const b = bucketOf(item.city, item.district);
     if (item.type === 'new-store') {
@@ -2908,19 +2925,32 @@ function buildTodayRegions_(list, anchors, allPharmacies) {
     } else if (item.type === 'customer' && item.ratio >= 1) {
       b.customerDueCount += 1;
     }
+    if (item.type === 'customer' && item.followupItems && item.followupItems.length) {
+      addFollowup(b, item.id, item.name, item.followupItems);
+    }
   });
   const pharmacyById = {};
   allPharmacies.forEach(p => { pharmacyById[p.id] = p; });
   const screeningById = {};
   list.filter(item => item.type === 'new-store').forEach(item => { screeningById[item.id] = item; });
   anchors.forEach(a => {
-    if (a.source !== '送貨') return;
     const p = pharmacyById[a.id] || screeningById[a.id];
     const b = p ? bucketOf(p.city, p.district) : fallback;
-    b.deliveryCount += 1;
+    if (a.source === '送貨') {
+      b.deliveryCount += 1;
+    } else if (a.source === '待追蹤') {
+      addFollowup(b, a.id, a.name, a.item ? [a.item] : []);
+    }
   });
-  const groups = PLANNER_CONFIG.regionGroups.map(g => ({ ...byGroupKey[g.key], estimateMinutes: regionMinutesOf_(g) }));
-  if (fallback.newStoreCount || fallback.customerDueCount || fallback.deliveryCount) groups.push({ ...fallback, estimateMinutes: null });
+  function withFollowup(base, bucket, estimateMinutes) {
+    const followupStores = Array.from(followupMapOf(bucket).values())
+      .map(s => ({ id: s.id, name: s.name, items: Array.from(s.items) }));
+    return { ...base, estimateMinutes, followupStores, followupStoreCount: followupStores.length };
+  }
+  const groups = PLANNER_CONFIG.regionGroups.map(g => withFollowup(byGroupKey[g.key], byGroupKey[g.key], regionMinutesOf_(g)));
+  if (fallback.newStoreCount || fallback.customerDueCount || fallback.deliveryCount || followupMapOf(fallback).size) {
+    groups.push(withFollowup(fallback, fallback, null));
+  }
   // 2026-11-02：依急迫程度排序——有新店的區在前（高倍數優先，同倍數看新店家數多的），沒有新店的區排最後
   groups.sort((a, b) => {
     const aHas = a.newStoreCount > 0;

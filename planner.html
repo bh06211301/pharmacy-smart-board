@@ -107,6 +107,7 @@
   .region-card-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); }
   .region-card-stats { font-size: var(--sr-text-xs); color: var(--sr-ink-2); margin-top: 2px; }
   .region-card-minutes { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; }
+  .region-card-followup { font-size: var(--sr-text-2xs); color: var(--sr-ink-2); margin-top: 2px; }
   .region-card-reason { font-size: var(--sr-text-2xs); color: var(--sr-ink-3); margin-top: 2px; font-style: italic; }
   .region-card-btn {
     height: var(--sr-btn-h-sm); padding: 0 var(--sr-space-5); border-radius: var(--sr-radius-md);
@@ -884,6 +885,18 @@ function regionSortReasonText_(g, index) {
   bits.push(g.customerDueCount ? `客戶該去 ${g.customerDueCount} 家` : '無客戶該去');
   return `${rank}：無新店（${bits.join('、')}——這兩項不影響排序，僅供參考）`;
 }
+// 「待追蹤 N 家：店名 事項｜店名 事項｜…」——最多顯示 3 家，超過顯示「（另 N 家）」。
+// 事項保留原文、不解析，每一段都各自 escapeHtml，所以用拼字串而不是整行一次 escape。
+function regionFollowupText_(g) {
+  const stores = g.followupStores || [];
+  if (!stores.length) return '';
+  const shown = stores.slice(0, 3).map(s => {
+    const items = (s.items || []).join('、');
+    return `${escapeHtml(s.name)} ${escapeHtml(items)}`;
+  }).join('｜');
+  const more = stores.length > 3 ? `（另 ${stores.length - 3} 家）` : '';
+  return `待追蹤 ${g.followupStoreCount} 家：${shown}${more}`;
+}
 function renderRegionOverview() {
   const root = document.getElementById('region-overview-root');
   if (!planData) { root.innerHTML = '<div class="empty-hint">載入中…</div>'; return; }
@@ -893,11 +906,13 @@ function renderRegionOverview() {
     const isEmpty = !g.newStoreCount && !g.customerDueCount && !g.deliveryCount;
     const isSelected = selectedRegionKey === g.key;
     const minutesText = g.estimateMinutes === null ? '' : `車程約 ${g.estimateMinutes} 分鐘（直線距離估算，僅供參考）`;
+    const followupText = regionFollowupText_(g);
     return `<div class="region-card ${isEmpty ? 'empty' : ''} ${isSelected ? 'selected' : ''}">
       <div class="region-card-main">
         <div class="region-card-label">${escapeHtml(g.label)}</div>
         <div class="region-card-stats">新店 ${g.newStoreCount} 家${g.maxRatio ? '（最高倍數 ' + g.maxRatio + '）' : ''}　送貨 ${g.deliveryCount} 家　客戶該去 ${g.customerDueCount} 家</div>
         <div class="region-card-minutes">${escapeHtml(minutesText)}</div>
+        ${followupText ? `<div class="region-card-followup">${followupText}</div>` : ''}
         <div class="region-card-reason">${escapeHtml(regionSortReasonText_(g, index))}</div>
       </div>
       <button class="region-card-btn ${isSelected ? 'selected' : ''}" data-action="pick-region" data-key="${escapeHtml(g.key)}">${isSelected ? '已選 ✓' : '選這區'}</button>
