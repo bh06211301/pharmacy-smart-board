@@ -178,6 +178,13 @@
   .anchor-line1 { display: flex; align-items: center; justify-content: space-between; gap: var(--sr-space-3); padding-right: 36px; }
   .anchor-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); }
   .anchor-type { background: var(--sr-ink); color: var(--sr-on-dark); font-size: var(--sr-text-xs); padding: 1px 8px; border-radius: var(--sr-radius-sm); flex-shrink: 0; }
+  .anchor-type-group { display: flex; gap: 4px; flex-shrink: 0; }
+  .anchor-type-toggle {
+    background: var(--sr-bg); color: var(--sr-ink-2); border: 1px solid var(--sr-line);
+    font-size: var(--sr-text-xs); font-family: var(--sr-font); padding: 1px 8px; border-radius: var(--sr-radius-sm);
+    cursor: pointer;
+  }
+  .anchor-type-toggle.active { background: var(--sr-ink); color: var(--sr-on-dark); border-color: var(--sr-ink); }
   .anchor-line2 { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-top: 2px; }
   .anchor-line3 { font-size: var(--sr-text-xs); color: var(--sr-ink-3); margin-top: 2px; }
   .anchor-dad-reminder {
@@ -444,6 +451,12 @@
 <script src="planner-nav.js"></script>
 <script>
 const WORKER = window.SR_WORKER_URL;
+// ?test=1：今日行程的「整天覆蓋」存檔（saveTodayPlanNow_）改寫 worker.js 已經支援的
+// 「今日行程_TEST」測試分頁，不碰正式「今日行程」表（跟 field-v2/addVisit 的 sheetName
+// 白名單同一套既有機制，worker.js TODAY_PLAN_SHEET_WHITELIST 本來就包含這個值）。只影響
+// 寫入路徑——GET /api/plan、/api/today-plan 目前沒有對應的測試分頁讀取通道，test 模式下
+// 讀到的仍是正式資料，不在這次改動範圍內。
+const TEST_MODE = new URL(location.href).searchParams.get('test') === '1';
 
 // ══════════════════════════════
 // 常數區（2026-11-05 搬到檔案最上方：原本放在 calcRoute() 附近，結果今日清單階段一新增的
@@ -617,6 +630,8 @@ document.body.addEventListener('click', (e) => {
     if (p) withBusy(t, '加入中…', () => pickManualAdd(p));
   } else if (action === 'pick-region') {
     withBusy(t, '加入中…', () => pickRegion(t.dataset.key));
+  } else if (action === 'toggle-anchor-visit-type') {
+    toggleAnchorVisitType(id, t.dataset.type); // 跟 toggleCol2 一樣是離散點擊，不用 withBusy 停用/改字
   } else if (action === 'remove-today') {
     withBusy(t, '移除中…', () => removeTodayListRow_(id));
   } else if (action === 'manual-order-keep') {
@@ -994,6 +1009,49 @@ function anchorTypeLabel(a) {
   return a.source === '待追蹤' ? '待追蹤' : a.source === '送貨' ? '送貨' : a.source || '手動';
 }
 
+// 2026-11-24：①卡片右上角「送貨」可切換「送貨」「請款」（可複選，至少選一個）。
+// 只對「這筆錨點原本的類型就是送貨」的卡片開放切換——待追蹤／本週排／寄賣對帳／新店／
+// 手動加入等其他來源的卡片維持原本單一標籤顯示，不受影響（這些來源各自有自己的既有語意，
+// 不是「送貨 vs 請款」這組二選一/複選的概念，硬套上去反而會混淆）。
+// a.visitTypes 是純前端執行期狀態：第一次呼叫時用 a.types（從「今日行程」表「類型」欄還原
+// 回來的既有選擇，見 worker.js handlePlannerPlan 的 anchors.push）當預設值，沒有的話預設
+// ['送貨']（「預設維持目前的類型」——這筆錨點本來就只會是「送貨」，不會無中生有變出「請款」）。
+// 算出來之後存回 a.visitTypes 快取，之後在同一個分頁的操作都讀寫同一份，不用每次重新還原。
+function anchorVisitTypes_(a) {
+  if (a.visitTypes) return a.visitTypes;
+  if (anchorSourceTag_(a.source) !== '送貨') return null; // 不適用切換，呼叫端改用舊的單一標籤
+  const restored = Array.isArray(a.types) ? a.types.filter(t => t === '送貨' || t === '請款') : [];
+  a.visitTypes = restored.length ? restored : ['送貨'];
+  return a.visitTypes;
+}
+function anchorTypeAreaHtml_(a) {
+  const types = anchorVisitTypes_(a);
+  if (!types) return `<span class="anchor-type">${escapeHtml(anchorTypeLabel(a))}</span>`;
+  return `<span class="anchor-type-group">${['送貨', '請款'].map(t => `
+    <button type="button" class="anchor-type-toggle${types.includes(t) ? ' active' : ''}"
+      data-action="toggle-anchor-visit-type" data-id="${escapeHtml(a.id)}" data-type="${escapeHtml(t)}">${escapeHtml(t)}</button>
+  `).join('')}</span>`;
+}
+// 離散動作立即存檔，比照 toggleCol2（修#1）：不等 2 秒 debounce。
+// 至少要保留一個選項——取消勾選會讓紅框整個消失、「類型」欄也會變空，不允許。
+async function toggleAnchorVisitType(id, type) {
+  const a = anchors.find(x => x.id === id);
+  if (!a) return;
+  const types = anchorVisitTypes_(a);
+  if (!types) return; // 不該發生：按鈕只會出現在有切換功能的卡片上
+  if (types.includes(type)) {
+    if (types.length <= 1) return; // 至少選一個
+    a.visitTypes = types.filter(t => t !== type);
+  } else {
+    a.visitTypes = [...types, type];
+  }
+  renderAnchors();
+  renderRecommend();
+  if (viewMode === 'map') renderMap();
+  await syncTodayList_();
+  await flushTodayPlanSave_();
+}
+
 // 第二行要顯示的是「這家店」本身的區域/備註，不是這筆錨點的事項文字——
 // 事項文字（手動加入／業務親送訂單／待追蹤事項…）移到第三行的「來源」。
 function anchorAreaNote(a) {
@@ -1010,9 +1068,18 @@ function isDadStore(id) {
   const ph = (allPharmaciesCache || []).find(p => p.id === id);
   return !!ph && ph.owner === '老爸';
 }
+// 依目前切換的類型決定顯示哪幾行：只選送貨→只顯示送貨那行；只選請款→只顯示請款那行；
+// 兩個都選→兩行都顯示。沒有切換功能的卡片（anchorVisitTypes_ 回 null，例如待追蹤/本週排
+// 來源）維持原本「兩行都顯示」的舊行為，不受這次改動影響。
 function dadReminderHtml(id) {
   if (!isDadStore(id)) return '';
-  return `<div class="anchor-dad-reminder"><div>送貨：帳單要還給老爸</div><div>請款：收到的錢要交給老爸</div></div>`;
+  const a = anchors.find(x => x.id === id);
+  const types = a ? anchorVisitTypes_(a) : null;
+  const lines = [];
+  if (!types || types.includes('送貨')) lines.push('<div>送貨：帳單要還給老爸</div>');
+  if (!types || types.includes('請款')) lines.push('<div>請款：收到的錢要交給老爸</div>');
+  if (!lines.length) return '';
+  return `<div class="anchor-dad-reminder">${lines.join('')}</div>`;
 }
 
 function renderAnchors() {
@@ -1023,7 +1090,7 @@ function renderAnchors() {
       <button class="anchor-remove" title="移除這個錨點" data-action="remove-anchor" data-id="${escapeHtml(a.id)}">✕</button>
       <div class="anchor-line1">
         <span class="anchor-name">${escapeHtml(a.name)}</span>
-        <span class="anchor-type">${escapeHtml(anchorTypeLabel(a))}</span>
+        ${anchorTypeAreaHtml_(a)}
       </div>
       <div class="anchor-line2">${escapeHtml(anchorAreaNote(a))}${a.deadline ? '　期限：' + escapeHtml(deadlineMdLabel_(a.deadline)) : ''}</div>
       <div class="anchor-line3">來源：${escapeHtml(a.item || a.source || '手動')}</div>
@@ -1440,7 +1507,13 @@ function anchorSourceTag_(source) {
 // 這家店為什麼在今日清單裡（可能同時符合第①②欄多個來源，標籤要全部列出來）。
 function todayListTypeTags_(id) {
   const tags = new Set();
-  anchors.filter(a => a.id === id).forEach(a => tags.add(anchorSourceTag_(a.source)));
+  anchors.filter(a => a.id === id).forEach(a => {
+    // 有切換過送貨/請款的卡片（anchorVisitTypes_ 非 null）用使用者實際選的值，
+    // 不然「類型」欄永遠只會寫死「送貨」，使用者切成「請款」也不會反映到今日行程表。
+    const types = anchorVisitTypes_(a);
+    if (types) types.forEach(t => tags.add(t));
+    else tags.add(anchorSourceTag_(a.source));
+  });
   if (selectedCol2Ids.has(id)) {
     const item = (planData?.recommended || []).find(x => x.id === id);
     tags.add(item?.type === 'new-store' ? '新店' : '客戶');
@@ -1831,6 +1904,7 @@ async function saveTodayPlanNow_(opts, retryCount) {
   const rows = todayList.map((row, i) => todayListRowToPayload_(row, i))
     .concat(removedAnchorMarkers_.map(todayListRemovedRowPayload_));
   const payload = { date: getPlanDate(), rows, clientUpdatedAt: lastTodayPlanUpdatedAt_ };
+  if (TEST_MODE) payload.sheetName = '今日行程_TEST'; // 測試模式只寫測試分頁，不碰正式「今日行程」表
   if (opts && opts.useKeepalive) {
     // 2026-11-19（修#2）：原本 fetch(...) 完全沒人接，非同步失敗（請求送出後網路中斷/被瀏覽器
     // 丟棄）會變成沒人處理的 rejected promise，使用者毫無所覺，而且當時 todayPlanDirty_ 已經

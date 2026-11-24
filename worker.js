@@ -3196,8 +3196,20 @@ async function handlePlannerPlan(request, env, ctx) {
   anchors.push(...keptAnchors);
   todayPlanAllRows.forEach(r => {
     if (!TODAY_PLAN_ANCHOR_SOURCES_.includes(r.source) || r.status === '移除') return;
-    if (anchors.some(a => a.id === r.storeId)) return;
-    anchors.push({ id: r.storeId, name: r.name, source: r.source, item: r.autoTask || r.purposeNote || '', deadline: null });
+    // types：原樣帶回「今日行程」表存過的「類型」欄（r.types，todayPlanRowToObj_ 已經 split('、')
+    // 過），讓 planner.html 的送貨/請款切換能在重新整理後還原使用者上次的選擇（見 planner.html
+    // anchorVisitTypes_）。純附加欄位，GET 回應多一個欄位，不影響既有讀者。
+    const existing = anchors.find(a => a.id === r.storeId);
+    if (existing) {
+      // 2026-11-24 修正：「業務親送訂單」自動產生的送貨錨點（上面訂單主檔那段）比這個還原迴圈
+      // 先進 anchors，本來沒有 types——遇到已存在就整筆略過的話，使用者存過的「類型」（例如切成
+      // 「請款」）永遠接不回這個錨點，畫面上會一直顯示回預設的「送貨」。只在「既有錨點來源是
+      // 送貨、還沒有 types」時才補上，其餘情況（已經有 types，或來源不是送貨）維持原本「不新增
+      // 重複錨點」的行為不變。
+      if (existing.source === '送貨' && !existing.types) existing.types = r.types;
+      return;
+    }
+    anchors.push({ id: r.storeId, name: r.name, source: r.source, item: r.autoTask || r.purposeNote || '', deadline: null, types: r.types });
   });
   const todayPlanRows = todayPlanAllRows.filter(r => r.status !== '移除').sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
   // 狀態＝「移除」的列本身不顯示在畫面上，但前端存檔（整天覆蓋）時要知道它們存在，不然下次
@@ -3296,16 +3308,25 @@ async function handleGetTodayPlan(request, env, ctx) {
 // 對齊「今日行程」表的物件再送出（todayPlanRowFromClient_）。conflict 原樣轉給前端，由前端
 // 決定要不要用試算表目前的資料覆蓋畫面；寫入成功（非 conflict）才清快取，避免使用者剛存檔
 // 卻在幾分鐘內的 SWR 視窗看到舊資料。
+// sheetName 可選帶「今日行程_TEST」（2026-11-24 補）：GAS 的 saveTodayPlan 本來就是「Worker
+// 決定讀寫哪個分頁，GAS 不自己判斷測試/正式」（見 gas-backend/PlannerActions.js 註解），這裡
+// 原本沒把 body.sheetName 接進來、一直寫死正式表。沿用 handleUpdateTodayPlanRow 已經在用的
+// TODAY_PLAN_SHEET_WHITELIST（本來就包含「今日行程_TEST」），不是新增白名單項目，只是把既有
+// 機制接通到這支整天覆蓋端點，讓 planner.html 的 ?test=1 也能安全測試（見該檔 TEST_MODE）。
 async function handleSaveTodayPlan(request, env) {
   const body = await request.json();
   const { date, rows, clientUpdatedAt } = body;
   if (!date) return json({ error: '缺少 date' }, 400);
   if (!Array.isArray(rows)) return json({ error: 'rows 必須是陣列' }, 400);
+  const sheetName = body.sheetName || TODAY_PLAN_SHEET_NAME;
+  if (TODAY_PLAN_SHEET_WHITELIST.indexOf(sheetName) < 0) {
+    return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
+  }
   const res = await fetch(env.GAS_VISIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      action: 'saveTodayPlan', sheetName: TODAY_PLAN_SHEET_NAME, date,
+      action: 'saveTodayPlan', sheetName, date,
       rows: rows.map(todayPlanRowFromClient_), clientUpdatedAt,
       token: env.PLANNER_API_TOKEN,
     }),
@@ -3316,7 +3337,7 @@ async function handleSaveTodayPlan(request, env) {
   // 自己 GET /api/today-plan、/api/plan 用的 todayPlanRowToObj_ 欄名不一樣——轉成同一套形狀，
   // 前端不用自己判斷「這份資料是從哪條路徑來的，欄名長怎樣」。
   if (data.conflict && Array.isArray(data.rows)) data.rows = data.rows.map(todayPlanObjFromGasRow_);
-  if (data.success && !data.conflict) await invalidateGvizCache_(env, env.SHEET_PLANNER, TODAY_PLAN_SHEET_NAME);
+  if (data.success && !data.conflict) await invalidateGvizCache_(env, env.SHEET_PLANNER, sheetName);
   return json(data);
 }
 function todayPlanObjFromGasRow_(o) {
