@@ -118,7 +118,7 @@
   .section-label { font-size: var(--sr-text-sm); font-weight: var(--sr-weight-bold); color: var(--sr-ink-2); }
   textarea, input[type=text], input[type=date] {
     width: 100%; box-sizing: border-box; border: 1px solid var(--sr-line); border-radius: var(--sr-radius-md);
-    padding: var(--sr-space-4); font-size: var(--sr-text-base); font-family: var(--sr-font);
+    padding: var(--sr-space-4); font-size: 16px; font-family: var(--sr-font); /* iOS Safari 對 <16px 的輸入框聚焦會自動放大頁面，這裡固定寫死不跟 --sr-text-base 走 */
   }
   textarea { min-height: 90px; resize: vertical; }
   .choice-group { display: flex; flex-direction: column; gap: var(--sr-space-3); }
