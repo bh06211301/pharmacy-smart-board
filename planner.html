@@ -338,6 +338,12 @@
   .map-legend-row { display: flex; align-items: center; gap: var(--sr-space-3); }
   .map-legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
   .map-legend-dot.hollow { background: var(--sr-bg); border: 2px solid var(--sr-ink); box-sizing: border-box; }
+  /* 2026-11-24：星星形狀＝有未完成待追蹤，顏色用中性灰（--sr-ink-3），跟地圖上 marker 本身
+     依分級/狀態決定的顏色分開——這裡只是示範「形狀」，不是新增一種顏色圖例。 */
+  .map-legend-star {
+    width: 14px; height: 14px; flex-shrink: 0; background: var(--sr-ink-3);
+    clip-path: polygon(50% 0%, 64.7% 29.8%, 97.6% 34.6%, 73.8% 57.7%, 79.4% 90.5%, 50% 75%, 20.6% 90.5%, 26.2% 57.7%, 2.4% 34.6%, 35.3% 29.8%);
+  }
   .map-info-card { font-family: var(--sr-font); min-width: 180px; }
   .map-info-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: 4px; }
   .map-info-line { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-bottom: 4px; }
@@ -442,6 +448,7 @@
     <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-3)"></span>該去了</div>
     <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-4)"></span>很久了</div>
     <div class="map-legend-row"><span class="map-legend-dot hollow"></span>開發中新店（不分級）</div>
+    <div class="map-legend-row"><span class="map-legend-star"></span>星星形狀＝有待追蹤（顏色仍代表倍數）</div>
   </div>
 </div>
 
@@ -2490,12 +2497,48 @@ function distanceToNearestAnchorText(id) {
   return isFinite(min) ? (Math.round(min * 10) / 10) + ' 公里' : '—';
 }
 
+// 2026-11-24：地圖標記改「有未完成待追蹤的店＝星星形狀」——未完成待追蹤事項有兩個來源：
+// (a) planData.recommended 裡 type==='customer' 的 followupItems（還沒到期，worker.js
+// buildTodayRegions_ 同樣讀這個欄位，見 docs/功能史.md）；(b) anchors 裡 source==='待追蹤'
+// 的項目（已到期，被挪出清單變成錨點，單筆文字存在 a.item）。兩個來源合併去重，openMapInfo
+// 跟 renderMap 共用這支，不要各自查一次。
+function followupItemsOf_(id) {
+  const result = [];
+  const seen = new Set();
+  const rec = (planData?.recommended || []).find(x => x.id === id);
+  (rec?.followupItems || []).forEach(it => { if (it && !seen.has(it)) { seen.add(it); result.push(it); } });
+  anchors.filter(a => a.id === id && a.source === '待追蹤').forEach(a => {
+    if (a.item && !seen.has(a.item)) { seen.add(a.item); result.push(a.item); }
+  });
+  return result;
+}
+
+// 五角星 SVG path（outer radius=1，跟 google.maps.SymbolPath.CIRCLE 的單位圓同一套座標慣例，
+// marker 的 icon.scale 可以直接沿用圓點原本的值去換算），頂點朝上、原點(0,0)就是質心，
+// 站號 label 一樣畫在 marker 的地理錨點上，跟星星置中與否無關（label 位置不受 icon 形狀影響）。
+const FOLLOWUP_STAR_PATH_ = 'M0,-1 L0.2939,-0.4045 L0.9511,-0.309 L0.4755,0.1545 L0.5878,0.809 L0,0.5 L-0.5878,0.809 L-0.4755,0.1545 L-0.9511,-0.309 L-0.2939,-0.4045 Z';
+// 星星視覺面積比同 scale 的圓小，用放大倍率讓它看起來跟原圓點差不多大或略大（放大倍率本身
+// 跟顏色/描邊設定完全無關，只影響 scale 這一個數字）。
+const FOLLOWUP_STAR_SCALE_UP_BIG_ = 1.15;   // ①②：28px 大標記
+const FOLLOWUP_STAR_SCALE_UP_SMALL_ = 1.3;  // ③：14px 小標記
+function markerIconPathAndScale_(id, baseScale, scaleUpFactor) {
+  const hasFollowup = followupItemsOf_(id).length > 0;
+  return hasFollowup
+    ? { path: FOLLOWUP_STAR_PATH_, scale: baseScale * scaleUpFactor }
+    : { path: google.maps.SymbolPath.CIRCLE, scale: baseScale };
+}
+
 function openMapInfo(marker, data) {
+  const followups = followupItemsOf_(data.id);
+  const followupLine = followups.length
+    ? `<div class="map-info-line">待追蹤：${followups.map(it => escapeHtml(it)).join('、')}</div>`
+    : '';
   let html;
   if (data.kind === 'anchor') {
     html = `<div class="map-info-card">
       <div class="map-info-name">${escapeHtml(data.name)}</div>
       <div class="map-info-line">錨點・來源：${escapeHtml(anchorTypeLabel(data.anchorMeta))}</div>
+      ${followupLine}
       <div class="map-info-actions">
         <button class="map-info-btn" data-action="open-drawer" data-id="${escapeHtml(data.id)}">看檔案</button>
         <button class="map-info-btn" data-action="remove-anchor" data-id="${escapeHtml(data.id)}">移除</button>
@@ -2510,6 +2553,7 @@ function openMapInfo(marker, data) {
       <div class="map-info-name">${escapeHtml(data.name)}</div>
       <div class="map-info-line">${statusLine}　倍數 ${item.ratio ?? '—'}×</div>
       <div class="map-info-line">距最近錨點 ${distanceToNearestAnchorText(data.id)}</div>
+      ${followupLine}
       <div class="map-info-actions">
         <label><input type="checkbox" data-action="toggle-col2" data-id="${escapeHtml(data.id)}" ${checked ? 'checked' : ''}> 加入</label>
         <button class="map-info-btn" data-action="open-drawer" data-id="${escapeHtml(data.id)}">看檔案</button>
@@ -2559,7 +2603,7 @@ async function renderMap() {
     if (!loc?.lat || !loc?.lng) return;
     const marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: a.name, zIndex: 20,
-      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-ink'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+      icon: { ...markerIconPathAndScale_(a.id, 14, FOLLOWUP_STAR_SCALE_UP_BIG_), fillColor: cssVar('--sr-ink'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
       label: seqById[a.id] ? { text: String(seqById[a.id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
     });
     marker.addListener('click', () => openMapInfo(marker, { id: a.id, name: a.name, kind: 'anchor', anchorMeta: a }));
@@ -2583,7 +2627,7 @@ async function renderMap() {
     const item = visibleById[id] || (planData?.recommended || []).find(x => x.id === id);
     const marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: item?.name || id, zIndex: 15,
-      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: cssVar('--sr-primary'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
+      icon: { ...markerIconPathAndScale_(id, 14, FOLLOWUP_STAR_SCALE_UP_BIG_), fillColor: cssVar('--sr-primary'), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
       label: seqById[id] ? { text: String(seqById[id]), color: cssVar('--sr-on-dark'), fontSize: '11px', fontWeight: 'bold' } : null,
     });
     marker.addListener('click', () => openMapInfo(marker, { id, name: item?.name || id, kind: 'selected', item }));
@@ -2598,8 +2642,8 @@ async function renderMap() {
     if (!loc?.lat || !loc?.lng) return;
     const isNewStore = item.type === 'new-store';
     const icon = isNewStore
-      ? { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar('--sr-bg'), fillOpacity: 1, strokeColor: cssVar('--sr-ink'), strokeWeight: 2 }
-      : { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: cssVar(ratioColorVar(ratioTierOf(item.ratio))), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1 };
+      ? { ...markerIconPathAndScale_(item.id, 7, FOLLOWUP_STAR_SCALE_UP_SMALL_), fillColor: cssVar('--sr-bg'), fillOpacity: 1, strokeColor: cssVar('--sr-ink'), strokeWeight: 2 }
+      : { ...markerIconPathAndScale_(item.id, 7, FOLLOWUP_STAR_SCALE_UP_SMALL_), fillColor: cssVar(ratioColorVar(ratioTierOf(item.ratio))), fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1 };
     const marker = new google.maps.Marker({ position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: item.name, icon, zIndex: 10 });
     marker.addListener('click', () => openMapInfo(marker, { id: item.id, name: item.name, kind: 'candidate', item }));
     srMapMarkers.push(marker);
