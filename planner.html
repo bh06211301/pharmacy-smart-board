@@ -344,6 +344,8 @@
     width: 14px; height: 14px; flex-shrink: 0; background: var(--sr-ink-3);
     clip-path: polygon(50% 0%, 64.7% 29.8%, 97.6% 34.6%, 73.8% 57.7%, 79.4% 90.5%, 50% 75%, 20.6% 90.5%, 26.2% 57.7%, 2.4% 34.6%, 35.3% 29.8%);
   }
+  /* 2026-11-24：老爸的店圖示縮圖，src 由 JS 填 data URI（見 dadMarkerIconUrl_） */
+  .map-legend-dad-icon { width: 14px; height: 14px; flex-shrink: 0; }
   .map-info-card { font-family: var(--sr-font); min-width: 180px; }
   .map-info-name { font-size: var(--sr-text-md); font-weight: var(--sr-weight-bold); margin-bottom: 4px; }
   .map-info-line { font-size: var(--sr-text-sm); color: var(--sr-ink-2); margin-bottom: 4px; }
@@ -449,6 +451,10 @@
     <div class="map-legend-row"><span class="map-legend-dot" style="background:var(--sr-map-ratio-4)"></span>很久了</div>
     <div class="map-legend-row"><span class="map-legend-dot hollow"></span>開發中新店（不分級）</div>
     <div class="map-legend-row"><span class="map-legend-star"></span>星星形狀＝有待追蹤（顏色仍代表倍數）</div>
+    <!-- 2026-11-24：老爸的店圖示列——src 由 JS 在腳本初始化時用 dadMarkerIconUrl_(false) 填入
+         （data URI 讀 cssVar() 要等 design-tokens.css 套用後才有值，靠 JS 補，不寫死在 HTML）。 -->
+    <div class="map-legend-row"><img id="map-legend-dad-icon" class="map-legend-dad-icon" alt="老爸的店圖示">老爸的店（墨鏡圖示；有待追蹤會疊一顆小星星）</div>
+    <div class="map-legend-row"><label><input type="checkbox" id="map-legend-dad-toggle" checked> 顯示老爸的店</label></div>
   </div>
 </div>
 
@@ -1382,6 +1388,76 @@ function mapCandidateList_() {
   if (filterMode === 'radius') list = list.filter(item => withinAnchorRadius(item.id));
   return list;
 }
+
+// 2026-11-24：地圖上額外標出「負責人=老爸」的店——worker.js 組 planData.recommended 時本來就
+// 排除老爸的店（跟死客戶、不拜訪一樣，見 isDadStore 旁註解／CLAUDE.md），所以老爸的店平常只有
+// 被加進①（錨點）才會出現在地圖。這支直接從 allPharmaciesCache（客戶表原始資料，不是
+// planData.recommended）另外撈，排除死客戶／不拜訪／已經是錨點／已經勾進②的店（這幾種維持
+// 原本①②的畫法，不用這支、也不重複畫），filterMode==='radius' 時一樣套用錨點半徑篩選，跟
+// mapCandidateList_ 的篩選鏈保持一致。showDadStores_ 開關只在呼叫端（renderMap）判斷要不要
+// 呼叫這支，這支本身不管開關狀態。
+function mapDadStoreList_() {
+  if (!allPharmaciesCache) return [];
+  const excludeIds = anchorIds();
+  let list = allPharmaciesCache.filter(p =>
+    p.owner === '老爸' && !p.deadReason && p.status !== '不拜訪' &&
+    !excludeIds.has(p.id) && !selectedCol2Ids.has(p.id));
+  if (filterMode === 'radius') list = list.filter(p => withinAnchorRadius(p.id));
+  return list;
+}
+
+// 墨鏡圖示（老爸的店專用，data URI SVG，用 icon.url／scaledSize／anchor 而不是既有 marker 用的
+// path symbol——兩片鏡片＋鼻樑橋＋鏡腳是複合形狀，塞進單一 SymbolPath 很難畫清楚，SVG 直接畫
+// 比較直覺）。顏色一律用 cssVar() 讀 design-tokens.css 實際算出的值，不寫死色碼。
+// hasFollowup=true 時右上角疊一顆小星星徽章：星星頂點座標是 FOLLOWUP_STAR_PATH_（單位圓，
+// 見上面宣告處）平移縮放到 cx=48,cy=15,r=9 後手算出來的結果（跟其他 helper 一樣「故意複製一份
+// 再變形」，不是共用同一個 path 字串——這裡是座標系統完全不同的 SVG viewBox，不能直接套用）。
+// y 範圍 6~22.28，跟鏡片（ellipse cy=33 ry=9，上緣 y=24）刻意留出間距，不會疊到鏡片上。
+const DAD_MARKER_STAR_PATH_ = 'M48,6 L50.65,11.36 L56.56,12.22 L52.28,16.39 L53.29,22.28 L48,19.5 L42.71,22.28 L43.72,16.39 L39.44,12.22 L45.36,11.36 Z';
+function dadMarkerSvg_(hasFollowup, grayFill, darkFill) {
+  const starHtml = hasFollowup
+    ? `<path d="${DAD_MARKER_STAR_PATH_}" fill="${darkFill}" stroke="#fff" stroke-width="1"/>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">`
+    + `<circle cx="32" cy="32" r="29" fill="${grayFill}" stroke="#fff" stroke-width="3"/>`
+    + `<line x1="8" y1="30" x2="2" y2="25" stroke="${darkFill}" stroke-width="4" stroke-linecap="round"/>`
+    + `<line x1="56" y1="30" x2="62" y2="25" stroke="${darkFill}" stroke-width="4" stroke-linecap="round"/>`
+    + `<ellipse cx="20" cy="33" rx="12" ry="9" fill="${darkFill}"/>`
+    + `<ellipse cx="44" cy="33" rx="12" ry="9" fill="${darkFill}"/>`
+    + `<rect x="29" y="29" width="6" height="6" rx="2" fill="${darkFill}"/>`
+    + starHtml
+    + `</svg>`;
+}
+function dadMarkerIconUrl_(hasFollowup) {
+  const svg = dadMarkerSvg_(hasFollowup, cssVar('--sr-map-dad'), cssVar('--sr-ink'));
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+}
+
+// 老爸的店資訊窗：跟 openMapInfo 分開寫（不是同一種資料結構——p 是 allPharmaciesCache 原始物件，
+// 不是 planData.recommended 的 item，沒有 ratio/tier 這些欄位），「加入今天」直接沿用
+// pick-manual-add 既有流程（跟搜尋框手動加入老爸的店走同一條路，見 pickManualAdd／CLAUDE.md
+// 搜尋框 placeholder「含老爸／新竹／不拜訪的店」），不另寫一套寫入邏輯。
+function openDadMapInfo_(marker, p) {
+  const followups = followupItemsOf_(p.id);
+  const followupLine = followups.length
+    ? `<div class="map-info-line">待追蹤：${followups.map(it => escapeHtml(it)).join('、')}</div>`
+    : '';
+  const area = p.district || p.city || '';
+  const html = `<div class="map-info-card">
+    <div class="map-info-name">${escapeHtml(p.name)}</div>
+    <div class="map-info-line">${escapeHtml(area)}　老爸的店</div>
+    ${followupLine}
+    <div class="map-info-actions">
+      <button class="map-info-btn" data-action="open-drawer" data-id="${escapeHtml(p.id)}">看檔案</button>
+      <button class="map-info-btn" data-action="pick-manual-add" data-id="${escapeHtml(p.id)}">加入今天</button>
+    </div>
+  </div>`;
+  srMapInfoWindow.setContent(html);
+  srMapInfoWindow.open({ map: srMap, anchor: marker });
+}
+
+// 「顯示老爸的店」開關：只存在記憶體（跟 viewMode 同慣例，不寫 localStorage），預設勾選。
+let showDadStores_ = true;
 
 function loadGoogleMapsSdk() {
   return new Promise(resolve => {
@@ -2601,11 +2677,14 @@ async function renderMap() {
   // 清單預設收合倍數<1 的店（「還不急」），但地圖不該因為清單沒展開就漏畫這些店（使用者回報
   // 的原始問題）。清單本身的收合行為完全不動，只有這裡（地圖）改。
   const mapCandidates_ = mapCandidateList_();
+  // 2026-11-24：老爸的店（開關關閉時不算，不需要定位、也不需要畫）。
+  const dadList_ = showDadStores_ ? mapDadStoreList_() : [];
   const nameById_ = {};
   anchors.forEach(a => { nameById_[a.id] = a.name; });
   mapCandidates_.forEach(item => { nameById_[item.id] = item.name; });
+  dadList_.forEach(p => { if (!nameById_[p.id]) nameById_[p.id] = p.name; });
   (planData?.recommended || []).forEach(item => { if (!nameById_[item.id]) nameById_[item.id] = item.name; });
-  const neededIds_ = new Set([...anchors.map(a => a.id), ...selectedCol2Ids, ...mapCandidates_.map(item => item.id)]);
+  const neededIds_ = new Set([...anchors.map(a => a.id), ...selectedCol2Ids, ...mapCandidates_.map(item => item.id), ...dadList_.map(p => p.id)]);
   const locById = {};
   await Promise.all([...neededIds_].map(async id => { locById[id] = await resolveStoreLocation_(id, nameById_[id] || id); }));
 
@@ -2666,6 +2745,23 @@ async function renderMap() {
     extend(loc.lat, loc.lng);
   });
 
+  // ⑤ 老爸的店：灰底墨鏡圖示，zIndex 比①②③都低（這批店不是今天排程的重點，只是順便標出來
+  // 提醒「這家店帳要還老爸」），已經是錨點/已勾選的老爸的店不會出現在 dadList_（mapDadStoreList_
+  // 已經排除），維持①②原本的深色/primary 圓畫法，不會重複畫兩個 marker。
+  dadList_.forEach(p => {
+    const loc = locById[p.id];
+    if (!loc?.lat || !loc?.lng) return;
+    const hasFollowup = followupItemsOf_(p.id).length > 0;
+    const size = hasFollowup ? 24 : 20;
+    const marker = new google.maps.Marker({
+      position: { lat: loc.lat, lng: loc.lng }, map: srMap, title: p.name, zIndex: 5,
+      icon: { url: dadMarkerIconUrl_(hasFollowup), scaledSize: new google.maps.Size(size, size), anchor: new google.maps.Point(size / 2, size / 2) },
+    });
+    marker.addListener('click', () => openDadMapInfo_(marker, p));
+    srMapMarkers.push(marker);
+    extend(loc.lat, loc.lng);
+  });
+
   // ④ 路線線：直線段連接目前已算好的站點順序，不是實際路網線（不解析 Routes API 回傳的
   // encoded polyline，避免多引入 Maps JavaScript 的 geometry library，保守簡化，WORKLOG 記錄）
   if (route && route.length > 1) {
@@ -2680,6 +2776,14 @@ async function renderMap() {
 }
 
 document.getElementById('manual-add-input').addEventListener('input', onManualAddInput);
+// 2026-11-24：圖例裡的墨鏡縮圖用 JS 填 src（data URI 要讀 cssVar() 算出來的實際色碼，
+// design-tokens.css 這時已經套用完成，不用等 renderMap 第一次跑）；開關只換 showDadStores_，
+// 不寫任何資料，只有在地圖模式才需要重畫。
+document.getElementById('map-legend-dad-icon').src = dadMarkerIconUrl_(false);
+document.getElementById('map-legend-dad-toggle').addEventListener('change', (e) => {
+  showDadStores_ = e.target.checked;
+  if (viewMode === 'map') renderMap();
+});
 renderMiniCal();
 applyViewModeUI();
 loadPlan();
