@@ -191,6 +191,17 @@
       <div class="topbar-sub" id="home-finish-estimate">預估收工 —</div>
     </div>
     <div class="body-scroll">
+      <!-- ?voice=1 外勤語音捷徑：定位找到最近站時在這裡提示，由使用者按確認才進記錄畫面 -->
+      <div id="voice-suggest-card" class="card" hidden>
+        <div class="store-meta">依目前位置建議</div>
+        <div class="store-name" id="voice-suggest-name"></div>
+        <div class="store-meta" id="voice-suggest-dist"></div>
+        <div class="btn-row" style="margin-top:var(--sr-space-4)">
+          <button class="btn" id="voice-suggest-cancel">取消</button>
+          <button class="btn primary" id="voice-suggest-confirm">記錄這家</button>
+        </div>
+      </div>
+
       <div class="section-label">下一站</div>
       <div id="home-nextstop" class="card card-hero">
         <div class="center-note">讀取今日行程中…（真實資料，呼叫 GET /api/today-plan＋/api/plan）</div>
@@ -521,6 +532,9 @@ const GMAPS_KEY = 'AIzaSyASAVr49ayzfFF2ZuuLaOneo-PsK1094tc'; // 跟 planner.html
 const ORIGIN_ADDR = '新北市汐止區湖東街五巷25號';
 const DEST_ADDR = '台北市內湖區新民街422號';
 const IS_TEST_MODE = new URLSearchParams(location.search).get('test') === '1';
+// ?voice=1：iPhone 捷徑打開後直接進記錄畫面用（見 fv2VoiceEntry_）。只接受 'voice=1'，
+// 其他值（含 voice=abc）一律忽略，行為等同沒帶這個參數。
+const VOICE_ENTRY = new URLSearchParams(location.search).get('voice') === '1';
 function fv2SheetNameFor_(prodName, testName) { return IS_TEST_MODE ? testName : prodName; }
 // funnel/result（含confirmed）、addFollowup、todos-v2 老爸提醒這三種沒有 _TEST 姊妹分頁可用，
 // 測試模式下不能像拜訪紀錄/今日行程那樣換 sheetName 避開正式資料——改成測試模式一律不送出，
@@ -2277,8 +2291,60 @@ const FV2_VISIT_PURPOSES = ['例行拜訪', '新店開發', '送貨', '對帳請
 document.getElementById('add-stop-purposes').innerHTML = FV2_VISIT_PURPOSES
   .map((p, i) => `<span class="chip${i === 0 ? ' selected' : ''}" data-value="${escapeHtml_(p)}">${escapeHtml_(p)}</span>`).join('');
 
+// ============================================================
+// ?voice=1 外勤語音捷徑：iPhone 捷徑開網址直接進記錄畫面用。純讀取＋前端算距離，不新增任何
+// 寫入路徑——真正要記錄還是走既有 fv2DoRecord_（進畫面3/3b，使用者按儲存才真的送出）。
+// 必須等 fv2LoadAll() 的 Promise resolve、FV2.todayRows 有資料後才能判斷，不能在同步區塊做。
+// ============================================================
+function fv2VoiceCoord_(r) {
+  const key = r.storeId || r.address;
+  const { ph, rec } = fv2StoreMeta_(key);
+  const lat = ph?.confirmedLat ?? ph?.lat ?? rec?.lat;
+  const lng = ph?.confirmedLng ?? ph?.lng ?? rec?.lng;
+  return (lat != null && lng != null) ? { lat, lng } : null;
+}
+function fv2VoiceHideSuggest_() {
+  const card = document.getElementById('voice-suggest-card');
+  if (card) card.hidden = true;
+}
+// 定位建議卡只負責顯示＋等使用者按確認；確認才呼叫 fv2DoRecord_，取消只隱藏卡片，
+// 畫面留在今日清單（1-home 本來就在顯示），不自動改任何狀態。
+function fv2VoiceShowSuggest_(row, distKm) {
+  const card = document.getElementById('voice-suggest-card');
+  if (!card) return;
+  document.getElementById('voice-suggest-name').textContent = row.name;
+  document.getElementById('voice-suggest-dist').textContent = `距離約 ${distKm.toFixed(1)} 公里`;
+  card.hidden = false;
+  const key = row.storeId || row.address;
+  document.getElementById('voice-suggest-confirm').onclick = () => { fv2VoiceHideSuggest_(); fv2DoRecord_(key); };
+  document.getElementById('voice-suggest-cancel').onclick = () => { fv2VoiceHideSuggest_(); };
+}
+// 定位成功才找最近站；沒有定位 API、被拒絕、逾時、或今日行程沒有店有座標，都直接維持
+// 首頁清單原樣（不另外彈窗、不強制選），使用者自己從「全部站點」點「記錄這家」。
+function fv2VoiceLocateAndSuggest_(rows) {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude } = pos.coords;
+      const withCoord = rows.map(r => ({ row: r, coord: fv2VoiceCoord_(r) })).filter(x => x.coord);
+      if (!withCoord.length) return;
+      withCoord.forEach(x => { x.distKm = haversineKm_(latitude, longitude, x.coord.lat, x.coord.lng); });
+      withCoord.sort((a, b) => a.distKm - b.distKm);
+      fv2VoiceShowSuggest_(withCoord[0].row, withCoord[0].distKm);
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 15000 }
+  );
+}
+function fv2VoiceEntry_() {
+  const rows = FV2.todayRows;
+  const arrived = rows.find(r => r.status === '已到');
+  if (arrived) { fv2DoRecord_(arrived.storeId || arrived.address); return; }
+  fv2VoiceLocateAndSuggest_(rows);
+}
+
 showScreen('1-home');
-fv2LoadAll().catch(() => {}); // 第一次載入失敗的畫面已經在 fv2LoadAll 內部處理過，這裡只是接住拋出的錯誤避免console噴警告
+fv2LoadAll().then(() => { if (VOICE_ENTRY) fv2VoiceEntry_(); }).catch(() => {}); // 第一次載入失敗的畫面已經在 fv2LoadAll 內部處理過，這裡只是接住拋出的錯誤避免console噴警告
 </script>
 </body>
 </html>
