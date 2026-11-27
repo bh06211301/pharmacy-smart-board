@@ -191,6 +191,8 @@
       <div class="topbar-sub" id="home-finish-estimate">預估收工 —</div>
     </div>
     <div class="body-scroll">
+      <!-- ?voice=1&text=… 語音聽寫文字：還沒進記錄畫面前先暫存在記憶體，這行提示使用者文字已收到 -->
+      <div id="voice-text-pending-note" class="dad-note" hidden>已收到語音文字，進入記錄畫面後會帶入</div>
       <!-- ?voice=1 外勤語音捷徑：定位找到最近站時在這裡提示，由使用者按確認才進記錄畫面 -->
       <div id="voice-suggest-card" class="card" hidden>
         <div class="store-meta">依目前位置建議</div>
@@ -1224,9 +1226,11 @@ function fv2DoRecord_(key) {
   if (row && row.types && row.types.indexOf('新店') >= 0) {
     fv2RenderRecordNewstore(key);
     showScreen('3b-record-newstore');
+    fv2VoiceApplyPendingText_('record-newstore-content');
   } else {
     fv2RenderRecordCustomer(key);
     showScreen('3-record-customer');
+    fv2VoiceApplyPendingText_('record-customer-content');
   }
 }
 
@@ -2336,6 +2340,72 @@ function fv2VoiceLocateAndSuggest_(rows) {
     { enableHighAccuracy: true, timeout: 15000 }
   );
 }
+// ---- ?voice=1&text=…：iPhone 捷徑「聽寫文字」的結果原樣帶進拜訪內容框 ----
+// 第一版不經過任何 AI、不新增 Worker 端點、不新增寫入路徑：只把文字放進 textarea，使用者自己
+// 確認／修改後按儲存，走既有存檔流程。text 只在 voice=1 時生效；讀到後立刻用 replaceState 把
+// text 從網址拿掉（避免留在瀏覽器歷史），其他參數（test、voice、dev…）原樣保留。
+const FV2_VOICE_TEXT_MAX_ = 2000;
+// 從原始 search 字串取出 text 的值並解碼。刻意不用 URLSearchParams.get（它遇到格式錯誤的 % 會
+// 靜默照字面留下），改成自己 decodeURIComponent＋try/catch，格式錯誤就整段忽略。
+// 回傳 null＝沒有可用文字（沒帶、空白、格式錯誤）；否則 { text, truncated }。
+function fv2VoiceParseText_(search) {
+  const parts = String(search || '').replace(/^\?/, '').split('&');
+  const part = parts.find(x => x === 'text' || x.indexOf('text=') === 0);
+  if (part === undefined) return null;
+  let text;
+  try {
+    text = decodeURIComponent(part.slice(5).replace(/\+/g, ' '));
+  } catch (e) {
+    return null;
+  }
+  if (!text.trim()) return null;
+  const chars = Array.from(text); // 以字元（code point）計算，避免把 emoji 等切成半個
+  if (chars.length > FV2_VOICE_TEXT_MAX_) return { text: chars.slice(0, FV2_VOICE_TEXT_MAX_).join(''), truncated: true };
+  return { text, truncated: false };
+}
+// 回傳拿掉 text 參數後的網址（pathname＋其餘參數＋hash），給 history.replaceState 用。
+function fv2VoiceUrlWithoutText_(href) {
+  const u = new URL(href);
+  u.searchParams.delete('text');
+  const qs = u.searchParams.toString();
+  return u.pathname + (qs ? '?' + qs : '') + u.hash;
+}
+// 已有手打的字就不覆蓋，附加在後面並換行；空的就直接放入。
+function fv2VoiceMergeText_(existing, incoming) {
+  const cur = String(existing || '');
+  if (!cur.trim()) return incoming;
+  return cur + (cur.endsWith('\n') ? '' : '\n') + incoming;
+}
+let fv2VoicePendingText_ = null; // 還沒帶入記錄畫面的語音文字（只存在記憶體）
+function fv2VoiceShowPendingNote_(show) {
+  const el = document.getElementById('voice-text-pending-note');
+  if (el) el.hidden = !show;
+}
+// fv2DoRecord_ 進畫面（render 已經做完換店清空）之後呼叫：只用 .value 放入（不當 HTML），
+// 帶入一次就清掉暫存。程式設定 .value 不會發 input 事件，所以手動補發一次，讓既有的標籤建議
+// （fv2UpdateRecordCustomerTagHints_／fv2UpdateRecordNewstoreTagHints_：規則＋AI 建議）
+// 跟手打一樣接手；待追蹤自動勾選只看下次要記得／緊急問題／已選標籤，不看拜訪內容，不受影響。
+function fv2VoiceApplyPendingText_(textareaId) {
+  if (fv2VoicePendingText_ === null) return;
+  const el = document.getElementById(textareaId);
+  if (!el) return;
+  el.value = fv2VoiceMergeText_(el.value, fv2VoicePendingText_);
+  fv2VoicePendingText_ = null;
+  fv2VoiceShowPendingNote_(false);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// 頁面載入當下同步執行（不等 fv2LoadAll）：讀 text → 立刻清網址 → 暫存＋顯示提示行。
+function fv2VoiceInitText_() {
+  if (!VOICE_ENTRY) return;
+  const parsed = fv2VoiceParseText_(location.search);
+  if (new URLSearchParams(location.search).has('text')) {
+    try { history.replaceState(history.state, '', fv2VoiceUrlWithoutText_(location.href)); } catch (e) {}
+  }
+  if (!parsed) return;
+  fv2VoicePendingText_ = parsed.text;
+  fv2VoiceShowPendingNote_(true);
+  if (parsed.truncated) fv2Toast_(`語音文字超過 ${FV2_VOICE_TEXT_MAX_} 字，只帶入前 ${FV2_VOICE_TEXT_MAX_} 字`, true);
+}
 function fv2VoiceEntry_() {
   const rows = FV2.todayRows;
   const arrived = rows.find(r => r.status === '已到');
@@ -2344,6 +2414,7 @@ function fv2VoiceEntry_() {
 }
 
 showScreen('1-home');
+fv2VoiceInitText_();
 fv2LoadAll().then(() => { if (VOICE_ENTRY) fv2VoiceEntry_(); }).catch(() => {}); // 第一次載入失敗的畫面已經在 fv2LoadAll 內部處理過，這裡只是接住拋出的錯誤避免console噴警告
 </script>
 </body>
