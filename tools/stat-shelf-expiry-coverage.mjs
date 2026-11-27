@@ -1,42 +1,74 @@
 // 店端效期推估「涵蓋率」唯讀統計（一次性腳本，分支1：feature/shelf-expiry-estimate）。
-// 只送一次 gviz 讀取請求（GET，公開試算表的唯讀端點，不帶任何金鑰/token），不寫入任何東西。
-// 讀取方式照抄 worker.js 的 fetchGvizSheetRaw_（約 L1676）：直接 fetch gviz tq JSON，不經 Worker。
+// 只送一次讀取請求（GET，公開試算表的唯讀端點，不帶任何金鑰/token），不寫入任何東西。
+// 2026-11-27：原本用 gviz（tqx=out:json）讀，後來發現 gviz 會把整欄型態不一致的儲存格清成
+// null、甚至整列漏讀（詳見 tools/audit-gviz-vs-export.mjs 的稽核），改用 Google 試算表的
+// export?format=csv 端點（非 gviz，直接拿到原始儲存格字串），結果才準。
 // 執行：node tools/stat-shelf-expiry-coverage.mjs
 //
 // SHEET_ORDER（出貨明細）的試算表 ID 寫在 wrangler.toml 的 [vars]，屬於文件已公開記載的 Sheet ID
-// （非金鑰），沿用 CLAUDE.md 記錄的同一個 ID。
+// （非金鑰），沿用 CLAUDE.md 記錄的同一個 ID。gid=0 是第一個分頁（worker.js 讀 SHEET_ORDER 時
+// 沒有指定分頁名稱，等同讀取第一個分頁）。
 
 import { parseOrderNoDate } from '../shelf-expiry-logic.js';
 
 const SHEET_ORDER_ID = '13HB7e9mzL0H6Nhfyl-AKhjO8M_GElnqPldTk-u-0ni8';
+const SHEET_ORDER_GID = 0;
 const WINDOW_DAYS = 14;
 const MONTHS_BACK = 12;
 
-async function fetchGvizSheetRaw_(sheetId) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+// 簡易 CSV 解析（處理雙引號包住的欄位、欄內逗號、跨行欄位）
+function parseCsv_(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field); field = '';
+    } else if (c === '\n') {
+      row.push(field); rows.push(row); row = []; field = '';
+    } else if (c === '\r') {
+      // 忽略，跟 \n 一起處理換行
+    } else {
+      field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function fetchExportCsv_(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`gviz 讀取失敗：HTTP ${res.status}`);
+    throw new Error(`export CSV 讀取失敗：HTTP ${res.status}`);
   }
   const text = await res.text();
-  const m = text.match(/^.*?({.*}).*$/s);
-  if (!m) throw new Error('gviz 回應格式不符預期（抓不到 JSON 區塊）');
-  const data = JSON.parse(m[1]);
-  const cols = data?.table?.cols || [];
-  const rows = data?.table?.rows || [];
+  if (/^<!DOCTYPE html|^<html/i.test(text.trim())) {
+    throw new Error('export CSV 回應是 HTML（通常代表這個分頁未開放「知道連結的人可檢視」）');
+  }
+  const table = parseCsv_(text);
+  const header = table[0] || [];
+  const rows = table.slice(1).filter(r => !(r.length === 1 && r[0] === ''));
   const colMap = {};
-  cols.forEach((c, i) => { colMap[c.label] = i; });
+  header.forEach((label, i) => { colMap[label] = i; });
   return { rows, colMap };
 }
 
-function gvizGet(row, colMap, label) {
+function csvGet_(row, colMap, label) {
   const i = colMap[label];
-  if (i === undefined || !row.c[i]) return '';
-  return row.c[i].v ?? '';
+  if (i === undefined) return '';
+  return row[i] ?? '';
 }
 
 function main() {
-  return fetchGvizSheetRaw_(SHEET_ORDER_ID).then(({ rows, colMap }) => {
+  return fetchExportCsv_(SHEET_ORDER_ID, SHEET_ORDER_GID).then(({ rows, colMap }) => {
     console.log(`原始列數：${rows.length}`);
     console.log(`欄位：${Object.keys(colMap).join('、')}`);
 
@@ -50,9 +82,9 @@ function main() {
     const productSet = new Set();
 
     rows.forEach(row => {
-      const store = String(gvizGet(row, colMap, '店名_備份') || '').trim();
-      const product = String(gvizGet(row, colMap, '產品ID') || '').trim();
-      const orderNo = gvizGet(row, colMap, '訂單編號');
+      const store = String(csvGet_(row, colMap, '店名_備份') || '').trim();
+      const product = String(csvGet_(row, colMap, '產品ID') || '').trim();
+      const orderNo = csvGet_(row, colMap, '訂單編號');
       const date = parseOrderNoDate(orderNo);
       if (!date) {
         parseFailCount++;
