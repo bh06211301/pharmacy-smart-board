@@ -65,6 +65,20 @@ function gvizCellIsTrue_(v) {
   return String(v).trim().toUpperCase() === 'TRUE';
 }
 
+// ---- 複製自 worker.js 的 gvizCellToIsoDate_（記錄日期讀取，2026-11-27 審查補，方案A）----
+// 寫入時是 'YYYY-MM-DD' 文字，但 Sheets 可能自動偵測成真日期，gviz 讀回來是
+// 'Date(2026,10,27)'（月份0起算）。使用者決定保留真日期，這支負責轉回 'YYYY-MM-DD'；
+// 格式不明原樣傳回，空值/undefined 回傳空字串，不經過 new Date(...)（避免時區風險）。
+function gvizCellToIsoDate_(v) {
+  if (v === undefined || v === null || v === '') return '';
+  const s = String(v);
+  const m = s.match(/^Date\((\d+),(\d+),(\d+)\)$/);
+  if (!m) return s;
+  const mm = String(parseInt(m[2], 10) + 1).padStart(2, '0');
+  const dd = String(parseInt(m[3], 10)).padStart(2, '0');
+  return `${m[1]}-${mm}-${dd}`;
+}
+
 let total = 0;
 let passed = 0;
 function assertEqual(name, got, expect) {
@@ -204,6 +218,15 @@ assertEqual('布林 false → false', gvizCellIsTrue_(false), false);
 assertEqual('字串 "FALSE" → false', gvizCellIsTrue_('FALSE'), false);
 assertEqual('空字串 → false', gvizCellIsTrue_(''), false);
 assertEqual('undefined → false', gvizCellIsTrue_(undefined), false);
+
+// ---- gvizCellToIsoDate_：記錄日期讀取要能正規化 gviz 日期格式（2026-11-27 審查補，方案A） ----
+assertEqual('Date(2026,10,27) → 2026-11-27（月份0起算+1）', gvizCellToIsoDate_('Date(2026,10,27)'), '2026-11-27');
+assertEqual('Date(2026,0,1) → 2026-01-01（月初）', gvizCellToIsoDate_('Date(2026,0,1)'), '2026-01-01');
+assertEqual('Date(2026,11,31) → 2026-12-31（年底）', gvizCellToIsoDate_('Date(2026,11,31)'), '2026-12-31');
+assertEqual('已經是 YYYY-MM-DD 原樣傳回', gvizCellToIsoDate_('2026-11-27'), '2026-11-27');
+assertEqual('空字串 → 空字串', gvizCellToIsoDate_(''), '');
+assertEqual('undefined → 空字串', gvizCellToIsoDate_(undefined), '');
+assertEqual('格式不明字串原樣傳回，不報錯', gvizCellToIsoDate_('不是日期的亂字串'), '不是日期的亂字串');
 
 console.log(`\n共 ${total} 項斷言，通過 ${passed} 項`);
 console.log(passed === total ? '全部通過' : '有測試沒過！');

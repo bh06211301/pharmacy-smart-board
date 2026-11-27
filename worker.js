@@ -3492,6 +3492,24 @@ function gvizCellIsTrue_(v) {
   return String(v).trim().toUpperCase() === 'TRUE';
 }
 
+// 2026-11-27 審查補（方案A）：記錄日期寫入時是 'YYYY-MM-DD' 文字，但實測發現即使欄位設了
+// setNumberFormat('@')，Sheets 仍把它自動偵測成真正的日期，gviz 讀回來是 'Date(2026,10,27)'
+// （月份 0 起算）——使用者決定保留這個真日期（方案A：之後排序/篩選用得到），由這裡轉回
+// 'YYYY-MM-DD' 字串給呼叫端用。故意不走既有 parseGvizDate()+formatDateIso_()（rawDateToIso_()
+// 那條路）：那條路要把中間結果餵進 new Date(...) 再用本地時區的 getDate() 讀回來，UTC負時區下
+// 可能倒退一天；這裡直接用正規表達式從 'Date(y,m,d)' 手動取數字補零，不經過 Date 物件，沒有
+// 時區風險。格式不明的字串原樣傳回，不拋錯、不猜；空值/undefined 回傳空字串。跟
+// tools/test-shelf-expiry-write.mjs 共用同一份寫法。
+function gvizCellToIsoDate_(v) {
+  if (v === undefined || v === null || v === '') return '';
+  const s = String(v);
+  const m = s.match(/^Date\((\d+),(\d+),(\d+)\)$/);
+  if (!m) return s;
+  const mm = String(parseInt(m[2], 10) + 1).padStart(2, '0');
+  const dd = String(parseInt(m[3], 10)).padStart(2, '0');
+  return `${m[1]}-${mm}-${dd}`;
+}
+
 async function handleGetShelfExpiry(request, env, ctx) {
   const url = new URL(request.url);
   const pharmacy = url.searchParams.get('pharmacy');
@@ -3506,7 +3524,7 @@ async function handleGetShelfExpiry(request, env, ctx) {
     .filter(r => r.get('店家代號') === pharmacy)
     .map(r => ({
       recordId: r.get('記錄ID'), storeId: r.get('店家代號'), productId: r.get('產品編號'),
-      expiryYearMonth: r.get('效期年月'), source: r.get('來源'), recordDate: r.get('記錄日期'),
+      expiryYearMonth: r.get('效期年月'), source: r.get('來源'), recordDate: gvizCellToIsoDate_(r.get('記錄日期')),
       note: r.get('備註') || '', outOfStock: gvizCellIsTrue_(r.get('庫外旗標')),
       expiryKey: r.get('效期庫Key') || '',
     }));
