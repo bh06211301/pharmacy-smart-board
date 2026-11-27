@@ -43,6 +43,11 @@
   .finish-time-label { font-size: var(--sr-text-xs); color: var(--sr-ink-3); }
   .finish-time-value { font-size: var(--sr-text-2xl); font-weight: var(--sr-weight-bold); }
   .finish-time-value.late { color: var(--sr-danger); }
+  .work-end-row { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-top: 2px; }
+  .work-end-input {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); font-family: var(--sr-font);
+    font-size: 16px; padding: 1px 4px; /* 16px 固定值，跟 field-v2.html 同一顆輸入框同一個理由，避免行動裝置聚焦放大 */
+  }
 
   /* ---------- 三欄（DESIGN.md 2.11） ----------
      寬度 ≥1200px：nav／頁首固定高度，.columns 吃掉剩下的視窗高度，三欄各自在欄內捲動──
@@ -384,6 +389,7 @@
   <div class="finish-time-block">
     <div class="finish-time-label">預估收工時間</div>
     <div class="finish-time-value" id="finish-time-value">—</div>
+    <div class="finish-time-label work-end-row">工作結束 <input type="time" class="work-end-input" id="work-end-input"></div>
   </div>
 </div>
 
@@ -503,6 +509,42 @@ function fmtMin(min) {
   const h = Math.floor(min / 60) % 24, m = Math.round(min % 60);
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
+
+// 工作結束時間（跟 field-v2.html 共用同一個 localStorage 鍵名／格式，邏輯各自維護一份——
+// 理由跟該檔案 TODAY_PLAN_ANCHOR_SOURCES_ 的註解一樣，兩邊都是獨立靜態頁面，沒有共用檔案
+// 機制）。「當天」用真正的今天（new Date()），不是這頁目前在看的規劃日期——工作結束時間
+// 本來就是「我今天幾點要收工」，跟在規劃哪一天的行程是兩件事。
+const SR_WORK_END_TIME_KEY_ = 'sr_work_end_time';
+const SR_WORK_END_TIME_DEFAULT_ = '17:30';
+function todayStr_() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function resolveWorkEndTime_(rawStr, todayStr) {
+  if (!rawStr) return SR_WORK_END_TIME_DEFAULT_;
+  let obj;
+  try { obj = JSON.parse(rawStr); } catch (e) { return SR_WORK_END_TIME_DEFAULT_; }
+  if (!obj || obj.date !== todayStr || !/^\d{1,2}:\d{2}$/.test(obj.value || '')) return SR_WORK_END_TIME_DEFAULT_;
+  return obj.value;
+}
+function getWorkEndTime_() {
+  let raw = null;
+  try { raw = localStorage.getItem(SR_WORK_END_TIME_KEY_); } catch (e) {}
+  return resolveWorkEndTime_(raw, todayStr_());
+}
+function setWorkEndTime_(value) {
+  try { localStorage.setItem(SR_WORK_END_TIME_KEY_, JSON.stringify({ date: todayStr_(), value })); } catch (e) {}
+}
+function workEndTimeMin_() {
+  const m = String(getWorkEndTime_()).match(/^(\d{1,2}):(\d{2})$/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 17 * 60 + 30;
+}
+document.getElementById('work-end-input').value = getWorkEndTime_();
+document.getElementById('work-end-input').addEventListener('change', (e) => {
+  if (!/^\d{1,2}:\d{2}$/.test(e.target.value || '')) return;
+  setWorkEndTime_(e.target.value);
+  recomputeTodayListTimes_(); // 只是重算.late樣式要用的門檻，不碰路線/車程資料
+});
 
 // 2026-11-01：主選單改共用元件（planner-nav.js），extraRight 放這頁才有的規劃日期選擇器／找藥局框，
 // 要在 initHeader() 用到 #plan-date-input 之前先把 nav 灌進去，不然抓不到元素。
@@ -2373,7 +2415,7 @@ function recomputeTodayListTimes_() {
   }
   const homeArrival = todayListFinishMin_();
   lastComputedFinishMin_ = homeArrival;
-  if (finishEl) { finishEl.textContent = fmtMin(homeArrival); finishEl.classList.toggle('late', homeArrival > 17 * 60 + 30); }
+  if (finishEl) { finishEl.textContent = fmtMin(homeArrival); finishEl.classList.toggle('late', homeArrival > workEndTimeMin_()); }
   renderTodayList_();
 }
 
