@@ -55,6 +55,18 @@
   }
   .pill.synced { background: var(--sr-primary-tint); color: var(--sr-primary-hover); }
   .pill.offline { background: var(--sr-danger-tint); color: var(--sr-danger); }
+  .work-end-row { display: flex; align-items: center; gap: 4px; }
+  .work-end-input {
+    border: 1px solid var(--sr-line); border-radius: var(--sr-radius-sm); font-family: var(--sr-font);
+    font-size: 16px; padding: 1px 4px; /* 16px 固定值，理由跟下面 textarea/input[type=text]/input[type=date] 那條同一個註解 */
+  }
+  .anchor-hint {
+    margin-top: var(--sr-space-4); padding: var(--sr-space-4) var(--sr-space-5);
+    border-radius: var(--sr-radius-md); font-size: var(--sr-text-sm);
+  }
+  .anchor-hint.go { color: var(--sr-ink-2); background: var(--sr-bg-subtle); }
+  .anchor-hint.tight { color: var(--sr-ink); background: var(--sr-billing-tint); border: 1px solid var(--sr-billing-soft); }
+  .anchor-hint.atrisk { color: var(--sr-danger); background: var(--sr-danger-tint); border: 1px solid var(--sr-danger); font-weight: var(--sr-weight-bold); }
   .body-scroll { flex: 1; overflow-y: auto; padding: var(--sr-space-6); display: flex; flex-direction: column; gap: var(--sr-space-6); }
   .card {
     border: 1px solid var(--sr-line-soft); border-radius: var(--sr-radius-lg);
@@ -189,6 +201,9 @@
         </span>
       </div>
       <div class="topbar-sub" id="home-finish-estimate">預估收工 —</div>
+      <div class="topbar-sub work-end-row">
+        工作結束時間 <input type="time" class="work-end-input" id="work-end-input">
+      </div>
     </div>
     <div class="body-scroll">
       <!-- ?voice=1&text=… 語音聽寫文字：還沒進記錄畫面前先暫存在記憶體，這行提示使用者文字已收到 -->
@@ -208,6 +223,9 @@
       <div id="home-nextstop" class="card card-hero">
         <div class="center-note">讀取今日行程中…（真實資料，呼叫 GET /api/today-plan＋/api/plan）</div>
       </div>
+      <!-- 錨點時間餘裕提示：只有今天有設錨點、資料完整時才會有內容，否則維持空白（不是 hidden，
+           因為沒有東西要藏，單純沒有子節點） -->
+      <div id="home-anchor-hint"></div>
 
       <div class="section-label">全部站點</div>
       <div id="home-stoplist" class="stop-list"></div>
@@ -594,6 +612,170 @@ function minutesToHHMM_(totalMin) {
 }
 
 // ============================================================
+// 錨點時間餘裕判斷（2026-11-27 新增，純前端，不碰 Worker/GAS）
+// ============================================================
+// 跟 worker.js 的 TODAY_PLAN_ANCHOR_SOURCES_、planner.html 的同名常數同步——三處定義完全
+// 無法共用檔案（worker.js 是 Worker 打包、field-v2.html／planner.html 是各自獨立的靜態頁面，
+// 這個專案目前沒有給純靜態頁面共用小型常數的機制，VISIT_PURPOSES 也是同樣各自維護一份），
+// 改動時三處都要一起改，tools/test-anchor-time-budget.mjs 有逐字比對三處集合是否一致。
+const TODAY_PLAN_ANCHOR_SOURCES_ = ['錨點', '送貨', '待追蹤', '本週排', '寄賣對帳'];
+const TODAY_PLAN_DONE_STATUSES_ = ['完成', '跳過'];
+
+function fv2HHMMToMin_(hhmm) {
+  const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+function fv2NumOrNull_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+// 工作結束時間：localStorage 共用鍵（field-v2.html／planner.html 都用這個鍵名跟同一套格式，
+// 不是各自發明，但受限同上沒有共用檔案機制，函式本身仍各自維護一份），值 {date,value}，
+// date 不是今天就當沒設定，回預設 17:30（跨日自動失效，不會把昨天改的值帶到今天）。
+const SR_WORK_END_TIME_KEY_ = 'sr_work_end_time';
+const SR_WORK_END_TIME_DEFAULT_ = '17:30';
+// 純邏輯（可測試）：給定「localStorage 讀到的原始字串」跟「今天日期字串」，解析出今天該用的
+// 工作結束時間。值格式不對、日期不是今天、或整個沒存過，都回預設值，不報錯。
+function fv2ResolveWorkEndTime_(rawStr, todayStr) {
+  if (!rawStr) return SR_WORK_END_TIME_DEFAULT_;
+  let obj;
+  try { obj = JSON.parse(rawStr); } catch (e) { return SR_WORK_END_TIME_DEFAULT_; }
+  if (!obj || obj.date !== todayStr || !/^\d{1,2}:\d{2}$/.test(obj.value || '')) return SR_WORK_END_TIME_DEFAULT_;
+  return obj.value;
+}
+function fv2GetWorkEndTime_() {
+  let raw = null;
+  try { raw = localStorage.getItem(SR_WORK_END_TIME_KEY_); } catch (e) { /* 私密模式等讀不到，當沒設定 */ }
+  return fv2ResolveWorkEndTime_(raw, todayStr_());
+}
+function fv2SetWorkEndTime_(value) {
+  try { localStorage.setItem(SR_WORK_END_TIME_KEY_, JSON.stringify({ date: todayStr_(), value })); } catch (e) { /* 存不進去就算了，下次還是會回預設 */ }
+}
+
+// 核心算式：給定今日行程列（依 seq 升冪）、現在時間（分鐘）、出發時間（分鐘，可能 null）、
+// 工作結束時間（分鐘），算出「餘裕／預留／可自由使用時間」。
+// 設計說明（2026-11-27 跟使用者確認過的做法）：
+// - legMin（每一列前一段車程分鐘）不是新欄位，是用「清單順序前一列」的 arrival/stayMin 反推：
+//   legMin[i] = arrival[i] − arrival[i-1] − stayMin[i-1]（i=0 用 departMin 取代 arrival[-1]+stayMin[-1]）。
+//   這個反推只跟「清單順序」有關，跟某一列的完成狀態無關——已完成/已跳過的列，arrival／stayMin
+//   從來不會被「標記已到/完成」的流程覆蓋成實際時間（fv2MarkTodayStatus_ 只送 patch:{狀態:...}，
+//   worker.js TODAY_PLAN_ROW_PATCHABLE_FIELDS 雖然也允許改「預計到達」，但目前沒有任何呼叫端
+//   真的送這個欄位），所以反推對已完成列一樣成立、不受影響。
+// - 基準時間不是 departMin 往下累加整天（那是 planner.html 算「如果照計畫走」的靜態數字，不會
+//   反映「現在實際進度」），改成：找第一個「未完成」列，用它前一列的『計畫離店時間』
+//   （arrival+stayMin）跟「現在時間」取 max，當作往下投影的起點——這樣提早/落後都會反映出來。
+//   整天還沒開始（第一列本身就是未完成，前面沒有任何列）時，沒有「前一列」可以取，退回用
+//   departMin（跟現在時間取 max）；兩者都拿不到就整體標記 dataIncomplete。
+// - 「預估收工時間」沿用既有做法（不重做一套）：從基準點依序把剩下未完成列的 legMin+stayMin
+//   累加上去，累加到最後一列為止；跟 fv2RenderHome() 原本「finishRow.arrival+stayMin」同一個
+//   概念，只是起點換成動態基準點。finishMin 只用來在「tight」提示裡顯示「預估收工 HH:MM」，
+//   不參與任何判斷（下面這點是 2026-11-27 當天就發現、使用者隔天審查時確認要修的算式錯誤）。
+// - 「預留」＝未完成錨點各自的 cost（legMin+stayMin）加總，用的是清單順序上「緊接在它前面
+//   那一列」的車程，不是「直接從現在位置開車過去」的車程——沒有重打路線 API，這是目前資料
+//   能反推出的最佳近似值，會比實際需要的時間少算（如果錨點前面還隔著別的未完成一般店，省略
+//   了繞過去的車程），這點在回報裡會特別說明。
+// - 2026-11-28 修正算式錯誤（規格本身的錯，不是實作錯）：判斷「夠不夠」不能拿
+//   slackMin(=workEndMin−finishMin) 去扣 anchorReserveMin——finishMin 本身已經累加了所有
+//   未完成列（含錨點）的成本，slackMin 已經把錨點扣過一次，再扣 anchorReserveMin 會把錨點
+//   的時間扣兩次，產生假警報（例：10:00現在、11:30收工、剩一般店30分+錨點35分+一般店20分，
+//   共85分鐘其實夠用，但 slack=5 < reserve=35 會誤判成「去不了」）。改用：
+//   timeLeftMin = workEndMin − baseline（用基準點，不是已經扣過成本的 finishMin），
+//   atrisk 判斷：timeLeftMin < anchorReserveMin；
+//   go 判斷：(timeLeftMin − anchorReserveMin) >= 下一家自己的 cost。
+//   slackMin 還是算出來（可能給之後除錯/顯示用），但不再參與任何判斷。
+// - 任何一列缺 arrival 或 stayMin，導致沒辦法往下反推時：整體標記 dataIncomplete=true，
+//   不生出一個看起來煞有介事但其實瞎猜的數字——呼叫端看到 dataIncomplete 就不要顯示任何新提示，
+//   跟「沒有錨點」時的沉默行為一致。
+function fv2AnchorBudget_(rows, nowMin, departMin, workEndMin) {
+  const isAnchor = r => TODAY_PLAN_ANCHOR_SOURCES_.indexOf(r.source) >= 0;
+  const isDone = r => TODAY_PLAN_DONE_STATUSES_.indexOf(r.status) >= 0;
+  const hasAnchor = rows.some(isAnchor);
+  if (!hasAnchor) return { hasAnchor: false, dataIncomplete: false };
+
+  const firstPendingIdx = rows.findIndex(r => !isDone(r));
+  if (firstPendingIdx < 0) {
+    // 全部站都處理完了，沒有「下一家」可判斷，但仍回傳 hasAnchor 讓呼叫端知道今天本來有錨點
+    return { hasAnchor: true, dataIncomplete: false, allDone: true, finishMin: null, slackMin: null, timeLeftMin: null, anchorReserveMin: 0, freeMin: null };
+  }
+
+  let baselineMin = null;
+  if (firstPendingIdx === 0) {
+    baselineMin = departMin; // 整天還沒開始，沒有「前一列」可用，退回出發時間
+  } else {
+    const prev = rows[firstPendingIdx - 1];
+    const prevArrival = fv2HHMMToMin_(prev.arrival);
+    const prevStay = fv2NumOrNull_(prev.stayMin);
+    baselineMin = (prevArrival !== null && prevStay !== null) ? prevArrival + prevStay : null;
+  }
+  if (baselineMin === null) return { hasAnchor: true, dataIncomplete: true };
+
+  const baseline = Math.max(nowMin, baselineMin);
+  let cum = baseline;
+  let anchorReserveMin = 0;
+  let nextCost = null; // 第一個未完成列（＝下一家）自己的 cost，原封不動暴露出去給
+                        // fv2AnchorSuggestion_ 用，不要在那邊用 arrival-baseline 重新瞎猜一次
+                        // ——baseline 可能因為「現在時間比計畫晚」被墊高，這裡的 legMin 是用原始
+                        // 計畫值反推的固定值，兩個不是同一件事，混用會在跑得比計畫慢時把成本算少。
+  for (let i = firstPendingIdx; i < rows.length; i++) {
+    const row = rows[i];
+    if (isDone(row)) continue; // 清單允許跳著完成（例如先跳過一站，之後又回頭補記），逐列檢查狀態
+    const arrival = fv2HHMMToMin_(row.arrival);
+    const stay = fv2NumOrNull_(row.stayMin);
+    let legMin = null;
+    if (i === 0) {
+      legMin = (arrival !== null && departMin !== null) ? arrival - departMin : null;
+    } else {
+      const prevArrival = fv2HHMMToMin_(rows[i - 1].arrival);
+      const prevStay = fv2NumOrNull_(rows[i - 1].stayMin);
+      legMin = (arrival !== null && prevArrival !== null && prevStay !== null) ? arrival - prevArrival - prevStay : null;
+    }
+    if (legMin === null || stay === null) return { hasAnchor: true, dataIncomplete: true };
+    const cost = legMin + stay;
+    if (nextCost === null) nextCost = cost;
+    cum += cost;
+    if (isAnchor(row)) anchorReserveMin += cost;
+  }
+
+  const finishMin = cum;
+  const slackMin = workEndMin - finishMin; // 只保留供參考/顯示，不用於任何判斷（見上方 2026-11-28 說明）
+  const timeLeftMin = workEndMin - baseline; // 判斷用的餘裕：從「現在」算到工作結束，不是從「跑完全部列」算
+  const freeMin = timeLeftMin - anchorReserveMin; // 扣掉錨點的最低需求後，真正可以自由拿去繞一般店的時間
+  return { hasAnchor: true, dataIncomplete: false, allDone: false, baseline, finishMin, slackMin, timeLeftMin, anchorReserveMin, freeMin, nextCost };
+}
+
+// 第二步：給「下一家」這一列，配合 fv2AnchorBudget_() 算出的結果，決定要顯示哪種提示。
+// 回傳 null 代表不顯示任何新提示（沒有錨點、資料不完整、下一家本身就是錨點、或已經全部跑完）。
+// 跟 fv2RenderHome() 的「下一站」規則（2026-11-18 版）同一套判斷，抽出來給 change handler
+// 重算提示時共用，不要維護第二份邏輯。
+function fv2FindNextRow_(rows) {
+  let idx = rows.findIndex(r => r.status === '已到');
+  if (idx < 0) idx = rows.findIndex(r => ['完成', '跳過', '未完成'].indexOf(r.status) < 0);
+  return idx >= 0 ? rows[idx] : null;
+}
+function fv2AnchorSuggestion_(budget, nextRow) {
+  if (!budget || !budget.hasAnchor || budget.dataIncomplete || budget.allDone || !nextRow) return null;
+  const isAnchor = TODAY_PLAN_ANCHOR_SOURCES_.indexOf(nextRow.source) >= 0;
+  if (isAnchor) return null; // 下一家本身就是錨點，照常顯示，不用額外提示
+  // atrisk 用 timeLeftMin（現在到工作結束的餘裕）跟 anchorReserveMin 比，不是 slackMin
+  // （slackMin 已經把錨點成本扣過一次，見 fv2AnchorBudget_ 上方 2026-11-28 說明）。
+  // 這條判斷跟「下一家是不是已到」無關——已經在店裡一樣可能去不了後面的錨點，要照常顯示。
+  if (budget.timeLeftMin < budget.anchorReserveMin) {
+    return { type: 'atrisk', deficitMin: Math.round(budget.anchorReserveMin - budget.timeLeftMin) };
+  }
+  // 下一家狀態是「已到」＝人已經在店裡，順路去不去是上一個決定的結果，不是現在要做的決定，
+  // go/tight 建議在這個時間點沒有意義，不顯示（但上面的 atrisk 不受這條影響）。
+  if (nextRow.status === '已到') return null;
+  // nextRow 的 cost 直接用 fv2AnchorBudget_ 算過的 nextCost（它內部第一個未完成列就是這家），
+  // 不在這裡重新反推一次——理論上 nextRow 就是 rows 裡的第一個未完成列，兩邊看到的是同一家店。
+  if (budget.nextCost === null) return null; // 理論上不會發生（沒有未完成列就不會有 nextRow），防呆
+  const freeMin = budget.timeLeftMin - budget.anchorReserveMin;
+  if (freeMin >= budget.nextCost) return { type: 'go' };
+  return { type: 'tight', cost: Math.round(budget.nextCost) };
+}
+
+// ============================================================
 // 2026-11-20 標籤說明／自動建議／自動建待追蹤——使用者核准的方向（見聊天紀錄）：
 // 「標籤（可複選）」區塊從單純一排 chip 改成每個標籤各自一格，底下固定掛一行說明文字，
 // 輸入拜訪內容/下次要記得/緊急問題時再動態多掛一行「建議」（虛線外框＋小字），純關鍵字比對，
@@ -870,6 +1052,7 @@ const FV2 = {
   todayRows: [],      // GET /api/today-plan 的 rows
   pharmacies: [],      // GET /pharmacies 的 pharmacies（含 lat/lng/owner/tier等）
   planRecommended: [], // GET /api/plan 的 recommended（倍數/分級用）
+  savedDepartMin: null, // GET /api/plan 的 savedDepartMin（分鐘），錨點時間餘裕判斷的起算點用
   dadIds: new Set(),   // GET /dad-pharmacies
   dadTodos: [],        // GET /todos-v2 篩 quadrant==='dad'
   allFollowups: [],    // GET /api/followups 全量（首頁展開站點用，依 storeId 篩）
@@ -971,6 +1154,7 @@ async function fv2LoadAll() {
     FV2.todayRows = (todayRes.rows || []).filter(r => r.status !== '移除').sort((a, b) => (parseInt(a.seq) || 0) - (parseInt(b.seq) || 0));
     FV2.pharmacies = phRes.pharmacies || [];
     FV2.planRecommended = planRes.recommended || [];
+    FV2.savedDepartMin = typeof planRes.savedDepartMin === 'number' ? planRes.savedDepartMin : null;
     FV2.dadIds = new Set(dadRes.ids || []);
     FV2.dadTodos = (todosRes.todos || []).filter(t => t.quadrant === 'dad');
     // 全量待追蹤（階段2 項目5：首頁展開站點用），只留未完成的，依 storeId 篩
@@ -1032,6 +1216,7 @@ function fv2RenderHome() {
         <button class="btn primary" data-arrive-id="${escapeHtml_(r.storeId || r.address)}">我到了</button>
       </div>`;
   }
+  fv2RenderAnchorHint_(rows, nextIdx >= 0 ? rows[nextIdx] : null);
 
   // 全部站點（階段2 項目5：點一下展開拜訪目的/目的備註/地址/導航/未結案待追蹤，只顯示不能動）
   const listEl = document.getElementById('home-stoplist');
@@ -1048,6 +1233,33 @@ function fv2RenderHome() {
       <div class="stop-detail" data-stop-detail="${escapeHtml_(stopKey)}" hidden></div>`;
   }).join('') || '<div class="center-note">今天還沒有排任何站點</div>';
 }
+
+// 錨點時間餘裕提示：套用 fv2AnchorBudget_/fv2AnchorSuggestion_ 的計算結果到 #home-anchor-hint。
+// 沒有錨點、資料不完整、下一家本身是錨點、或今天已經跑完，都不顯示任何東西（清空）——
+// 提示只是建議，不擋任何操作，純畫面顯示，不會寫入任何資料。
+function fv2RenderAnchorHint_(rows, nextRow) {
+  const el = document.getElementById('home-anchor-hint');
+  const workEndMin = fv2HHMMToMin_(fv2GetWorkEndTime_());
+  const nowMin = (() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); })();
+  const budget = fv2AnchorBudget_(rows, nowMin, FV2.savedDepartMin, workEndMin);
+  const sug = fv2AnchorSuggestion_(budget, nextRow);
+  if (!sug) { el.innerHTML = ''; return; }
+  if (sug.type === 'go') {
+    el.innerHTML = `<div class="anchor-hint go">順路可去</div>`;
+  } else if (sug.type === 'tight') {
+    const nextAnchor = rows.find(r => TODAY_PLAN_ANCHOR_SOURCES_.indexOf(r.source) >= 0 && TODAY_PLAN_DONE_STATUSES_.indexOf(r.status) < 0);
+    el.innerHTML = `<div class="anchor-hint tight">時間不足，建議直接去錨點${nextAnchor ? '「' + escapeHtml_(nextAnchor.name) + '」' : ''}<br>預估收工 ${minutesToHHMM_(budget.finishMin)}</div>`;
+  } else if (sug.type === 'atrisk') {
+    const nextAnchor = rows.find(r => TODAY_PLAN_ANCHOR_SOURCES_.indexOf(r.source) >= 0 && TODAY_PLAN_DONE_STATUSES_.indexOf(r.status) < 0);
+    el.innerHTML = `<div class="anchor-hint atrisk">錨點${nextAnchor ? '「' + escapeHtml_(nextAnchor.name) + '」' : ''}今天去不了，缺 ${sug.deficitMin} 分鐘</div>`;
+  }
+}
+document.getElementById('work-end-input').value = fv2GetWorkEndTime_();
+document.getElementById('work-end-input').addEventListener('change', (e) => {
+  if (!/^\d{1,2}:\d{2}$/.test(e.target.value || '')) return;
+  fv2SetWorkEndTime_(e.target.value);
+  fv2RenderAnchorHint_(FV2.todayRows, fv2FindNextRow_(FV2.todayRows));
+});
 // 展開單一站點明細（點第一次才算，之後只是切換顯示/隱藏，不用重複算）
 // 2026-11-18：全部站點可以直接操作任何一家——展開區最下面補「開始導航／我到了／記錄這家」
 // 三顆按鈕。「開始導航」用跟下一站卡片同一個 data-nav 委派；「我到了」用跟下一站卡片同一個
