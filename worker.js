@@ -14,6 +14,13 @@
 
 import { PLANNER_CONFIG } from './planner-config.js';
 import { parseIcsEvents_ } from './ics-utils.js';
+import { parseOrderNoDate } from './shelf-expiry-logic.js';
+import {
+  ORDER_SHEET_COLUMN_TYPES_,
+  ORDER_MASTER_SHEET_COLUMN_TYPES_,
+  parseExportCsv_,
+  exportRowsToGvizShape_,
+} from './order-csv-reader.js';
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_MODEL_PRO = 'gemini-3.5-flash-lite';
@@ -428,7 +435,10 @@ async function warmPlannerCaches_(env, ctx) {
     tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_PLANNER}:階段歷程`, () => fetchGvizSheetRaw_(env.SHEET_PLANNER, '階段歷程')));
   }
   if (env.SHEET_ORDER_MASTER) {
-    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_ORDER_MASTER}:`, () => fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, null)));
+    // 2026-11-28：改走 fetchOrderMasterSheetRaw_()（export CSV），不能繼續用 fetchGvizSheetRaw_
+    // 直接寫回同一個快取key——否則預熱寫進去的還是漏讀版本，SWR會直接信任這份「新鮮」的舊資料，
+    // 完全繞過這次的修正。
+    tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_ORDER_MASTER}:`, () => fetchOrderMasterSheetRaw_(env, null)));
   }
   tasks.push(warmCacheKey_(env, `gviz:${env.SHEET_RETURN_ORDER}:`, () => fetchGvizSheetRaw_(env.SHEET_RETURN_ORDER, null)));
   if (env.SHEET_CONTRACT) {
@@ -986,18 +996,9 @@ async function handleVisitsSummary(env, ctx, cacheMeta) {
 // 6. 所有藥局叫貨金額統計
 // ============================================================
 async function handleOrdersSummary(env) {
-  const sheetId = env.SHEET_ORDER;
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-
-  const res = await fetch(url);
-  const text = await res.text();
-  const jsonStr = text.replace(/^.*?({.*}).*$/s, '$1');
-  const data = JSON.parse(jsonStr);
-
-  const rows = data?.table?.rows || [];
-  const cols = data?.table?.cols || [];
-  const colMap = {};
-  cols.forEach((c, i) => { colMap[c.label] = i; });
+  // 2026-11-28：原本自己 inline fetch gviz（沒有走任何快取），改走 fetchOrderSheet_()
+  // ——同時解決「小計」欄 gviz 漏讀62列造成金額低估的問題，並順便吃到 SWR 快取。
+  const { rows, colMap } = await fetchOrderSheet_(env);
 
   const summary = {};
   rows.forEach(row => {
@@ -1380,9 +1381,11 @@ async function handleProductOrders(request, env) {
   const months  = parseInt(reqUrl.searchParams.get('months') || '12', 10);
   if (!product) return json({ error: '缺少 product 參數' }, 400);
 
-  const [prodRes, orderRes] = await Promise.all([
+  // 2026-11-28：SHEET_PRODUCT 沒有gviz漏讀問題（稽核確認過），維持原樣inline fetch；
+  // SHEET_ORDER 改走 fetchOrderSheet_()（解決訂單編號/產品ID/數量/小計漏讀），順便吃SWR快取。
+  const [prodRes, orderData] = await Promise.all([
     fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_PRODUCT}/gviz/tq?tqx=out:json`),
-    fetch(`https://docs.google.com/spreadsheets/d/${env.SHEET_ORDER}/gviz/tq?tqx=out:json`),
+    fetchOrderSheet_(env),
   ]);
 
   function parseGviz(text) {
@@ -1395,8 +1398,7 @@ async function handleProductOrders(request, env) {
     return { rows, cols, colMap };
   }
 
-  const prodData  = parseGviz(await prodRes.text());
-  const orderData = parseGviz(await orderRes.text());
+  const prodData = parseGviz(await prodRes.text());
 
   const nameCol  = ['產品名稱','品名','商品名稱','藥品名稱'].find(n => prodData.colMap[n] !== undefined);
   const idCol2   = prodData.colMap['產品編號2'] !== undefined ? '產品編號2' : null; // 精準 ID，如 "8A"
@@ -1423,19 +1425,11 @@ async function handleProductOrders(request, env) {
     ? new Date(Date.now() - months * 30 * 86400000).toISOString().slice(0, 10)
     : '';
 
-  // 訂單編號格式：YYMMDDNN → 2026-01-12
+  // 訂單編號格式：YYMMDDNN/YYYYMMDDNNN → 2026-01-12（2026-11-28 統一改用
+  // shelf-expiry-logic.js 的 parseOrderNoDate，順便補上 11碼格式支援；它回 null 代表失敗，
+  // 這裡轉成空字串維持原本 extractDate() 的既有回傳慣例，呼叫端用 if(date) 判斷不受影響）。
   function extractDate(orderNo) {
-    const s = String(orderNo || '').replace(/\D/g, '');
-    if (s.length >= 6) {
-      const yy = parseInt(s.slice(0, 2), 10);
-      const mm = parseInt(s.slice(2, 4), 10);
-      const dd = parseInt(s.slice(4, 6), 10);
-      if (yy >= 10 && yy <= 99 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-        return `${2000 + yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-      }
-    }
-    const m = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
-    return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+    return parseOrderNoDate(orderNo) || '';
   }
 
   const oMap = orderData.colMap;
@@ -1566,7 +1560,32 @@ function needsInvoicing(orderDateStr, now) {
 // /api/plan、/api/store、/api/followups、/api/week 都會整批讀一次。
 async function fetchOrderMasterRows(env, ctx, cacheMeta) {
   if (!env.SHEET_ORDER_MASTER) throw new Error('未設定 SHEET_ORDER_MASTER');
-  return fetchGvizSheet(env.SHEET_ORDER_MASTER, null, env, ctx, cacheMeta);
+  // 2026-11-28：改走 export CSV 讀取（見下方 fetchOrderMasterSheetRaw_ 定義處的說明），沿用
+  // 跟 fetchGvizSheet() 完全相同的 SWR 快取 key 格式，invalidateGvizCache_() 不用改。
+  const cacheKey = `gviz:${env.SHEET_ORDER_MASTER}:`;
+  const entry = await swrFetch_(env, ctx, cacheKey, () => fetchOrderMasterSheetRaw_(env, null));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return entry.data;
+}
+
+// 取代原本 fetchGvizSheet(env.SHEET_ORDER, null, env, ctx, cacheMeta) 的所有既有呼叫點
+// （handleProductOrders、fetchStoreOrdersAndReturns_ 等），同樣沿用相同快取key格式，
+// 見上方 fetchOrderSheetRaw_ 定義處的說明。
+async function fetchOrderSheet_(env, ctx, cacheMeta) {
+  const cacheKey = `gviz:${env.SHEET_ORDER}:`;
+  const entry = await swrFetch_(env, ctx, cacheKey, () => fetchOrderSheetRaw_(env));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return entry.data;
+}
+
+// 取代原本 fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx) 的呼叫點
+// （handleRedSlips 非fresh分支）。sheetNameParam 有值時沿用原本快取key格式（含分頁名稱），
+// fetchOrderMasterSheetRaw_ 內部會判斷是不是正式分頁名稱，決定走 CSV 還是退回 gviz。
+async function fetchOrderMasterSheet_(env, ctx, sheetNameParam, cacheMeta) {
+  const cacheKey = `gviz:${env.SHEET_ORDER_MASTER}:${sheetNameParam || ''}`;
+  const entry = await swrFetch_(env, ctx, cacheKey, () => fetchOrderMasterSheetRaw_(env, sheetNameParam || null));
+  noteCacheTime_(cacheMeta, entry.cachedAt);
+  return entry.data;
 }
 
 // ============================================================
@@ -1704,6 +1723,60 @@ async function fetchGvizSheet(sheetId, sheetName, env, ctx, cacheMeta) {
   return entry.data;
 }
 
+// ============================================================
+// 2026-11-28：SHEET_ORDER（訂單明細）／SHEET_ORDER_MASTER（訂單主檔）改用
+// export?format=csv 讀取，不再用 gviz（tqx=out:json）——稽核發現 gviz 對這兩張表部分欄位
+// （訂單編號、明細ID、借出/歸還日期）因為格式不一致，會整欄把跟多數樣本不符的儲存格清成
+// null（訂單明細566列、訂單主檔255列，見 docs/ 或對應commit訊息）。export CSV 讀到的是
+// 原始顯示字串，不會有這個問題，但要自己把字串轉回跟 gviz 相同的 {rows, colMap} 形狀
+// （見 order-csv-reader.js），讓既有 handler 不需要改。
+//
+// gid 不是從0開始連續編號，兩張表目前各自的「第一個分頁」gid 都剛好是 0（2026-11-27用
+// /htmlview 確認過：SHEET_ORDER 唯一分頁「訂單明細」gid=0；SHEET_ORDER_MASTER「訂單主檔」
+// gid=0，跟 ORDER_MASTER_FORMAL_SHEET_NAME_ 常數指的是同一個分頁）。只在 sheetName 為 null
+// （沒有指定分頁，等同讀「第一個分頁」）時套用這個讀法；呼叫端如果明確指定其他分頁名稱
+// （例如 _TEST 測試分頁），一律維持原本的 gviz 讀法，不套用這裡的 CSV/gid 對照，因為測試
+// 分頁的 gid 未知，猜錯 gid 會讀到完全不相關的分頁內容。
+const ORDER_SHEET_GID_ = 0;
+const ORDER_MASTER_SHEET_GID_ = 0;
+
+// CSV 讀取失敗（HTTP錯誤、格式不符、需要登入）就退回原本的 gviz 讀取，不讓整個功能壞掉；
+// 退回時在 log 留下警示，方便之後排查是不是 CSV 讀取又開始不穩定。
+async function fetchOrderSheetViaCsvOrGviz_(sheetId, gid, columnTypes, gvizSheetName) {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) throw new Error(`export CSV HTTP ${res.status}`);
+    if (/accounts\.google\.com|ServiceLogin/.test(text) || /^<!DOCTYPE html|^<html/i.test(text.trim())) {
+      throw new Error('export CSV 回應是登入頁（分頁未開放「知道連結的人可檢視」或gid不對）');
+    }
+    const table = parseExportCsv_(text);
+    const header = table[0] || [];
+    if (!header.length) throw new Error('export CSV 沒有標題列');
+    const dataRows = table.slice(1).filter(r => !(r.length === 1 && r[0] === ''));
+    return exportRowsToGvizShape_(header, dataRows, columnTypes);
+  } catch (e) {
+    console.error(`[order-csv] export CSV 讀取失敗，退回 gviz（sheetId末4碼:${String(sheetId).slice(-4)}）：${e.message}`);
+    return fetchGvizSheetRaw_(sheetId, gvizSheetName);
+  }
+}
+
+// 取代原本直接呼叫 fetchGvizSheetRaw_(env.SHEET_ORDER, null) 的所有既有呼叫點。
+async function fetchOrderSheetRaw_(env) {
+  return fetchOrderSheetViaCsvOrGviz_(env.SHEET_ORDER, ORDER_SHEET_GID_, ORDER_SHEET_COLUMN_TYPES_, null);
+}
+
+// 取代原本直接讀 SHEET_ORDER_MASTER「第一個分頁」（sheetName=null 或明確傳正式分頁名稱）的
+// 既有呼叫點。sheetNameParam 有值且不是正式分頁名稱時（例如 _TEST 測試分頁），直接退回原本
+// 的 gviz 讀法，不套用 CSV（原因見上方註解）。
+async function fetchOrderMasterSheetRaw_(env, sheetNameParam) {
+  if (sheetNameParam && sheetNameParam !== ORDER_MASTER_FORMAL_SHEET_NAME_) {
+    return fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetNameParam);
+  }
+  return fetchOrderSheetViaCsvOrGviz_(env.SHEET_ORDER_MASTER, ORDER_MASTER_SHEET_GID_, ORDER_MASTER_SHEET_COLUMN_TYPES_, sheetNameParam || null);
+}
+
 function gvizGet(row, colMap, label) {
   const i = colMap[label];
   if (i === undefined || !row.c[i]) return '';
@@ -1717,7 +1790,7 @@ async function handleInventoryCandidates(request, env) {
   if (!pharmacy) return json({ error: '缺少 pharmacy 參數' }, 400);
 
   const [orderData, returnData, returnOrderData, productData] = await Promise.all([
-    fetchGvizSheet(env.SHEET_ORDER, null, env),
+    fetchOrderSheet_(env),
     fetchGvizSheet(env.SHEET_RETURN, null, env),
     fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env),
     fetchGvizSheet(env.SHEET_PRODUCT, null, env),
@@ -1856,18 +1929,10 @@ async function handleProductPhoto(key, env) {
 // ============================================================
 // 21. 藥局資訊總覽（出貨明細 + 退貨紀錄 + 盤點歷史，依 pharmacy 彙整）
 // ============================================================
+// 2026-11-28：統一改用 shelf-expiry-logic.js 的 parseOrderNoDate（補上11碼YYYYMMDDNNN
+// 格式支援），保留這個函式名稱跟空字串回傳慣例，兩個既有呼叫點都不用改。
 function extractOrderDateFromNo(orderNo) {
-  const s = String(orderNo || '').replace(/\D/g, '');
-  if (s.length >= 6) {
-    const yy = parseInt(s.slice(0, 2), 10);
-    const mm = parseInt(s.slice(2, 4), 10);
-    const dd = parseInt(s.slice(4, 6), 10);
-    if (yy >= 10 && yy <= 99 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      return `${2000 + yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-    }
-  }
-  const m = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+  return parseOrderNoDate(orderNo) || '';
 }
 
 // 共用：某店的叫貨明細（orders，一列=一個品項）＋退貨紀錄（returns，一列=一張退貨單含明細）。
@@ -1877,7 +1942,7 @@ function extractOrderDateFromNo(orderNo) {
 //不同——這幾張表資料量大、join 邏輯有十幾行，值得抽成函式，不是幾行就能複製的小工具）。
 async function fetchStoreOrdersAndReturns_(pharmacy, env, ctx) {
   const [orderData, productData, returnDetailData, returnOrderData] = await Promise.all([
-    fetchGvizSheet(env.SHEET_ORDER, null, env, ctx),
+    fetchOrderSheet_(env, ctx),
     fetchGvizSheet(env.SHEET_PRODUCT, null, env, ctx),
     fetchGvizSheet(env.SHEET_RETURN, null, env, ctx),
     fetchGvizSheet(env.SHEET_RETURN_ORDER, null, env, ctx),
@@ -4410,8 +4475,8 @@ async function handleRedSlips(request, env, ctx) {
   const fresh = url.searchParams.get('fresh') === '1';
   const [{ rows, colMap }, pharmaciesRes] = await Promise.all([
     fresh
-      ? fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetNameParam || null)
-      : fetchGvizSheet(env.SHEET_ORDER_MASTER, sheetNameParam || null, env, ctx),
+      ? fetchOrderMasterSheetRaw_(env, sheetNameParam || null)
+      : fetchOrderMasterSheet_(env, ctx, sheetNameParam),
     handleGetPharmacies(null, env, ctx).then(r => r.json()).catch(() => ({ pharmacies: [] })),
   ]);
   const pharmacies = pharmaciesRes.pharmacies || [];
@@ -4508,7 +4573,7 @@ async function handleRedSlipAction(request, env, ctx) {
   if (visitSheetNameParam && visitSheetNameParam !== VISIT_TEST_SHEET_NAME_) return json({ error: '不合法的 visitSheetName' }, 400);
   const sheetName = sheetNameParam || ORDER_MASTER_FORMAL_SHEET_NAME_;
 
-  const { rows, colMap } = await fetchGvizSheetRaw_(env.SHEET_ORDER_MASTER, sheetName);
+  const { rows, colMap } = await fetchOrderMasterSheetRaw_(env, sheetName);
   const row = rows.find(r => String(gvizGet(r, colMap, '訂單編號') || '').trim() === String(orderNo).trim());
   if (!row) return json({ error: '找不到訂單：' + orderNo }, 404);
   if (gvizGet(row, colMap, '歸還日期')) return json({ error: '這張訂單已經有歸還日期，不能重複標記' }, 409);
