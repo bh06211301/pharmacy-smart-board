@@ -430,6 +430,10 @@
         <button class="btn-calc-route" id="btn-calc-route" onclick="calcRouteClicked_()">計算路線</button>
         <button class="btn-calc-route" id="btn-open-gmaps" onclick="openGoogleMaps()">開 Google Maps</button>
       </div>
+      <div class="tl-actions" style="margin-top:6px">
+        <button class="btn-calc-route" id="btn-reverse-route" onclick="reverseRouteOrderClicked_()" disabled>反轉順序</button>
+      </div>
+      <div id="reverse-route-hint" class="tl-save-status"></div>
       <!-- 2026-11-19：拿掉「送到外勤模式」這顆永遠灰色的按鈕——field-v2 本來就直接讀寫這天的
            「今日行程」表（跟這裡 scheduleTodayPlanSave_ 存檔同一張表），不需要額外的「送出」動作，
            這顆按鈕從階段二之後就沒接過線。改顯示實際的同步狀態，文案由 renderTodaySaveStatus_ 統一更新。 -->
@@ -1894,6 +1898,7 @@ function renderTodayList_() {
   // 2026-11-06：「確定今天的行程」不綁計算路線成不成功——按下＝立即存檔並標這天已確定，
   // 有清單就能按，不用先算過路線。
   if (confirmBtn) confirmBtn.style.display = todayList.length ? '' : 'none';
+  updateReverseRouteButtonState_();
   if (root) {
     if (!todayList.length) root.innerHTML = '<div class="empty-hint">在第①②欄選好店家後，這裡會立即出現清單</div>';
     else root.innerHTML = todayList.map((row, i) => todayListRowHtml_(row, i)).join('');
@@ -2517,8 +2522,10 @@ function scheduleManualRecalc_() {
 // 的差別：intermediates 不設 optimizeWaypointOrder（固定 false），且不會重新排 todayList 的順序
 // （定位失敗的站就留在原本的位置，不像 calcRoute 那樣挪到最後面，因為手動模式下順序是使用者自己
 // 排的，不該因為某一站定位失敗就被我們動位置）。
+// 回傳值：true＝重算成功（lastRouteLegMinutes 等已更新），false＝失敗（例如 Routes API 錯誤、
+// 全部站點定位失敗）。reverseRouteOrderClicked_ 靠這個判斷要不要把 todayList 還原成反轉前的順序。
 async function recalcManualOrderTimes_() {
-  if (!todayList.length) return;
+  if (!todayList.length) return false;
   const warnEl = document.getElementById('today-list-warnings');
   const btn = document.getElementById('btn-calc-route');
   if (warnEl) warnEl.innerHTML = '';
@@ -2571,11 +2578,84 @@ async function recalcManualOrderTimes_() {
     if (warnEl && warnings.length) {
       warnEl.innerHTML = `<div class="route-warning-banner">${warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
     }
+    return true;
   } catch (e) {
     if (warnEl) warnEl.innerHTML = `<div class="empty-hint">重算時間失敗：${escapeHtml(e.message)}</div>`;
+    return false;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '計算路線'; }
   }
+}
+
+// ══════════════════════════════
+// 今日清單：反轉順序（純邏輯函式刻意跟 DOM/網路 I/O 分開寫，方便單元測試原封不動複製貼上，
+// 見 tools/test-reverse-route-order.mjs 開頭的註解——改這兩支時那份測試也要同步複製貼上）
+// ══════════════════════════════
+const TODAY_LIST_IN_PROGRESS_STATUSES_ = ['已到', '完成', '跳過'];
+
+// 只反轉陣列本身（起終點是 ORIGIN_ADDR／DEST_ADDR 常數，不在這個陣列裡，不受影響）。
+function reverseTodayListRows_(rows) {
+  return rows.slice().reverse();
+}
+
+// 回傳 null＝可以反轉；回傳字串＝停用理由（按鈕 disabled 的判斷依據，字串本身當提示文字用）。
+// 「已到／完成／跳過」擋住反轉：外勤模式已經開始走了，反轉會打亂實際進度跟已經發生的到站記錄，
+// 整段擋住比只擋「已到站之後的部分」更安全，不讓系統自作主張去動已經在跑的行程。
+function reverseRouteOrderDisabledReason_(rows, orderMode_, hasRouteData) {
+  if (!rows || rows.length < 2) return '清單少於 2 站，不需要反轉順序';
+  if (orderMode_ === 'unordered' || !hasRouteData) return '尚未計算路線，請先按「計算路線」';
+  if (rows.some(r => TODAY_LIST_IN_PROGRESS_STATUSES_.indexOf(r.status) >= 0)) {
+    return '已有站點進行中（已到／完成／跳過），無法反轉順序';
+  }
+  return null;
+}
+
+function updateReverseRouteButtonState_() {
+  const btn = document.getElementById('btn-reverse-route');
+  const hintEl = document.getElementById('reverse-route-hint');
+  if (!btn) return;
+  const reason = reverseRouteOrderDisabledReason_(todayList, orderMode, !!lastRouteLegMinutes);
+  btn.disabled = !!reason;
+  btn.title = reason || '';
+  if (hintEl) hintEl.textContent = reason || '';
+}
+
+// 反轉中間的站，起終點（ORIGIN_ADDR／DEST_ADDR）不變——重用手動拖曳排序那條既有的固定順序
+// 重算流程（recalcManualOrderTimes_，optimizeWaypointOrder:false），不另寫一套路線計算。
+// 失敗時整個還原成反轉前的狀態（todayList 順序＋orderMode＋lastRoute* 車程資料），不留半套：
+// KV 的 orderMode 要等確定成功/還原完成才存一次，不會在還沒確定結果時就先寫入「manual」。
+async function reverseRouteOrderClicked_() {
+  if (reverseRouteOrderDisabledReason_(todayList, orderMode, !!lastRouteLegMinutes)) return; // 按鈕本身已停用，這裡保險擋一次
+  const btn = document.getElementById('btn-reverse-route');
+  const prevList = todayList;
+  const prevOrderMode = orderMode;
+  const prevLegMinutes = lastRouteLegMinutes;
+  const prevResolvedIds = lastRouteResolvedIds;
+  const prevStopIds = lastRouteStopIds;
+  const prevTotalKm = lastRouteTotalKm;
+
+  todayList = reverseTodayListRows_(todayList);
+  orderMode = 'manual';
+  lastRouteLegMinutes = null;
+  lastRouteResolvedIds = null;
+  if (btn) { btn.disabled = true; btn.textContent = '反轉中…'; }
+  recomputeTodayListTimes_(); // 畫面先顯示新順序，時間先清成「—」，等重算回來再補新數字
+
+  const ok = await recalcManualOrderTimes_();
+  if (btn) btn.textContent = '反轉順序';
+
+  if (!ok) {
+    todayList = prevList;
+    orderMode = prevOrderMode;
+    lastRouteLegMinutes = prevLegMinutes;
+    lastRouteResolvedIds = prevResolvedIds;
+    lastRouteStopIds = prevStopIds;
+    lastRouteTotalKm = prevTotalKm;
+    recomputeTodayListTimes_(); // 還原畫面＋把還原後的順序重新排進存檔佇列
+    return;
+  }
+  savePlanState(); // orderMode 存在 KV plan:{date}；順序與到達時間已經由上面 recalcManualOrderTimes_
+                    // → recomputeTodayListTimes_ → renderTodayList_ 存進「今日行程」表
 }
 
 // 「計算路線」按鈕的實際進入點：手動調整過順序時先問使用者要保留順序只重算時間、還是整個
