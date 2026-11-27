@@ -6,8 +6,15 @@
 // extractOrderDateFromNo（約 L1849）兩處重複邏輯保持一致，三處邏輯分家會導致同一張單解析出不同日期。
 // ============================================================
 
-// 訂單編號格式：YYMMDDNN → '2026-01-12'；解析失敗回 null（worker.js 既有兩處邏輯回傳的是空字串，
-// 這裡改回 null 讓呼叫端用 if (date) 判斷時更直覺，邏輯本身與 worker.js 完全一致）。
+// 訂單編號格式：主要是 YYMMDD+序號（6/8/9 碼），但 2026-11-27 用 export CSV（非 gviz）重讀
+// SHEET_ORDER 原始資料後發現還有一批 11 碼 YYYYMMDD+序號 的訂單編號（347列，日期範圍
+// 2025-03-17~2026-08-25），worker.js 既有兩處解析邏輯（extractDate L1417／extractOrderDateFromNo
+// L1849）只認 YYMMDD，這批會全部解析失敗——此處先試 YYMMDD（跟 worker.js 完全一致，維持相容），
+// 失敗才試 YYYYMMDD。解析失敗回 null（worker.js 既有兩處邏輯回傳的是空字串，這裡改回 null 讓
+// 呼叫端用 if (date) 判斷時更直覺）。
+// 已知限制（未在目前資料出現，故未特別處理）：YYMMDD 嘗試對 11 碼輸入也會跑，若某個 11 碼訂單編號
+// 剛好讓前6碼也湊成合法的 YYMMDD（例如年份 2012/2112 這種「世紀兩碼+年份後兩碼」恰好形成合法月份），
+// 會被誤判成 YYMMDD 而不會進到 YYYYMMDD 分支，取到錯的日期。
 export function parseOrderNoDate(orderNo) {
   const s = String(orderNo || '').replace(/\D/g, '');
   if (s.length >= 6) {
@@ -16,6 +23,14 @@ export function parseOrderNoDate(orderNo) {
     const dd = parseInt(s.slice(4, 6), 10);
     if (yy >= 10 && yy <= 99 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
       return `${2000 + yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+    }
+  }
+  if (s.length >= 8) {
+    const yyyy = parseInt(s.slice(0, 4), 10);
+    const mm = parseInt(s.slice(4, 6), 10);
+    const dd = parseInt(s.slice(6, 8), 10);
+    if (yyyy >= 2000 && yyyy <= 2099 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
     }
   }
   const m = String(orderNo || '').match(/(\d{4})-(\d{2})-(\d{2})/);

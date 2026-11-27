@@ -34,6 +34,21 @@ assertEqual('訂單編號空值回 null', parseOrderNoDate(''), null);
 assertEqual('訂單編號 undefined 回 null', parseOrderNoDate(undefined), null);
 assertEqual('訂單編號本身已是 YYYY-MM-DD 格式', parseOrderNoDate('2026-01-12'), '2026-01-12');
 
+// 2026-11-27：export CSV（非 gviz）重讀 SHEET_ORDER 原始資料後發現訂單編號還有 9 碼／11 碼格式，
+// worker.js 既有兩處邏輯（只認 YYMMDD 前6碼）對 11 碼會全部解析失敗，這裡補上 YYYYMMDD 後備規則。
+assertEqual('9碼 YYMMDDNNN（260102002）→ 2026-01-02', parseOrderNoDate('260102002'), '2026-01-02');
+assertEqual('11碼 YYYYMMDDNNN（20260114001）→ 2026-01-14', parseOrderNoDate('20260114001'), '2026-01-14');
+assertEqual('8碼 YYMMDDNN（26111002）→ 2026-11-10', parseOrderNoDate('26111002'), '2026-11-10');
+// '20260114' 長度8：YYMMDD分支先試 slice(0,6)='202601'→yy=20,mm=26（超出1-12）→失敗，
+// 落到 YYYYMMDD 分支 slice(0,8)='20260114'→yyyy=2026,mm=01,dd=14→成功。
+assertEqual('8碼純 YYYYMMDD（20260114，無序號）→ 2026-01-14', parseOrderNoDate('20260114'), '2026-01-14');
+assertEqual('短流水號 8（<6碼）回 null', parseOrderNoDate('8'), null);
+assertEqual('短流水號 224（<6碼）回 null', parseOrderNoDate('224'), null);
+assertEqual('短流水號 2654（<6碼）回 null', parseOrderNoDate('2654'), null);
+assertEqual('11碼非法日期（20261301001，月份13）回 null', parseOrderNoDate('20261301001'), null);
+assertEqual('含非數字字元的11碼輸入（2026-01-14-001）仍可解析', parseOrderNoDate('2026-01-14-001'), '2026-01-14');
+assertEqual('含非數字字元的9碼輸入（26/01/02-002）仍可解析', parseOrderNoDate('26/01/02-002'), '2026-01-02');
+
 // 與 worker.js 既有兩處重複邏輯（extractDate L1417、extractOrderDateFromNo L1849）比對一致性：
 // 兩處邏輯完全相同，這裡用同一批輸入跑一次 worker.js 的版本（原樣複製，僅回傳空字串而非 null）驗證。
 function workerExtractDate_(orderNo) {
