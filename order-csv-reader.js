@@ -11,6 +11,14 @@
 // 欄位型態用「寫死的schema」而不是重新推斷型態——重新推斷正是 gviz 會出錯的做法。
 // schema 來源：2026-11-27 直接讀 gviz 的 cols[].type 取得，之後若試算表欄位有新增/改名/
 // 改變型態，要同步更新這裡（跟 worker.js 裡任何讀取邏輯一樣，本來就要跟著表結構變動維護）。
+//
+// ⚠️ export CSV 讀到的是「顯示文字」（Google試算表儲存格的格式化顯示值），不是底層的完整
+// 數值精度。如果試算表把某欄的顯示格式設成「只顯示整數」或「只顯示小數點後兩位」之類的格式，
+// CSV 讀到的字串就已經被截斷/四捨五入過，這裡的轉換函式無從分辨「真的只有這麼多位」還是
+// 「被格式設定藏起來了」——跟 gviz 讀 f（格式化值）會遇到同樣的風險，但 gviz 讀 v（底層值）
+// 本來是不會有這個問題的，改走 CSV 等於主動放棄這層保障。如果之後要改任何一欄的數字顯示格式
+// （含小計、總金額、數量、單價等），改之前要先重跑 tools/verify-order-csv-equivalence.mjs
+// 確認「CSV轉換後的值」跟「gviz原本讀到的值」還是對得上，不要假設格式改了沒事。
 // ============================================================
 
 export const ORDER_SHEET_COLUMN_TYPES_ = {
@@ -130,6 +138,25 @@ export function isBlankCsvRow_(rowArr) {
   return rowArr.every(v => String(v ?? '').trim() === '');
 }
 
+// 欄位對不上的保護：CSV 標題列必須跟 schema「數量、順序、名稱」完全一致，才信任這份 CSV。
+// 任何一種不符（多一欄、少一欄、順序換位、欄名改了）都當作「這份 CSV 不可信」處理——
+// 不是因為順序理論上一定會讀錯（exportRowsToGvizShape_ 是用欄名查表、不是用位置），而是
+// 「標題跟寫死的schema對不上」本身就代表試算表結構變了，我們沒有同步更新schema，繼續讀
+// 下去可能把新欄位誤判成舊欄位的型態（例如新插入一欄剛好也是純數字，被當成訂單編號解析）。
+// 呼叫端收到 ok:false 要整個退回 gviz，不能只挑欄位部分相信。
+export function validateCsvHeader_(headerRow, columnTypes) {
+  const expected = Object.keys(columnTypes);
+  if (!Array.isArray(headerRow) || headerRow.length !== expected.length) {
+    return { ok: false, reason: `欄位數量不符：預期${expected.length}欄，實際${headerRow ? headerRow.length : 0}欄` };
+  }
+  for (let i = 0; i < expected.length; i++) {
+    if (headerRow[i] !== expected[i]) {
+      return { ok: false, reason: `第${i + 1}欄不符：預期「${expected[i]}」，實際「${headerRow[i]}」` };
+    }
+  }
+  return { ok: true, reason: null };
+}
+
 // 把「標題列 + 資料列」轉成跟 fetchGvizSheetRaw_() 回傳相同形狀：{ rows, colMap }。
 // rows[i].c[j] 是 { v } 或 null（gviz 對空白儲存格就是整個 c[j] 為 null，不是 {v:null}），
 // 跟既有的 gvizGet()／row.c[i]?.v 用法完全相容。
@@ -146,4 +173,27 @@ export function exportRowsToGvizShape_(headerRow, dataRows, columnTypes) {
       }),
     }));
   return { rows, colMap };
+}
+
+// ============================================================
+// handleStoreTimeline（A8 時間軸）用：同店叫貨明細依「可辨識的訂單」分組成一筆事件。
+// 原本用 `o.orderNo || o.date` 當 key，兩者都空的列會全部共用同一個 key `''`，被誤合併成
+// 一筆（2026-11-28 發現）。訂單編號/日期都沒有時，改用「這一列在陣列中的位置」當獨立 key，
+// 保證每一列各自成一筆事件，不會被不相關的列誤合併。
+// ============================================================
+export function orderTimelineGroupKey_(order, rowIndex) {
+  if (order.orderNo) return `no:${order.orderNo}`;
+  if (order.date) return `date:${order.date}`;
+  return `row:${rowIndex}`;
+}
+
+export function groupOrdersForTimeline_(orders) {
+  const groups = {};
+  orders.forEach((o, idx) => {
+    const key = orderTimelineGroupKey_(o, idx);
+    if (!groups[key]) groups[key] = { orderNo: o.orderNo, date: o.date, items: [], total: 0 };
+    groups[key].items.push(`${o.productName}×${o.qty}`);
+    groups[key].total += o.subtotal;
+  });
+  return Object.values(groups);
 }

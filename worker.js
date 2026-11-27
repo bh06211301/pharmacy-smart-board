@@ -20,6 +20,8 @@ import {
   ORDER_MASTER_SHEET_COLUMN_TYPES_,
   parseExportCsv_,
   exportRowsToGvizShape_,
+  validateCsvHeader_,
+  groupOrdersForTimeline_,
 } from './order-csv-reader.js';
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
@@ -1754,6 +1756,8 @@ async function fetchOrderSheetViaCsvOrGviz_(sheetId, gid, columnTypes, gvizSheet
     const table = parseExportCsv_(text);
     const header = table[0] || [];
     if (!header.length) throw new Error('export CSV 沒有標題列');
+    const headerCheck = validateCsvHeader_(header, columnTypes);
+    if (!headerCheck.ok) throw new Error(`CSV標題列跟schema不符，不信任這份資料：${headerCheck.reason}`);
     const dataRows = table.slice(1).filter(r => !(r.length === 1 && r[0] === ''));
     return exportRowsToGvizShape_(header, dataRows, columnTypes);
   } catch (e) {
@@ -2090,15 +2094,10 @@ async function handleStoreTimeline(request, env, ctx) {
     });
   });
 
-  // 叫貨：orders 是一列一個品項（fetchStoreOrdersAndReturns_），依訂單編號分組成一筆事件
-  const orderGroups = {};
-  orders.forEach(o => {
-    const key = o.orderNo || o.date;
-    if (!orderGroups[key]) orderGroups[key] = { orderNo: o.orderNo, date: o.date, items: [], total: 0 };
-    orderGroups[key].items.push(`${o.productName}×${o.qty}`);
-    orderGroups[key].total += o.subtotal;
-  });
-  Object.values(orderGroups).forEach(g => {
+  // 叫貨：orders 是一列一個品項（fetchStoreOrdersAndReturns_），依訂單編號分組成一筆事件。
+  // 2026-11-28 改用 groupOrdersForTimeline_()：訂單編號／日期都沒有的列不會再被疊成同一筆
+  // （見 order-csv-reader.js 的說明）。
+  groupOrdersForTimeline_(orders).forEach(g => {
     events.push({ type: 'order', date: rawDateToIso_(g.date), orderNo: g.orderNo, amount: g.total, itemsText: g.items.join('、') });
   });
 
