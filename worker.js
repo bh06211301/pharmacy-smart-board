@@ -366,6 +366,16 @@ export default {
         return await handleSaveGeo(request, env);
       }
 
+      // ★ 店端效期（店端效期_分支2 寫入路徑，2026-11-27）：純讀取，不需使用者核准就能用
+      if (path === '/shelf-expiry' && request.method === 'GET') {
+        return await handleGetShelfExpiry(request, env, ctx);
+      }
+      // ⚠️ 會轉送 GAS 的 addShelfExpiry action，寫入新分頁「店端效期」——部署前需使用者核准
+      // （新分頁＋新action＋新白名單，依 CLAUDE.md「新增寫入目標」規則）
+      if (path === '/shelf-expiry' && request.method === 'POST') {
+        return await handleAddShelfExpiry(request, env);
+      }
+
       // ★ 2026-11-20：field-v2「標籤（可複選）」AI 建議（只讀，不寫任何正式資料，見 handleTagSuggest）
       if (path === '/api/tag-suggest') {
         return await handleTagSuggest(request, env, ctx);
@@ -3452,6 +3462,99 @@ async function handleUpdateStoreLocation(request, env) {
   const data = await res.json();
   if (data.success) await invalidateGvizCache_(env, env.SHEET_PHARMACY, '新客戶資料表_AppSheet');
   return json(data);
+}
+
+// ============================================================
+// 店端效期（店端效期_分支2 寫入路徑，2026-11-27，docs/店端效期_設計方案.md）
+// 讀寫目標：SHEET_PLANNER（「藥局規劃資料」試算表）新分頁「店端效期」，寫入轉送 GAS 的
+// addShelfExpiry action，token 代填方式沿用 handlePlannerRules／handlePlannerFollowups。
+// ⚠️ 這個分頁、這個 GAS action、這個白名單項目都還沒取得使用者核准，不能部署／不能建分頁。
+// ============================================================
+const SHELF_EXPIRY_SHEET_NAME = '店端效期';
+const SHELF_EXPIRY_TEST_SHEET_NAME = '店端效期_TEST';
+const SHELF_EXPIRY_SHEET_WHITELIST = [SHELF_EXPIRY_SHEET_NAME, SHELF_EXPIRY_TEST_SHEET_NAME];
+
+// GET ?pharmacy=&sheetName?——純讀取，走 fetchGvizRows 的 SWR 快取（跟待追蹤/店家規則同模式）。
+// 回傳原始列，不在這裡做「取目前這批」的推估判斷（pickCurrentRecord 邏輯留給之後接輸入介面/
+// 提醒功能的分支處理，見設計方案文件第5節）。
+// sheetName 可選帶「店端效期_TEST」，跟 saveTodayPlan 同一套：Worker 決定讀寫哪個分頁，GAS
+// 不自己判斷測試/正式；不帶就讀正式分頁——跟 handleGetTodayPlan 一樣，field-v2 的 ?test=1
+// 只影響「寫入」決定送哪個分頁，不會讓「讀取」自動跟著切（見 CLAUDE.md「測試模式的已知限制」），
+// 之後接輸入介面的分支要自己決定要不要在讀取也補這個查詢參數。
+// 2026-11-27 審查補：庫外旗標寫入時是字串 "TRUE"/"FALSE"，但 Google Sheets 即使設了
+// setNumberFormat('@') 也可能把它自動偵測成真正的布林值（同一個根因見 PLANNER_TODAY_PLAN_COLS
+// 「停留手動」「已確定」那段踩坑記錄），gviz 讀回來時有時是字串 "TRUE"、有時是布林 true，單純
+// `=== 'TRUE'` 字串比較在後者會永遠判成 false（庫外的記錄被誤判成非庫外）。這裡對布林與字串
+// 兩種型態都相容，判斷邏輯跟 tools/test-shelf-expiry-write.mjs 共用同一份寫法。
+function gvizCellIsTrue_(v) {
+  if (v === true) return true;
+  if (v === false || v == null) return false;
+  return String(v).trim().toUpperCase() === 'TRUE';
+}
+
+// 2026-11-27 審查補（方案A）：記錄日期寫入時是 'YYYY-MM-DD' 文字，但實測發現即使欄位設了
+// setNumberFormat('@')，Sheets 仍把它自動偵測成真正的日期，gviz 讀回來是 'Date(2026,10,27)'
+// （月份 0 起算）——使用者決定保留這個真日期（方案A：之後排序/篩選用得到），由這裡轉回
+// 'YYYY-MM-DD' 字串給呼叫端用。故意不走既有 parseGvizDate()+formatDateIso_()（rawDateToIso_()
+// 那條路）：那條路要把中間結果餵進 new Date(...) 再用本地時區的 getDate() 讀回來，UTC負時區下
+// 可能倒退一天；這裡直接用正規表達式從 'Date(y,m,d)' 手動取數字補零，不經過 Date 物件，沒有
+// 時區風險。格式不明的字串原樣傳回，不拋錯、不猜；空值/undefined 回傳空字串。跟
+// tools/test-shelf-expiry-write.mjs 共用同一份寫法。
+function gvizCellToIsoDate_(v) {
+  if (v === undefined || v === null || v === '') return '';
+  const s = String(v);
+  const m = s.match(/^Date\((\d+),(\d+),(\d+)\)$/);
+  if (!m) return s;
+  const mm = String(parseInt(m[2], 10) + 1).padStart(2, '0');
+  const dd = String(parseInt(m[3], 10)).padStart(2, '0');
+  return `${m[1]}-${mm}-${dd}`;
+}
+
+async function handleGetShelfExpiry(request, env, ctx) {
+  const url = new URL(request.url);
+  const pharmacy = url.searchParams.get('pharmacy');
+  if (!pharmacy) return json({ error: '缺少 pharmacy' }, 400);
+  const sheetName = url.searchParams.get('sheetName') || SHELF_EXPIRY_SHEET_NAME;
+  if (SHELF_EXPIRY_SHEET_WHITELIST.indexOf(sheetName) < 0) {
+    return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
+  }
+  if (!env.SHEET_PLANNER) return json({ ok: true, pharmacy, records: [] });
+  const rows = await fetchGvizRows(env.SHEET_PLANNER, sheetName, env, ctx);
+  const records = rows
+    .filter(r => r.get('店家代號') === pharmacy)
+    .map(r => ({
+      recordId: r.get('記錄ID'), storeId: r.get('店家代號'), productId: r.get('產品編號'),
+      expiryYearMonth: r.get('效期年月'), source: r.get('來源'), recordDate: gvizCellToIsoDate_(r.get('記錄日期')),
+      note: r.get('備註') || '', outOfStock: gvizCellIsTrue_(r.get('庫外旗標')),
+      expiryKey: r.get('效期庫Key') || '',
+    }));
+  return json({ ok: true, pharmacy, records });
+}
+
+// POST 轉送 GAS 的 addShelfExpiry action（token 由 Worker 代填，前端永遠不會看到密鑰，沿用
+// handlePlannerRules／handlePlannerFollowups 同一套代填模式）。
+// 這裡只檢查 sheetName 白名單（跟 TODAY_PLAN_SHEET_WHITELIST 同一個理由：由 Worker 決定寫哪個
+// 分頁，不讓呼叫端指定任意分頁名稱）；欄位值驗證（必填/來源enum/效期年月格式/記錄ID重複）只放在
+// GAS 那一份（ShelfExpiryActions.js），這裡不重複一份——跟 handlePlannerRules／
+// handlePlannerFollowups 轉送 addRule/addFollowup 時的既有分工一樣，規則類型/排程處理/誰交代這些
+// enum 驗證也只存在 GAS 端，不是本次新發明的做法。
+// 沒有 expectedUpdatedAt 類的衝突機制：這支是「新增一筆」，不是像 updateTodayPlanRow 那樣
+// 「改既有一列」會跟別人同時改動衝突——GAS 端的記錄ID重複檢查已經是足夠的防呆，不需要樂觀鎖版本號。
+async function handleAddShelfExpiry(request, env) {
+  const body = await request.json();
+  const sheetName = body.sheetName || SHELF_EXPIRY_SHEET_NAME;
+  if (SHELF_EXPIRY_SHEET_WHITELIST.indexOf(sheetName) < 0) {
+    return json({ error: '不允許的分頁名稱：' + sheetName }, 400);
+  }
+  const res = await fetch(env.GAS_VISIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, action: 'addShelfExpiry', sheetName, token: env.PLANNER_API_TOKEN }),
+    redirect: 'follow',
+  });
+  const data = await res.json();
+  if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, sheetName);
+  return json({ ok: !!data.success, ...data });
 }
 
 // ============================================================
