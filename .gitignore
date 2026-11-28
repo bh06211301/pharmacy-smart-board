@@ -11,3 +11,6 @@ desktop.ini
 
 # wrangler dev 本機暫存/KV/R2 狀態，不是原始碼
 .wrangler/
+
+# 部署前後快照（含店家資料），只是本機核對用，不是原始碼
+tools/snapshots/
