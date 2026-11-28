@@ -359,6 +359,43 @@
       <label class="choice"><input type="checkbox" id="record-customer-followup-checkbox"><div>同時建立待追蹤（下次經過）</div></label>
 
       <div id="record-customer-dad-note" class="dad-note" hidden></div>
+
+      <!-- ============ 店端效期（分支3 輸入介面） ============ -->
+      <div id="shelf-expiry-block" hidden style="display:flex;flex-direction:column;gap:var(--sr-space-4)">
+        <div class="section-label" style="margin-top:var(--sr-space-4)">店端效期</div>
+        <details class="card fixed-info" id="shelf-expiry-existing-wrap" hidden>
+          <summary class="section-label">目前效期記錄（<span id="shelf-expiry-existing-count">0</span>）</summary>
+          <div id="shelf-expiry-existing-list" style="display:flex;flex-direction:column;gap:var(--sr-space-3);margin-top:var(--sr-space-3)"></div>
+        </details>
+
+        <div class="card" style="display:flex;flex-direction:column;gap:var(--sr-space-4)">
+          <div>
+            <div class="section-label">產品</div>
+            <input type="text" id="shelf-expiry-product-search" placeholder="搜尋產品名稱…（叫過的產品排前面）">
+            <div id="shelf-expiry-product-list" style="display:flex;flex-direction:column;gap:var(--sr-space-2);margin-top:var(--sr-space-2);max-height:160px;overflow-y:auto"></div>
+            <div class="stop-sub" id="shelf-expiry-selected-product" hidden></div>
+          </div>
+          <div>
+            <div class="section-label">效期年月</div>
+            <input type="text" id="shelf-expiry-yearmonth" placeholder="例如 28/05 或 2805" inputmode="numeric">
+            <div class="stop-sub" id="shelf-expiry-yearmonth-confirm"></div>
+          </div>
+          <div>
+            <div class="section-label">來源</div>
+            <div class="chip-group" data-single="true" id="shelf-expiry-source-chips">
+              <span class="chip selected" data-value="實看">實看（本次親眼看到實體）</span>
+              <span class="chip" data-value="手動指定">手動指定</span>
+            </div>
+          </div>
+          <label class="choice"><input type="checkbox" id="shelf-expiry-outofstock"><div>這是庫外存貨（不在店內產品庫）</div></label>
+          <div>
+            <div class="section-label">備註</div>
+            <input type="text" id="shelf-expiry-note" placeholder="選填">
+          </div>
+          <div class="stop-sub" id="shelf-expiry-mode-note"></div>
+          <button class="btn primary" id="shelf-expiry-submit" disabled>記一筆效期</button>
+        </div>
+      </div>
     </div>
     <div class="bottombar">
       <button class="btn primary lg" id="record-customer-save">儲存並回首頁</button>
@@ -1535,7 +1572,284 @@ function fv2ResetRecordCustomerFields_() {
   fv2ResetAiTagHints_(); // 換店/重設畫面：取消進行中的 AI 請求、歸零次數計數
   fv2RenderTagHints_('record-customer-tags', []); // 換店/重進畫面清掉上一家店殘留的建議樣式
   fv2CurrentVisitId_ = genRequestId_();
+  fv2ShelfExpiryResetAll_();
 }
+
+// ============================================================
+// 店端效期輸入介面（分支3）。讀：GET /inventory-candidates（這家店買過的產品，含編號+名稱，
+// 已排除停售）＋ GET /product-catalog（全部產品，給「庫外新品」場景用，見 worker.js）＋
+// GET /shelf-expiry（這家店目前的效期記錄）。寫：POST /shelf-expiry（action:'addShelfExpiry'，
+// Worker 代填 token，前端永遠看不到密鑰）。
+// ============================================================
+let fv2ShelfExpiryLastStoreId_ = null;
+let fv2ShelfExpiryProductCatalog_ = null; // 全部產品快取（跨店共用，不用每家店重新抓一次）
+let fv2ShelfExpiryStoreProducts_ = []; // 這家店買過的產品 [{productId, productName}]
+let fv2ShelfExpiryExisting_ = []; // 這家店目前的效期記錄（原始列，GET /shelf-expiry 回來的）
+let fv2ShelfExpirySelectedProductId_ = null;
+let fv2ShelfExpirySelectedProductName_ = '';
+let fv2ShelfExpiryRecordId_ = null; // 冪等識別：同一次送出重試沿用同一個，成功或換產品才換新
+
+// sheetName：跟 saveTodayPlan／拜訪紀錄同一套——正式模式不帶（Worker 決定讀寫正式分頁），
+// 測試模式明確帶 _TEST 分頁名，GAS 不自己判斷測試/正式。
+function fv2ShelfExpirySheetName_() { return fv2SheetNameFor_(undefined, '店端效期_TEST'); }
+
+// ---- 效期年月輸入正規化（純函式，跟 tools/test-shelf-expiry-ui.mjs 共用同一份寫法） ----
+// 接受「28/05」「28/5」「2805」「2028/05」「2028/5」；年份只支援 20xx（這個系統的使用情境，
+// 不用處理跨世紀）。看不懂的格式或月份超出範圍都回傳 ok:false，不猜、不硬轉。
+function fv2NormalizeExpiryInput_(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return { ok: false, error: '請輸入效期年月' };
+  let yy, mm, m;
+  if ((m = s.match(/^(\d{4})\/(\d{1,2})$/))) { yy = m[1].slice(2); mm = m[2]; }
+  else if ((m = s.match(/^(\d{2})\/(\d{1,2})$/))) { yy = m[1]; mm = m[2]; }
+  else if ((m = s.match(/^(\d{4})$/))) { yy = s.slice(0, 2); mm = s.slice(2, 4); }
+  else return { ok: false, error: '看不懂的格式，請用「28/05」或「2805」這種寫法' };
+  const mmNum = parseInt(mm, 10);
+  if (!mmNum || mmNum < 1 || mmNum > 12) return { ok: false, error: '月份要在 1~12 之間' };
+  const yearMonth = `${yy.padStart(2, '0')}/${String(mmNum).padStart(2, '0')}`;
+  const displayText = `20${yy.padStart(2, '0')} 年 ${mmNum} 月`;
+  return { ok: true, yearMonth, displayText };
+}
+
+// ---- 每個產品取「目前有效」的一筆：手動指定≥實看>推估，同級取最新記錄日期 ----
+// （純函式，跟 tools/test-shelf-expiry-ui.mjs 共用同一份寫法）
+const FV2_SHELF_EXPIRY_SOURCE_PRIORITY_ = { '手動指定': 3, '實看': 2, '推估': 1 };
+function fv2PickCurrentShelfExpiryRecords_(records) {
+  const byProduct = {};
+  (records || []).forEach(r => {
+    const existing = byProduct[r.productId];
+    if (!existing) { byProduct[r.productId] = r; return; }
+    const pNew = FV2_SHELF_EXPIRY_SOURCE_PRIORITY_[r.source] || 0;
+    const pOld = FV2_SHELF_EXPIRY_SOURCE_PRIORITY_[existing.source] || 0;
+    if (pNew > pOld) { byProduct[r.productId] = r; return; }
+    if (pNew === pOld && String(r.recordDate || '') > String(existing.recordDate || '')) {
+      byProduct[r.productId] = r;
+    }
+  });
+  return byProduct;
+}
+
+// ---- 冪等識別：有就沿用，沒有才生成（純函式，跟測試共用） ----
+function fv2EnsureIdempotentId_(currentId, generator) { return currentId || generator(); }
+
+// ---- 組送出 payload（純函式，跟測試共用） ----
+function fv2ShelfExpiryPayload_({ recordId, storeId, productId, expiryYearMonth, source, outOfStock, note, recordDate, sheetName }) {
+  return {
+    recordId, storeId, productId, expiryYearMonth, source,
+    outOfStock: !!outOfStock, note: note || '', recordDate, sheetName,
+  };
+}
+
+function fv2ShelfExpiryResetAll_() {
+  fv2ShelfExpiryLastStoreId_ = null;
+  fv2ShelfExpiryStoreProducts_ = [];
+  fv2ShelfExpiryExisting_ = [];
+  document.getElementById('shelf-expiry-product-search').value = '';
+  document.getElementById('shelf-expiry-existing-list').innerHTML = '';
+  document.getElementById('shelf-expiry-existing-wrap').hidden = true;
+  document.getElementById('shelf-expiry-product-list').innerHTML = '';
+  fv2ShelfExpiryResetEntryFields_(true);
+}
+// 送出成功後的重置：保留已選的產品（同店連續記多個產品時，常常是同一個產品連續記幾次效期，
+// 也可能換下一個產品——保留選擇讓使用者自己決定要不要換，不強制清空）。
+// clearProduct=true 時才連產品一起清（只有換店的全清 fv2ShelfExpiryResetAll_ 會這樣用）。
+function fv2ShelfExpiryResetEntryFields_(clearProduct) {
+  if (clearProduct) {
+    fv2ShelfExpirySelectedProductId_ = null;
+    fv2ShelfExpirySelectedProductName_ = '';
+    document.getElementById('shelf-expiry-selected-product').hidden = true;
+  }
+  document.getElementById('shelf-expiry-yearmonth').value = '';
+  document.getElementById('shelf-expiry-yearmonth-confirm').textContent = '';
+  document.getElementById('shelf-expiry-note').value = '';
+  document.querySelectorAll('#shelf-expiry-source-chips .chip').forEach(c => c.classList.toggle('selected', c.dataset.value === '實看'));
+  document.getElementById('shelf-expiry-outofstock').checked = false;
+  fv2ShelfExpiryRecordId_ = null;
+  fv2ShelfExpiryUpdateSubmitEnabled_();
+}
+
+function fv2ShelfExpirySourceLabel_(source) {
+  return source === '手動指定' ? '手動指定' : (source === '實看' ? '實看' : (source === '推估' ? '推估' : (source || '—')));
+}
+function fv2ShelfExpiryExistingRowHtml_(r) {
+  const norm = fv2NormalizeExpiryInput_(r.expiryYearMonth); // 只為了拿 displayText，格式本來就是GAS存的合法YY/MM
+  const displayYm = norm.ok ? norm.displayText : r.expiryYearMonth;
+  return `
+    <div class="card" data-existing-record='${escapeHtml_(JSON.stringify(r))}'>
+      <div class="store-meta"><b>${escapeHtml_(r.productName || r.productId)}</b></div>
+      <div class="store-meta">${escapeHtml_(displayYm)}　<span class="tag">${escapeHtml_(fv2ShelfExpirySourceLabel_(r.source))}</span>${r.outOfStock ? ' <span class="tag warn">庫外</span>' : ''}</div>
+      <div class="stop-sub">記錄日期：${escapeHtml_(r.recordDate || '—')}</div>
+      <button type="button" class="btn" data-confirm-batch style="margin-top:var(--sr-space-3)">指定目前批次</button>
+    </div>`;
+}
+function fv2RenderShelfExpiryExisting_() {
+  const picked = fv2PickCurrentShelfExpiryRecords_(fv2ShelfExpiryExisting_);
+  const list = Object.values(picked).sort((a, b) => (a.productName || a.productId).localeCompare(b.productName || b.productId, 'zh-Hant'));
+  document.getElementById('shelf-expiry-existing-count').textContent = String(list.length);
+  const wrap = document.getElementById('shelf-expiry-existing-wrap');
+  wrap.hidden = list.length === 0;
+  document.getElementById('shelf-expiry-existing-list').innerHTML = list.map(fv2ShelfExpiryExistingRowHtml_).join('');
+}
+
+function fv2ShelfExpiryProductRowHtml_(p, isStoreProduct) {
+  return `<label class="choice" data-product-id="${escapeHtml_(p.productId)}">
+    <div>${escapeHtml_(p.productName)}${isStoreProduct ? ' <span class="tag">叫過</span>' : ''}</div>
+  </label>`;
+}
+function fv2RenderShelfExpiryProductList_() {
+  const q = document.getElementById('shelf-expiry-product-search').value.trim();
+  const storeIds = new Set(fv2ShelfExpiryStoreProducts_.map(p => p.productId));
+  const rest = (fv2ShelfExpiryProductCatalog_ || []).filter(p => !storeIds.has(p.productId));
+  const all = [...fv2ShelfExpiryStoreProducts_.map(p => ({ ...p, isStore: true })), ...rest.map(p => ({ ...p, isStore: false }))];
+  const filtered = q ? all.filter(p => p.productName.indexOf(q) >= 0) : all;
+  const el = document.getElementById('shelf-expiry-product-list');
+  el.innerHTML = filtered.slice(0, 30).map(p => fv2ShelfExpiryProductRowHtml_(p, p.isStore)).join('');
+  el.querySelectorAll('[data-product-id]').forEach(row => {
+    row.addEventListener('click', () => {
+      fv2ShelfExpirySelectedProductId_ = row.dataset.productId;
+      const p = all.find(x => x.productId === row.dataset.productId);
+      fv2ShelfExpirySelectedProductName_ = p ? p.productName : row.dataset.productId;
+      const selEl = document.getElementById('shelf-expiry-selected-product');
+      selEl.hidden = false;
+      selEl.textContent = `已選：${fv2ShelfExpirySelectedProductName_}`;
+      el.innerHTML = '';
+      document.getElementById('shelf-expiry-product-search').value = '';
+      fv2ShelfExpiryUpdateSubmitEnabled_();
+    });
+  });
+}
+
+function fv2ShelfExpiryUpdateSubmitEnabled_() {
+  const ymRaw = document.getElementById('shelf-expiry-yearmonth').value;
+  const norm = fv2NormalizeExpiryInput_(ymRaw);
+  const confirmEl = document.getElementById('shelf-expiry-yearmonth-confirm');
+  if (!ymRaw.trim()) {
+    confirmEl.textContent = ''; confirmEl.className = 'stop-sub';
+  } else if (norm.ok) {
+    confirmEl.textContent = norm.displayText; confirmEl.className = 'stop-sub';
+  } else {
+    confirmEl.textContent = norm.error; confirmEl.className = 'conflict-text';
+  }
+  const ok = !!fv2ShelfExpirySelectedProductId_ && norm.ok;
+  document.getElementById('shelf-expiry-submit').disabled = !ok;
+  return ok ? norm : null;
+}
+
+async function fv2RenderShelfExpiry_(storeId) {
+  fv2ShelfExpiryLastStoreId_ = storeId;
+  fv2ShelfExpiryExisting_ = [];
+  fv2ShelfExpiryStoreProducts_ = [];
+  document.getElementById('shelf-expiry-existing-list').innerHTML = '<div class="center-note">讀取中…</div>';
+  document.getElementById('shelf-expiry-existing-wrap').hidden = false;
+  try {
+    const catalogP = fv2ShelfExpiryProductCatalog_
+      ? Promise.resolve(fv2ShelfExpiryProductCatalog_)
+      : fetch(`${WORKER}/product-catalog`).then(r => r.json()).then(d => d.products || []);
+    const [candidatesRes, existingRes, catalog] = await Promise.all([
+      fetch(`${WORKER}/inventory-candidates?pharmacy=${encodeURIComponent(storeId)}`).then(r => r.json()).catch(() => ({ candidates: [] })),
+      fetch(`${WORKER}/shelf-expiry?pharmacy=${encodeURIComponent(storeId)}${IS_TEST_MODE ? '&sheetName=' + encodeURIComponent(fv2ShelfExpirySheetName_()) : ''}`).then(r => r.json()).catch(() => ({ records: [] })),
+      catalogP,
+    ]);
+    fv2ShelfExpiryProductCatalog_ = catalog;
+    fv2ShelfExpiryStoreProducts_ = (candidatesRes.candidates || []).map(c => ({ productId: c.productId, productName: c.productName }));
+    fv2ShelfExpiryExisting_ = existingRes.records || [];
+  } catch (e) {
+    console.log('[field-v2] 店端效期資料載入失敗（不影響記錄拜訪本身）：', e.message);
+  }
+  if (fv2ShelfExpiryLastStoreId_ !== storeId) return; // 載入期間使用者已經換店，不要用舊資料覆蓋新畫面
+  fv2RenderShelfExpiryExisting_();
+  fv2RenderShelfExpiryProductList_();
+
+  const modeNoteEl = document.getElementById('shelf-expiry-mode-note');
+  modeNoteEl.textContent = IS_TEST_MODE ? '目前：測試模式（寫入 店端效期_TEST）' : '目前：正式模式（寫入 店端效期）';
+}
+
+document.getElementById('shelf-expiry-product-search').addEventListener('input', fv2RenderShelfExpiryProductList_);
+document.getElementById('shelf-expiry-yearmonth').addEventListener('input', fv2ShelfExpiryUpdateSubmitEnabled_);
+// 來源切換時套用預設庫外旗標（手動指定預設勾、實看預設不勾）——chip 互斥切換本身由全域
+// data-single delegate 處理（見上方「chip 預設多選」那段），這裡只處理切換後的連動效果。
+document.getElementById('shelf-expiry-source-chips').addEventListener('click', (e) => {
+  // 2026-11-28 修正：這支跟全域 chip 互斥切換 delegate 都綁在 bubble 階段，這支綁在容器上、
+  // 比綁在 document 上的全域 delegate更接近事件目標，會先執行——這時候 .selected 還是「切換前」
+  // 的舊狀態，不能查 .selected，要直接讀被點擊那顆 chip 的 data-value 才是這次真正選到的值。
+  const clicked = e.target.closest('.chip');
+  if (!clicked) return;
+  document.getElementById('shelf-expiry-outofstock').checked = clicked.dataset.value === '手動指定';
+});
+
+async function fv2ShelfExpirySubmitPayload_(payload, btnForFeedback) {
+  try {
+    const res = await fetch(`${WORKER}/shelf-expiry`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }).then(r => r.json());
+    if (!res.ok && !res.success) throw new Error(res.error || '未知錯誤');
+    return { ok: true };
+  } catch (e) {
+    if (btnForFeedback) fv2Toast_('記錄效期失敗，請重試：' + e.message, true);
+    return { ok: false, error: e.message };
+  }
+}
+
+document.getElementById('shelf-expiry-submit').addEventListener('click', async () => {
+  const norm = fv2ShelfExpiryUpdateSubmitEnabled_();
+  if (!norm || !fv2ShelfExpirySelectedProductId_) return;
+  const btn = document.getElementById('shelf-expiry-submit');
+  btn.disabled = true; btn.textContent = '送出中…';
+  fv2ShelfExpiryRecordId_ = fv2EnsureIdempotentId_(fv2ShelfExpiryRecordId_, genRequestId_);
+  const source = document.querySelector('#shelf-expiry-source-chips .chip.selected')?.dataset.value || '實看';
+  const payload = fv2ShelfExpiryPayload_({
+    recordId: fv2ShelfExpiryRecordId_, storeId: FV2.currentStoreId, productId: fv2ShelfExpirySelectedProductId_,
+    expiryYearMonth: norm.yearMonth, source,
+    outOfStock: document.getElementById('shelf-expiry-outofstock').checked,
+    note: document.getElementById('shelf-expiry-note').value.trim(),
+    recordDate: todayStr_(), sheetName: fv2ShelfExpirySheetName_(),
+  });
+  const result = await fv2ShelfExpirySubmitPayload_(payload, true);
+  btn.textContent = '記一筆效期';
+  if (result.ok) {
+    fv2Toast_('已記錄效期');
+    fv2ShelfExpiryExisting_.push({
+      recordId: payload.recordId, storeId: payload.storeId, productId: payload.productId,
+      expiryYearMonth: payload.expiryYearMonth, source: payload.source, recordDate: payload.recordDate,
+      note: payload.note, outOfStock: payload.outOfStock, expiryKey: '',
+      productName: fv2ShelfExpirySelectedProductName_,
+    });
+    fv2RenderShelfExpiryExisting_();
+    fv2ShelfExpiryResetEntryFields_(false); // 保留已選產品，方便連續記同店下一個產品
+  } else {
+    btn.disabled = false; // 失敗保留輸入內容＋同一個 recordId，重試不會變成兩筆
+  }
+});
+
+// 「指定目前批次」：以清單裡那一筆內容，新增一筆來源「手動指定」的新記錄（確認目前在架是這批）。
+// 不修改/刪除舊記錄（資料表只增不改）——這點跟一般送出共用同一支 /shelf-expiry POST，只是
+// 直接用已知合法的值組 payload，不經過表單驗證 UI。
+document.getElementById('shelf-expiry-existing-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-confirm-batch]');
+  if (!btn) return;
+  const card = btn.closest('[data-existing-record]');
+  let r;
+  try {
+    r = JSON.parse(card.dataset.existingRecord);
+  } catch (err) {
+    fv2Toast_('這筆記錄資料讀取失敗，請重新整理畫面', true);
+    return;
+  }
+  btn.disabled = true; btn.textContent = '處理中…';
+  const payload = fv2ShelfExpiryPayload_({
+    recordId: genRequestId_(), storeId: r.storeId, productId: r.productId,
+    expiryYearMonth: r.expiryYearMonth, source: '手動指定', outOfStock: r.outOfStock,
+    note: '指定目前批次', recordDate: todayStr_(), sheetName: fv2ShelfExpirySheetName_(),
+  });
+  const result = await fv2ShelfExpirySubmitPayload_(payload, true);
+  if (result.ok) {
+    fv2Toast_('已確認目前批次');
+    fv2ShelfExpiryExisting_.push({ ...r, recordId: payload.recordId, source: '手動指定', recordDate: payload.recordDate, note: payload.note });
+    fv2RenderShelfExpiryExisting_();
+  } else {
+    btn.disabled = false; btn.textContent = '指定目前批次';
+  }
+});
 function fv2RenderRecordCustomer(storeId) {
   // 連按防呆：每次進這個畫面都把按鈕恢復成可按狀態，避免上次存檔成功後按鈕卡在disabled
   const saveBtnReset = document.getElementById('record-customer-save');
@@ -1573,6 +1887,16 @@ function fv2RenderRecordCustomer(storeId) {
   }
 
   fv2RenderFollowupActions_(FV2.currentFollowups);
+
+  // 店端效期（分支3）：只有真實客戶（查得到 ph，有 Customer_ID）才顯示——新店候選／手動補記
+  // 的合成 key（manual-...）沒有店家代號，寫效期記錄沒有意義，整塊隱藏不顯示。
+  const shelfBlock = document.getElementById('shelf-expiry-block');
+  if (ph) {
+    shelfBlock.hidden = false;
+    if (storeId !== fv2ShelfExpiryLastStoreId_) fv2RenderShelfExpiry_(storeId); // fire-and-forget，不擋畫面顯示
+  } else {
+    shelfBlock.hidden = true;
+  }
 }
 // 下次要記得：文字附在拜訪內容後面一起存檔（使用者核准的規則）
 function fv2AppendNextAction_(content, nextAction) {

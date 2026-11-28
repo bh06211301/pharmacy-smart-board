@@ -385,6 +385,11 @@ export default {
         return await handleAddShelfExpiry(request, env);
       }
 
+      // ★ 店端效期輸入介面（分支3）：產品選單用全部產品清單，純讀取，不需使用者核准
+      if (path === '/product-catalog' && request.method === 'GET') {
+        return await handleProductCatalog(env, ctx);
+      }
+
       // ★ 2026-11-20：field-v2「標籤（可複選）」AI 建議（只讀，不寫任何正式資料，見 handleTagSuggest）
       if (path === '/api/tag-suggest') {
         return await handleTagSuggest(request, env, ctx);
@@ -3619,6 +3624,22 @@ async function handleAddShelfExpiry(request, env) {
   const data = await res.json();
   if (data.success) await invalidateGvizCache_(env, env.SHEET_PLANNER, sheetName);
   return json({ ok: !!data.success, ...data });
+}
+
+// 店端效期輸入介面（分支3，field-v2）：產品選單用的「全部產品」唯讀清單。跟 /inventory-candidates
+// 的「這家店買過的產品」互補——那支只回這家店買過的（且排除停售/已盤點過的），這支回全部產品
+// （含這家店還沒買過的，給「庫外新品」場景挑選用，field-v2 的「這是庫外存貨」勾選框就是對應這種
+// 情境）。純讀取 SHEET_PRODUCT，走 fetchGvizSheet 既有 SWR 快取，不碰任何寫入路徑，不需要核准。
+async function handleProductCatalog(env, ctx) {
+  if (!env.SHEET_PRODUCT) return json({ ok: true, products: [] });
+  const { rows, colMap } = await fetchGvizSheet(env.SHEET_PRODUCT, null, env, ctx);
+  const products = rows
+    .map(row => ({
+      productId: String(gvizGet(row, colMap, '產品編號2') || '').trim(),
+      productName: String(gvizGet(row, colMap, '產品名稱') || ''),
+    }))
+    .filter(p => p.productId);
+  return json({ ok: true, products });
 }
 
 // ============================================================
