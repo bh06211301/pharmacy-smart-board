@@ -3,9 +3,19 @@
 // 只送 GET，/api/red-slips 帶 ?fresh=1（唯讀，不寫 KV，見 worker.js 既有註解）。
 // 輸出放在 tools/snapshots/before/，這個資料夾不進 git（含店家資料）。
 // 執行：node tools/snapshot-before-deploy.mjs
+// 2026-11-28：加上 --help/-h，印用法後直接結束，不送任何請求——這支腳本會真的打線上API，
+// 之前曾經為了看內容誤用 --help 當參數，結果照樣整批打下去還覆蓋了快照檔案（見commit紀錄），
+// 之後任何未知參數一律當成 --help 處理，不要悄悄當沒事繼續執行。
 
 import fs from 'node:fs';
 import path from 'node:path';
+
+if (process.argv.slice(2).length > 0) {
+  console.log(`用法：node tools/snapshot-before-deploy.mjs
+不接受任何參數（含 --help/-h）。偵測到參數就只印這段說明、不送任何請求、不寫檔。
+環境變數 SMARTROUTE_WORKER_BASE 可覆蓋預設的 Worker base URL。`);
+  process.exit(0);
+}
 
 const BASE = process.env.SMARTROUTE_WORKER_BASE || 'https://still-meadow-0efd.bh06211301.workers.dev';
 const OUT_DIR = path.join(process.cwd(), 'tools', 'snapshots', 'before');
