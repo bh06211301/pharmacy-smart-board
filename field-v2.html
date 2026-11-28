@@ -1828,7 +1828,13 @@ document.getElementById('shelf-expiry-existing-list').addEventListener('click', 
   const btn = e.target.closest('[data-confirm-batch]');
   if (!btn) return;
   const card = btn.closest('[data-existing-record]');
-  const r = JSON.parse(card.dataset.existingRecord);
+  let r;
+  try {
+    r = JSON.parse(card.dataset.existingRecord);
+  } catch (err) {
+    fv2Toast_('這筆記錄資料讀取失敗，請重新整理畫面', true);
+    return;
+  }
   btn.disabled = true; btn.textContent = '處理中…';
   const payload = fv2ShelfExpiryPayload_({
     recordId: genRequestId_(), storeId: r.storeId, productId: r.productId,
